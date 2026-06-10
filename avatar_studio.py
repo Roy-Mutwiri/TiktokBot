@@ -56,12 +56,13 @@ CHART_FADE_STEP = 0.12         # crossfade speed per frame (~0.5s transition)
 
 MOTION_THRESH = 7.0            # mean 64x64 gray-diff above which LP runs every frame
 
-# Quality presets -> (lp_interval, enhance level, body motion). Smooth maximises
-# fps (LP amortised + light enhance + no body warp); Sharp maximises detail.
+# Quality presets -> (lp_interval, enhance level, body motion, restore cadence).
+# "Delulu" is the tuned default: restoration every 3rd frame (crisp filmed look)
+# + smooth head (motion-adaptive bumps to every-frame on movement) + subtle body.
 QUALITY_PRESETS = {
-    "Smooth (max fps)":      dict(lp=3, enhance="light", body=False),
-    "Balanced":              dict(lp=2, enhance="light", body=True),
-    "Sharp (max detail)":    dict(lp=1, enhance="full",  body=True),
+    "Delulu (recommended)":  dict(lp=2, enhance="light", body=True,  restore_every=3),
+    "Smooth (max fps)":      dict(lp=3, enhance="light", body=False, restore_every=4),
+    "Sharp (max detail)":    dict(lp=1, enhance="full",  body=True,  restore_every=2),
 }
 QUALITY_LABELS = list(QUALITY_PRESETS.keys())
 
