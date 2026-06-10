@@ -146,8 +146,11 @@ class RestoreEngine:
         self._normalize(t, (0.5, 0.5, 0.5), (0.5, 0.5, 0.5), inplace=True)
         t = t.unsqueeze(0).to(self._device)
         with torch.no_grad(), self._autocast():
-            out = self._net(t, return_rgb=False, weight=FIDELITY)[0]
-        out = out[0].float()
+            if self._backend == "codeformer":
+                out = self._net(t, w=FIDELITY, adain=True)[0]   # restored images (B,3,H,W)
+            else:
+                out = self._net(t, return_rgb=False, weight=FIDELITY)[0][0]  # (3,H,W)
+        out = out.float()
         return self._tensor2img(out, rgb2bgr=True, min_max=(-1, 1)).astype(np.uint8)
 
     def _warmup(self):
