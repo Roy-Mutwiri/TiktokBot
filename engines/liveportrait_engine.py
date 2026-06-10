@@ -415,7 +415,6 @@ class LivePortraitEngine:
         holds the detected size fraction (0 = none) for callers/diagnostics.
         """
         self._face_found = False
-        self._face_size = 0.0
         mesh = self._get_mesh()
         h, w = frame.shape[:2]
         if mesh is None:
@@ -435,8 +434,18 @@ class LivePortraitEngine:
                     cy = (r.ymin + r.height / 2) * h
                     side = max(fw, fh) * DRIVING_CROP_PAD
                     box = np.array([cx, cy, side], dtype=np.float32)
-                    # only "good" (large enough) faces drive the avatar
                     self._face_found = self._face_size >= self.min_good_face
+                    self._miss = 0                     # detected -> reset grace
+            else:
+                # GRACE WINDOW: a detector blip shouldn't freeze the avatar. For a
+                # few frames after a miss, keep DRIVING with the last crop box (your
+                # head barely moves in ~5 frames) instead of holding. Only after
+                # sustained loss do we drop _face_found (-> hold / charts).
+                self._miss = getattr(self, "_miss", 0) + 1
+                if self._miss <= MISS_GRACE and self._drive_box is not None:
+                    self._face_found = True            # still tracking (last box)
+                else:
+                    self._face_size = 0.0              # truly lost
 
             if box is None:
                 if self._drive_box is None:
