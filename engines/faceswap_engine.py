@@ -145,10 +145,12 @@ class FaceSwapEngine:
                 bboxes, kpss = self.app.det_model.detect(frame, max_num=1, metric="default")
                 if bboxes is None or len(bboxes) == 0:
                     self._cached_target = None
+                    self.last_found = False
                     return frame
                 i = int(np.argmax((bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])))
                 target = self._Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
                 self._cached_target = target
+            self.last_found = True
             out = self.swapper.get(frame, target, self.source_face, paste_back=True)
             if COLOR_MATCH:
                 # recolour only the swapped face box to the original lighting
