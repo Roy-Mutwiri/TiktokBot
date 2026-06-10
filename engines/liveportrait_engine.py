@@ -205,6 +205,7 @@ class LivePortraitEngine:
         self._drive_box = None
         self._last_output = None
         self._cur_ref = 0
+        self._miss = 0
         self._reset_filters()
 
     def _reset_filters(self):

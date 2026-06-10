@@ -55,7 +55,8 @@ TARGET_FRAME_TIME = 1.0 / FPS
 NO_FACE_SECONDS = 1.5          # no face for this long -> switch to charts
 CHART_FADE_STEP = 0.12         # crossfade speed per frame (~0.5s transition)
 
-MOTION_THRESH = 7.0            # mean 64x64 gray-diff above which LP runs every frame
+MOTION_THRESH = 4.0            # mean 64x64 gray-diff above which LP runs every frame
+#                                (lower = turns reliably trigger full-rate LP -> less lag)
 
 # Quality presets -> (lp_interval, enhance level, body motion, restore cadence).
 # "Delulu" is the tuned default: restoration every 3rd frame (crisp filmed look)
