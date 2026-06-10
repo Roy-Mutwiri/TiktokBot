@@ -738,11 +738,13 @@ class AvatarStudio:
                 self.diag_lbl.configure(text=self._diag)
             # While a heavy voice generates a NEW line the GPU is busy and the
             # preview briefly stalls — show why so it doesn't look frozen.
-            if self.tts is not None and getattr(self.tts, "synthesizing", False):
+            if self._thinking:
+                self._set_status("thinking...", "#cc9933")
+            elif self.tts is not None and getattr(self.tts, "synthesizing", False):
                 self._set_status("generating voice...", "#cc9933")
             elif getattr(self, "_speaking", False):
                 self._set_status("speaking", GREEN)
-            elif self.status_lbl.cget("text") in ("generating voice...", "speaking"):
+            elif self.status_lbl.cget("text") in ("thinking...", "generating voice...", "speaking"):
                 self._set_status("LIVE", GREEN)
         self.root.after(33, self._poll_ui)   # ~30 Hz UI refresh
 
