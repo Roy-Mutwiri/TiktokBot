@@ -140,59 +140,72 @@ class FaceSwapEngine:
         return True
 
     def set_source_from_folder(self, folder):
-        """Build the CHARACTER identity by AVERAGING the arcface embedding across
-        every photo in `folder` (all angles/expressions) — more photos = a more
-        robust, consistent swap. Incremental: a cache stores the running sum +
-        which files are done, so daily-added photos only cost their own detection.
-        Returns the number of photos in the identity."""
+        """Build the CHARACTER identity from EVERY photo in `folder` (all angles).
+        Robust: stores each photo's arcface embedding, drops OUTLIERS (wrong face /
+        bad detection — low cosine-sim to the consensus) and weights the rest by
+        detection confidence, so the averaged identity is accurate, not diluted.
+        Incremental: caches per-photo embeddings so daily-added photos only cost
+        their own detection. Returns the number of photos kept in the identity."""
         if not self.ready or not os.path.isdir(folder):
             return 0
         exts = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
         files = sorted(f for f in os.listdir(folder) if f.lower().endswith(exts))
-        cache_path = os.path.join(folder, "_character_embedding.npz")
-        emb_sum = None
-        count = 0
-        done = set()
+        cache_path = os.path.join(folder, "_character_embeddings.npz")
+        embs = []        # list of (512,) raw embeddings
+        scores = []      # detection confidence per photo
+        done = []        # filenames processed
         if os.path.exists(cache_path):
             try:
                 z = np.load(cache_path, allow_pickle=True)
-                emb_sum = z["sum"].astype(np.float32)
-                count = int(z["count"])
-                done = set(z["files"].tolist())
+                embs = list(z["embs"].astype(np.float32))
+                scores = list(z["scores"].astype(np.float32))
+                done = list(z["files"].tolist())
             except Exception:
-                emb_sum, count, done = None, 0, set()
+                embs, scores, done = [], [], []
+        done_set = set(done)
         template = self.source_face
         new = 0
         for fn in files:
-            if fn in done:
+            if fn in done_set:
                 continue
             img = cv2.imread(os.path.join(folder, fn))
+            done.append(fn); done_set.add(fn)
             if img is None:
-                done.add(fn); continue
+                continue
             faces = self.app.get(img)
             if not faces:
-                done.add(fn); continue
+                continue
             face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
-            e = face.embedding.astype(np.float32)
-            emb_sum = e.copy() if emb_sum is None else emb_sum + e
-            count += 1; new += 1
-            done.add(fn)
+            embs.append(face.embedding.astype(np.float32))
+            scores.append(float(getattr(face, "det_score", 1.0)))
+            new += 1
             template = face
-        if count == 0 or emb_sum is None:
+        if not embs:
             print(f"[SWAP] no faces found in {folder}.")
             return 0
+        E = np.stack(embs).astype(np.float32)            # (N,512)
+        S = np.array(scores, dtype=np.float32)
         try:
-            np.savez(cache_path, sum=emb_sum, count=count,
-                     files=np.array(sorted(done), dtype=object))
+            np.savez(cache_path, embs=E, scores=S,
+                     files=np.array(done, dtype=object))
         except Exception:
             pass
-        # set the averaged identity onto a template face (normed_embedding follows)
+        # robust consensus: L2-normalise, drop low-similarity outliers, weight by score
+        En = E / (np.linalg.norm(E, axis=1, keepdims=True) + 1e-9)
+        mean = En.mean(axis=0); mean /= (np.linalg.norm(mean) + 1e-9)
+        sims = En @ mean
+        keep = sims >= max(0.25, float(np.median(sims)) - 0.25)   # drop clear outliers
+        if keep.sum() < 1:
+            keep = np.ones(len(En), dtype=bool)
+        w = (S[keep] * np.clip(sims[keep], 0, 1)).reshape(-1, 1)
+        ident = (E[keep] * w).sum(axis=0) / (w.sum() + 1e-9)
         if template is not None:
-            template.embedding = emb_sum / count
+            template.embedding = ident.astype(np.float32)
             self.source_face = template
-        print(f"[SWAP] character identity = {count} photos averaged "
-              f"({new} new this run) from {os.path.basename(folder)}")
-        return count
+        kept = int(keep.sum())
+        print(f"[SWAP] character identity = {kept}/{len(embs)} photos "
+              f"(dropped {len(embs)-kept} outliers, {new} new) from {os.path.basename(folder)}")
+        return kept
 
     def swap(self, frame):
         """Swap the character face onto the largest face in `frame` (the operator's
