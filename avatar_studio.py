@@ -249,8 +249,8 @@ class AvatarStudio:
         trow = tk.Frame(right, bg=BG); trow.pack(fill="x", pady=2)
         tk.Label(trow, text="Max turn deg (smaller = cleaner)", bg=BG,
                  fg=FG, font=("Segoe UI", 8)).pack(side="left")
-        self.turncap_var = tk.IntVar(value=22)
-        ttk.Spinbox(trow, from_=10, to=40, increment=2, width=4,
+        self.turncap_var = tk.IntVar(value=30)
+        ttk.Spinbox(trow, from_=10, to=44, increment=2, width=4,
                     textvariable=self.turncap_var,
                     command=self._on_turncap).pack(side="right")
 
