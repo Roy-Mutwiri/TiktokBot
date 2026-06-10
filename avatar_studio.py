@@ -887,7 +887,7 @@ class AvatarStudio:
             def _enable():
                 self.start_btn.configure(text="START")
                 self.stop_btn.configure(state="normal")
-                for b in (self.speak_btn, self.mute_btn, self.recenter_btn):
+                for b in (self.speak_btn, self.ask_btn, self.mute_btn, self.recenter_btn):
                     b.configure(state="normal")
             self.root.after(0, _enable)
             self._set_status("LIVE", GREEN)
