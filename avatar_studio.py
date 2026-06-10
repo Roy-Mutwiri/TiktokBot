@@ -457,8 +457,14 @@ class AvatarStudio:
                     obs = None
 
             from body_motion import BodyMotionEngine
+            from restore_engine import RestoreEngine
+            self._log_msg("[studio] GFPGAN restoration...")
+            restore = RestoreEngine()
+            self._log_msg("   -> " + restore.startup_check()[1])
+            restore.skin_detail = self.skin_var.get() / 100.0
             self.engines = {"lp": lp, "mt": mt, "comp": comp, "enh": enhance_engine,
-                            "chart": TradingView("XAUUSD"), "body": BodyMotionEngine()}
+                            "chart": TradingView("XAUUSD"), "body": BodyMotionEngine(),
+                            "restore": restore}
             self._on_quality()        # apply the selected quality preset at boot
             self.tts = tts
             self.cap = cap
