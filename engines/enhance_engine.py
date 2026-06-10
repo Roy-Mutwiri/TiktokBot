@@ -36,7 +36,7 @@ VIGNETTE_STRENGTH = 0.35
 CAMERA_SHAKE_AMOUNT = 1.5
 GRAIN_STRENGTH = 6.0            # luminance sensor grain (real cameras aren't clean)
 SOFTEN = 0.22                   # tiny blur blended in to kill the "too-sharp AI" look
-EDGE_FEATHER = 9                # selfie-seg edge softness (px); higher = smoother blend
+EDGE_FEATHER = 4                # selfie-seg edge softness (px) — tight, no halo
 FRAME_SIZE = 512
 
 # -----------------------------------------------------------------------------
