@@ -1052,7 +1052,7 @@ class AvatarStudio:
 
             # --- GFPGAN restoration: fix the plastic look on the FACE crop ----
             _t = time.perf_counter()
-            if self.restore_var.get() and getattr(lp, "_face_found", False):
+            if self.restore_var.get() and not did_swap and getattr(lp, "_face_found", False):
                 try:
                     ai = self.engines["restore"].restore(ai)
                 except Exception:
