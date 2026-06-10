@@ -45,12 +45,18 @@ def _log(msg):
         pass
 
 
+# Suppress the console window each git.exe subprocess would otherwise flash on
+# Windows (the watcher polls git every few seconds — without this a terminal
+# pops up and vanishes constantly).
+_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0
+
+
 def _git(args, timeout=30):
-    """Run a git command in the repo. Returns (returncode, output)."""
+    """Run a git command in the repo (no console window). Returns (rc, output)."""
     try:
         r = subprocess.run(["git"] + args, cwd=REPO_DIR, timeout=timeout,
                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                           text=True, errors="ignore")
+                           text=True, errors="ignore", creationflags=_NO_WINDOW)
         return r.returncode, (r.stdout or "").strip()
     except subprocess.TimeoutExpired:
         return 124, "timeout"

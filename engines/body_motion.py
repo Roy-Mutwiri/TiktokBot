@@ -33,17 +33,21 @@ if _ENGINES_DIR not in sys.path:
 # CONFIGURATION  (gentle gains — believable, not rubbery)
 # -----------------------------------------------------------------------------
 FRAME = 512
-NECK_Y = 330                # pivot row for shoulder rotation (below the face)
-HEAD_KEEP_Y = 250           # above this row = head, untouched (LivePortrait owns it)
-BODY_FULL_Y = 360           # below this row = full body warp; feather in between
+# The warp NEVER touches the face/neck — the boundary is placed just BELOW the
+# detected chin, so head+neck stay locked to the LivePortrait head (no neck
+# seam). Only the shoulders/chest below it move. Rotation pivots at that line so
+# the neck stays put and the shoulders swing under it.
+CHIN_MARGIN = 0.05          # keep this much (of frame) below the chin static
+FEATHER = 0.14              # feather depth below the keep line (of frame)
 
-ROLL_GAIN = 0.7             # avatar shoulder tilt per deg of your shoulder tilt
-SHIFT_GAIN = 0.9            # horizontal sway (px avatar per px you shift, norm'd)
-LEAN_GAIN = 0.6             # vertical lean
-SCALE_GAIN = 0.5            # lean in/out (shoulder-width change -> scale)
-MAX_ROLL = 10.0             # clamp degrees
-MAX_SHIFT = 26.0            # clamp px
-MAX_SCALE = 0.08            # clamp +/- scale
+ROLL_GAIN = 0.35            # gentle shoulder tilt (rotation tears necks — keep low)
+SHIFT_GAIN = 0.9            # horizontal sway
+LEAN_GAIN = 0.55            # vertical lean
+SCALE_GAIN = 0.45           # lean in/out
+MAX_ROLL = 6.0              # clamp degrees
+MAX_SHIFT = 24.0            # clamp px
+MAX_SCALE = 0.07            # clamp +/- scale
+FACE_REDETECT = 12          # re-find the avatar face every N frames (it barely moves)
 
 EURO = dict(min_cutoff=1.0, beta=0.02)   # smooth the body signal
 
@@ -54,8 +58,13 @@ class BodyMotionEngine:
     def __init__(self):
         self._pose = None
         self._pose_tried = False
+        self._facedet = None
+        self._facedet_tried = False
         self._ref = None                 # neutral (cx, cy, width, roll)
-        self._mask = self._build_mask()
+        self._keep_y = int(FRAME * 0.72)  # below-chin line (updated by detection)
+        self._pivot_y = self._keep_y
+        self._mask = None                # (re)built when _keep_y changes
+        self._fc = 0                     # frame counter for face redetection
         self._err = False
         from one_euro import OneEuroFilter
         self._f_roll = OneEuroFilter(**EURO)
@@ -89,14 +98,50 @@ class BodyMotionEngine:
             self._pose = None
         return self._pose
 
+    def _get_facedet(self):
+        if self._facedet_tried:
+            return self._facedet
+        self._facedet_tried = True
+        try:
+            import mediapipe as mp
+            self._facedet = mp.solutions.face_detection.FaceDetection(
+                model_selection=0, min_detection_confidence=0.5)
+        except Exception:
+            self._facedet = None
+        return self._facedet
+
+    def _update_keep_line(self, avatar_frame):
+        """Find the avatar's chin and keep everything above it (face+neck) static."""
+        det = self._get_facedet()
+        if det is None:
+            return
+        try:
+            h, w = avatar_frame.shape[:2]
+            res = det.process(cv2.cvtColor(avatar_frame, cv2.COLOR_BGR2RGB))
+            if not res.detections:
+                return
+            r = max((d.location_data.relative_bounding_box for d in res.detections),
+                    key=lambda b: b.width * b.height)
+            chin = (r.ymin + r.height) * h
+            keep = int(min(FRAME - 4, chin + CHIN_MARGIN * FRAME))
+            if abs(keep - self._keep_y) > 2:
+                self._keep_y = keep
+                self._pivot_y = keep
+                self._mask = None        # rebuild
+        except Exception:
+            pass
+
     def _build_mask(self):
-        """Vertical feather: 0 over the head, ramping to 1 over the torso."""
+        """0 over head+neck (above keep line), ramping to 1 over the torso below."""
         m = np.ones((FRAME, 1), np.float32)
-        m[:HEAD_KEEP_Y, 0] = 0.0
-        ramp = max(1, BODY_FULL_Y - HEAD_KEEP_Y)
-        for y in range(HEAD_KEEP_Y, min(FRAME, BODY_FULL_Y)):
-            m[y, 0] = (y - HEAD_KEEP_Y) / ramp
-        return m[:, :, None]             # (H,1,1) broadcasts over width+channels
+        keep = self._keep_y
+        full = min(FRAME, keep + int(FEATHER * FRAME))
+        m[:keep, 0] = 0.0
+        ramp = max(1, full - keep)
+        for y in range(keep, full):
+            m[y, 0] = (y - keep) / ramp
+        self._mask = m[:, :, None]
+        return self._mask
 
     # -------------------------------------------------------------------------
     def process(self, webcam_frame, avatar_frame):
@@ -105,6 +150,12 @@ class BodyMotionEngine:
         if pose is None or webcam_frame is None or avatar_frame is None:
             return avatar_frame
         try:
+            # keep the warp strictly BELOW the chin (face+neck never move)
+            self._fc += 1
+            if self._mask is None or self._fc % FACE_REDETECT == 0:
+                self._update_keep_line(avatar_frame)
+                if self._mask is None:
+                    self._build_mask()
             h, w = webcam_frame.shape[:2]
             res = pose.process(cv2.cvtColor(webcam_frame, cv2.COLOR_BGR2RGB))
             lm = getattr(res, "pose_landmarks", None)
@@ -136,12 +187,12 @@ class BodyMotionEngine:
             ty = float(np.clip(d_y * ref_w * LEAN_GAIN * (FRAME / h), -MAX_SHIFT, MAX_SHIFT))
             scale = 1.0 + float(np.clip(d_sc * SCALE_GAIN, -MAX_SCALE, MAX_SCALE))
 
-            M = cv2.getRotationMatrix2D((FRAME / 2.0, NECK_Y), angle, scale)
+            M = cv2.getRotationMatrix2D((FRAME / 2.0, float(self._pivot_y)), angle, scale)
             M[0, 2] += tx
             M[1, 2] += ty
             warped = cv2.warpAffine(avatar_frame, M, (FRAME, FRAME),
                                     flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
-            mask = self._mask
+            mask = self._mask if self._mask is not None else self._build_mask()
             if mask.shape[0] != avatar_frame.shape[0]:
                 mask = cv2.resize(self._mask[:, :, 0], (1, avatar_frame.shape[0]))[:, :, None]
             out = avatar_frame * (1.0 - mask) + warped * mask
