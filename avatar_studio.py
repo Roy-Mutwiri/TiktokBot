@@ -594,8 +594,8 @@ class AvatarStudio:
         self.body_var = tk.BooleanVar(value=True)
         self._check(c, "Live body motion  ·  torso follows you",
                     self.body_var).pack(fill="x", pady=3)
-        self.multiref_var = tk.BooleanVar(value=False)
-        self._check(c, "Extended turning  ·  multi-view  [experimental]",
+        self.multiref_var = tk.BooleanVar(value=True)
+        self._check(c, "Extended turning  ·  multi-view (your face, ~50°)",
                     self.multiref_var, self._on_multiref).pack(fill="x", pady=3)
 
         # ---- SCENE & OUTPUT ------------------------------------------------
