@@ -58,6 +58,8 @@ DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N fr
 # match the swapped face's colour to the target head (LAB Reinhard) so it blends
 # into the operator's real lighting instead of carrying the source clip's tone.
 COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
+# CodeFormer HD enhancement of the swapped face (inswapper is only 128px).
+ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "1") == "1"
 
 
 def _color_transfer(source, target):
@@ -226,7 +228,15 @@ class FaceSwapEngine:
                     self.last_found = False
                     return frame
                 i = int(np.argmax((bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])))
-                target = self._Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
+                kps = kpss[i].astype(np.float32)
+                # TEMPORAL SMOOTHING of the 5 keypoints — stops the swapped face
+                # jittering/sliding as you move (the "errors on face movement").
+                if self._kps_euro is not None:
+                    t = self._n / 30.0
+                    for j in range(5):
+                        kps[j, 0] = self._kps_euro[j][0](float(kps[j, 0]), t)
+                        kps[j, 1] = self._kps_euro[j][1](float(kps[j, 1]), t)
+                target = self._Face(bbox=bboxes[i, :4], kps=kps, det_score=bboxes[i, 4])
                 self._cached_target = target
             self.last_found = True
             out = self.swapper.get(frame, target, self.source_face, paste_back=True)
@@ -237,6 +247,19 @@ class FaceSwapEngine:
                 x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
                 if x2 > x1 and y2 > y1:
                     out[y1:y2, x1:x2] = _color_transfer(out[y1:y2, x1:x2], frame[y1:y2, x1:x2])
+            # CodeFormer HD enhancement of the swapped face — inswapper outputs 128px
+            # (soft); CodeFormer restores crisp, accurate detail = "exactly the face".
+            if ENHANCE_SWAP:
+                if self.enhancer is None and not self._enh_tried:
+                    self._enh_tried = True
+                    try:
+                        from face_restore_engine import FaceRestoreEngine
+                        self.enhancer = FaceRestoreEngine()
+                        print("[SWAP] CodeFormer face enhancement ON")
+                    except Exception as exc:
+                        print(f"[SWAP] enhancer unavailable ({exc})")
+                if self.enhancer is not None and getattr(self.enhancer, "ready", False):
+                    out = self.enhancer.process_frame(out)
             return out
         except Exception:
             return frame
