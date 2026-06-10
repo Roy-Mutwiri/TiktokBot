@@ -497,6 +497,18 @@ class LivePortraitEngine:
                 self._ref_kp_info = x_d_info
 
             ref = self._ref_kp_info
+            # PITCH/ROLL AUTO-CENTER: slowly drift the neutral toward your average
+            # head pitch/roll so a baked-in offset (e.g. neutral captured while you
+            # looked DOWN at the screen -> avatar stuck looking UP) self-corrects to
+            # level over a few seconds. Your actual up/down/tilt MOVEMENT still
+            # comes through as the delta; only the constant bias decays. Yaw is left
+            # fully responsive (no auto-center) so turns aren't pulled back.
+            if AUTOCENTER_PITCH > 0.0:
+                try:
+                    for k in ("pitch", "roll"):
+                        ref[k] = ref[k] * (1.0 - AUTOCENTER_PITCH) + x_d_info[k] * AUTOCENTER_PITCH
+                except Exception:
+                    pass
             # GAZE LOCK: pull the expression delta toward the source (camera-
             # facing) so the eyes/face don't wander off-camera. Strength scales
             # how much of YOUR expression deviation is kept (blinks largely
