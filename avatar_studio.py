@@ -388,8 +388,8 @@ class AvatarStudio:
                     style="Studio.TSpinbox").pack(side="right")
 
         r = self._row(c, "Max turn °  (smaller = cleaner)")
-        self.turncap_var = tk.IntVar(value=22)
-        ttk.Spinbox(r, from_=10, to=40, increment=2, width=5,
+        self.turncap_var = tk.IntVar(value=30)
+        ttk.Spinbox(r, from_=10, to=44, increment=2, width=5,
                     textvariable=self.turncap_var, command=self._on_turncap,
                     style="Studio.TSpinbox").pack(side="right")
 
@@ -409,42 +409,6 @@ class AvatarStudio:
                   style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_gaze()).pack(side="right")
 
-<<<<<<< HEAD
-        # live per-stage timing readout
-        self.diag_lbl = tk.Label(right, text="", bg=BG, fg="#7fa6c0",
-                                 font=("Consolas", 8))
-        self.diag_lbl.pack(anchor="w", pady=(2, 0))
-
-        # min face size gate (below this -> too far -> hold/charts, never a bad face)
-        mrow = tk.Frame(right, bg=BG); mrow.pack(fill="x", pady=2)
-        tk.Label(mrow, text="Min face size % (smaller = allow farther)", bg=BG,
-                 fg=FG, font=("Segoe UI", 8)).pack(side="left")
-        self.minface_var = tk.IntVar(value=9)
-        ttk.Spinbox(mrow, from_=6, to=40, increment=2, width=4,
-                    textvariable=self.minface_var,
-                    command=self._on_minface).pack(side="right")
-
-        # max head turn before it caps (smaller = cleaner, less range) — LIVE
-        trow = tk.Frame(right, bg=BG); trow.pack(fill="x", pady=2)
-        tk.Label(trow, text="Max turn deg (smaller = cleaner)", bg=BG,
-                 fg=FG, font=("Segoe UI", 8)).pack(side="left")
-        self.turncap_var = tk.IntVar(value=30)
-        ttk.Spinbox(trow, from_=10, to=44, increment=2, width=4,
-                    textvariable=self.turncap_var,
-                    command=self._on_turncap).pack(side="right")
-
-        # max head tilt (pitch) before it clamps — stops the uncanny up/down stretch
-        tirow = tk.Frame(right, bg=BG); tirow.pack(fill="x", pady=2)
-        tk.Label(tirow, text="Max tilt deg (up/down)", bg=BG, fg=FG,
-                 font=("Segoe UI", 8)).pack(side="left")
-        self.tilt_var = tk.IntVar(value=15)
-        ttk.Spinbox(tirow, from_=8, to=30, increment=1, width=4,
-                    textvariable=self.tilt_var,
-                    command=self._on_tilt).pack(side="right")
-
-        # GFPGAN restoration: fix the plastic look (face crop) + skin detail
-=======
->>>>>>> worktree-studio-ui-redesign
         self.restore_var = tk.BooleanVar(value=True)
         self._check(c, "Face restoration  ·  GFPGAN (fixes plastic look)",
                     self.restore_var).pack(fill="x", pady=3)
