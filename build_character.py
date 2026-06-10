@@ -89,7 +89,7 @@ def main(videos):
             if abs(b - yaw) > BUCKET_HALF:
                 continue
             if b not in best or sharp > best[b][0]:
-                best[b] = (sharp, crop.copy(), yaw, pitch)
+                best[b] = (sharp, crop.copy(), yaw, pitch, os.path.basename(video_path))
         cap.release()
 
     if not best:
