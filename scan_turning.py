@@ -35,7 +35,7 @@ rows = []
 for v in vids:
     cap = cv2.VideoCapture(v)
     yaws = []; i = 0; proc = 0
-    while proc < MAX_PROC:
+    while i < 500:                    # hard decode cap (first ~20s) — keeps it fast
         ok, f = cap.read()
         if not ok:
             break
