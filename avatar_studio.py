@@ -991,22 +991,42 @@ class AvatarStudio:
                 cached_face = None
 
             lp_fresh = False
+            did_swap = False
+            # --- FACE-SWAP MODE (inswapper): swap the character's face onto your
+            # REAL webcam head. Perfect profiles/turns because the head is real.
+            if self.swap_var.get():
+                if self.swap_engine is None:
+                    try:
+                        from faceswap_engine import FaceSwapEngine
+                        self._log_msg("[studio] loading face-swap (insightface + inswapper)...")
+                        self.swap_engine = FaceSwapEngine(self._char_path or _character_path())
+                    except Exception as exc:
+                        self._log_msg(f"[studio] face-swap load failed: {exc}")
+                        self.swap_var.set(False)
+                if self.swap_engine is not None and self.swap_engine.ready:
+                    _t = time.perf_counter()
+                    ai = self.swap_engine.swap(driving)
+                    cached_face = ai; lp_fresh = True; did_swap = True
+                    lp._face_found = self.swap_engine.last_found   # chart/loss logic
+                    t_lp += time.perf_counter() - _t
+
             lp_due = (cached_face is None or (frame_count % self.lp_interval) == 0
                       or motion > MOTION_THRESH)        # run every frame on big motion
-            _t = time.perf_counter()
-            try:
-                if getattr(lp, "fallback_mode", False):
-                    ai = lp.process_frame(driving); lp_fresh = True
-                elif lp_due:
-                    ai = lp.process_frame(driving); cached_face = ai; lp_fresh = True
-                else:
-                    ai = cached_face
-            except Exception as exc:
-                ai = driving
-                errs += 1
-                if errs <= 3:
-                    self._log_msg(f"[studio] LP frame error: {exc}")
-            t_lp += time.perf_counter() - _t
+            if not did_swap:
+                _t = time.perf_counter()
+                try:
+                    if getattr(lp, "fallback_mode", False):
+                        ai = lp.process_frame(driving); lp_fresh = True
+                    elif lp_due:
+                        ai = lp.process_frame(driving); cached_face = ai; lp_fresh = True
+                    else:
+                        ai = cached_face
+                except Exception as exc:
+                    ai = driving
+                    errs += 1
+                    if errs <= 3:
+                        self._log_msg(f"[studio] LP frame error: {exc}")
+                t_lp += time.perf_counter() - _t
 
             # --- upper-body motion: warp the torso to follow YOUR shoulders ----
             # Runs every frame (full webcam rate) so the body stays alive even on
