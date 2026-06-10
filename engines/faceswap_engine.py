@@ -60,6 +60,9 @@ DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N fr
 COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
 # CodeFormer HD enhancement of the swapped face (inswapper is only 128px).
 ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "1") == "1"
+COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.45"))  # gentle = keep Haddan skin
+AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "1") == "1"          # auto-framing
+CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))       # target face y (0..1)
 
 
 def _color_transfer(source, target):
@@ -99,8 +102,11 @@ class FaceSwapEngine:
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
             self._kps_euro = [[OneEuroFilter(min_cutoff=1.2, beta=0.02) for _ in range(2)]
                               for _ in range(5)]
+            self._shift_euro = [OneEuroFilter(min_cutoff=0.6, beta=0.01) for _ in range(2)]
         except Exception:
             self._kps_euro = None
+            self._shift_euro = None
+        self._amask = None
         try:
             import insightface
             from insightface.app.common import Face
@@ -210,46 +216,69 @@ class FaceSwapEngine:
               f"(dropped {len(embs)-kept} outliers, {new} new) from {os.path.basename(folder)}")
         return kept
 
+    def _aligned_mask(self, S):
+        """Cached feathered ellipse mask in the aligned (SxS) face space, extended
+        UP toward the forehead so the swap covers more of the hairline (pushes the
+        boundary above the brows) and blends softly into the real hair."""
+        if getattr(self, "_amask", None) is not None and self._amask.shape[0] == S:
+            return self._amask
+        m = np.zeros((S, S), np.float32)
+        cv2.ellipse(m, (S // 2, int(S * 0.55)),
+                    (int(S * 0.44), int(S * 0.54)), 0, 0, 360, 1.0, -1)  # tall = forehead
+        m = cv2.GaussianBlur(m, (0, 0), S * 0.05)          # soft edge / hairline feather
+        self._amask = m
+        return m
+
     def swap(self, frame):
-        """Swap the character face onto the largest face in `frame` (the operator's
-        real webcam head). Returns the composited BGR frame; passes through on no
-        face so the loop never stalls."""
+        """Swap the character face onto the largest face in `frame` (your real
+        webcam head). Auto-centers the face, smooths keypoints, custom forehead
+        paste, gentle skin-tone match, CodeFormer HD. Passes through on no face."""
         if not self.ready or self.source_face is None:
             self.last_found = False
             return frame
         try:
-            # per-frame TARGET needs only detection (bbox + 5 kps) — far faster than
-            # full app.get(). Reuse the box for DET_EVERY frames (head barely moves).
+            H, W = frame.shape[:2]
             self._n += 1
-            target = self._cached_target
-            if target is None or self._n % DET_EVERY == 0:
-                bboxes, kpss = self.app.det_model.detect(frame, max_num=1, metric="default")
-                if bboxes is None or len(bboxes) == 0:
-                    self._cached_target = None
-                    self.last_found = False
-                    return frame
-                i = int(np.argmax((bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])))
-                kps = kpss[i].astype(np.float32)
-                # TEMPORAL SMOOTHING of the 5 keypoints — stops the swapped face
-                # jittering/sliding as you move (the "errors on face movement").
-                if self._kps_euro is not None:
-                    t = self._n / 30.0
-                    for j in range(5):
-                        kps[j, 0] = self._kps_euro[j][0](float(kps[j, 0]), t)
-                        kps[j, 1] = self._kps_euro[j][1](float(kps[j, 1]), t)
-                target = self._Face(bbox=bboxes[i, :4], kps=kps, det_score=bboxes[i, 4])
-                self._cached_target = target
+            bboxes, kpss = self.app.det_model.detect(frame, max_num=1, metric="default")
+            if bboxes is None or len(bboxes) == 0:
+                self.last_found = False
+                return frame
+            i = int(np.argmax((bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])))
+            kps = kpss[i].astype(np.float32)
+            bbox = bboxes[i, :4].astype(np.float32)
+            # TEMPORAL SMOOTHING of the 5 keypoints — no jitter/slide on movement.
+            if self._kps_euro is not None:
+                t = self._n / 30.0
+                for j in range(5):
+                    kps[j, 0] = self._kps_euro[j][0](float(kps[j, 0]), t)
+                    kps[j, 1] = self._kps_euro[j][1](float(kps[j, 1]), t)
+            # AUTO-CENTER (auto-framing): shift the head to frame centre.
+            if AUTO_CENTER:
+                cx = (bbox[0] + bbox[2]) / 2.0; cy = (bbox[1] + bbox[3]) / 2.0
+                dx = float(np.clip(W * 0.5 - cx, -W * 0.3, W * 0.3))
+                dy = float(np.clip(H * CENTER_Y - cy, -H * 0.25, H * 0.25))
+                if self._shift_euro is not None:           # smooth the framing
+                    dx = self._shift_euro[0](dx, t); dy = self._shift_euro[1](dy, t)
+                Msh = np.array([[1, 0, dx], [0, 1, dy]], np.float32)
+                frame = cv2.warpAffine(frame, Msh, (W, H), borderMode=cv2.BORDER_REPLICATE)
+                kps = kps + np.array([dx, dy], np.float32)
             self.last_found = True
-            out = self.swapper.get(frame, target, self.source_face, paste_back=True)
-            if COLOR_MATCH:
-                # recolour only the swapped face box to the original lighting
-                x1, y1, x2, y2 = [int(v) for v in target.bbox]
-                x1, y1 = max(0, x1), max(0, y1)
-                x2, y2 = min(frame.shape[1], x2), min(frame.shape[0], y2)
-                if x2 > x1 and y2 > y1:
-                    out[y1:y2, x1:x2] = _color_transfer(out[y1:y2, x1:x2], frame[y1:y2, x1:x2])
-            # CodeFormer HD enhancement of the swapped face — inswapper outputs 128px
-            # (soft); CodeFormer restores crisp, accurate detail = "exactly the face".
+            target = self._Face(bbox=bbox, kps=kps, det_score=bboxes[i, 4])
+            # SWAP (aligned) + CUSTOM forehead paste-back -------------------------
+            bgr_fake, M = self.swapper.get(frame, target, self.source_face, paste_back=False)
+            S = bgr_fake.shape[0]
+            if COLOR_MATCH:                                # GENTLE skin-tone match
+                aimg = cv2.warpAffine(frame, M, (S, S))
+                matched = _color_transfer(bgr_fake, aimg)
+                bgr_fake = cv2.addWeighted(bgr_fake, 1.0 - COLOR_STRENGTH,
+                                           matched, COLOR_STRENGTH, 0)
+            mask = self._aligned_mask(S)
+            IM = cv2.invertAffineTransform(M)
+            fake_full = cv2.warpAffine(bgr_fake, IM, (W, H))
+            mask_full = cv2.warpAffine(mask, IM, (W, H))[:, :, None]
+            out = (frame.astype(np.float32) * (1 - mask_full)
+                   + fake_full.astype(np.float32) * mask_full).astype(np.uint8)
+            # CodeFormer HD enhancement (inswapper is only 128px -> crisp + exact).
             if ENHANCE_SWAP:
                 if self.enhancer is None and not self._enh_tried:
                     self._enh_tried = True
