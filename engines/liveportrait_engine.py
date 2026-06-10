@@ -631,7 +631,11 @@ class LivePortraitEngine:
         dyaw = float(yaw - ref["yaw"])                  # soft-limited yaw delta (deg)
         view = self._select_ref(dyaw)                   # nearest side-view (hysteresis)
 
-        delta_new = view["exp"] + (x_d_info["exp"] - ref["exp"])
+        # EXPRESSION from the FRONTAL source (eyes open, consistent), NOT the
+        # angled view (whose frame may have lidded/blinking eyes from the turn
+        # clip). Head GEOMETRY still comes from view["kp"]/R_new, so the profile
+        # stays real while the eyes stay open and follow the operator.
+        delta_new = self._x_s_info["exp"] + (x_d_info["exp"] - ref["exp"])
         ratio = (x_d_info["scale"] / ref["scale"]).clamp(1.0 - SCALE_BAND, 1.0 + SCALE_BAND)
         scale_new = view["scale"] * ratio
         t_new = view["t"] + (x_d_info["t"] - ref["t"])
