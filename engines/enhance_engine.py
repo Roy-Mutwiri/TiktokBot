@@ -185,11 +185,18 @@ def background_composite(frame):
 
 
 def apply_color_grade(frame):
-    """Gentle, natural warmth + mild contrast (not a punchy CG look)."""
+    """Cinematic streamer grade: slight exposure lift, teal-orange split-tone (warm
+    skin highlights, cool shadows) and a gentle S-curve — the lit-studio look."""
     f = frame.astype(np.float32) / 255.0
-    f[:, :, 2] = np.clip(f[:, :, 2] * 1.04 + 0.01, 0, 1)    # subtle warm red lift
-    f[:, :, 1] = np.clip(f[:, :, 1] * 1.01, 0, 1)
-    f = np.clip((f - 0.5) * 1.06 + 0.5, 0, 1)               # mild contrast
+    f = np.clip(f * 1.04, 0, 1)                             # exposure lift (brighter)
+    # luma for split-toning
+    luma = (0.114 * f[:, :, 0] + 0.587 * f[:, :, 1] + 0.299 * f[:, :, 2])[:, :, None]
+    hi = np.clip((luma - 0.5) * 2.0, 0, 1)                  # highlight weight
+    sh = np.clip((0.5 - luma) * 2.0, 0, 1)                  # shadow weight
+    f[:, :, 2] = np.clip(f[:, :, 2] + hi[:, :, 0] * 0.035 + 0.012, 0, 1)  # warm highlights (R)
+    f[:, :, 1] = np.clip(f[:, :, 1] + hi[:, :, 0] * 0.010, 0, 1)
+    f[:, :, 0] = np.clip(f[:, :, 0] + sh[:, :, 0] * 0.030, 0, 1)          # cool shadows (B)
+    f = np.clip((f - 0.5) * 1.09 + 0.5, 0, 1)              # S-curve contrast
     return (f * 255).astype(np.uint8)
 
 
