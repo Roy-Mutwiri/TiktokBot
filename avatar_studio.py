@@ -1251,6 +1251,18 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _on_pose(self, *args):
+        """Safe / Cinematic / Free — sets the turn + tilt caps together."""
+        p = POSE_PRESETS.get(self.pose_var.get())
+        if not p:
+            return
+        self.turncap_var.set(p["turn"])
+        self.tilt_var.set(p["tilt"])
+        self._on_turncap()
+        self._on_tilt()
+        self._log_msg(f"[studio] pose preset: {self.pose_var.get()} "
+                      f"(turn {p['turn']}deg / tilt {p['tilt']}deg)")
+
     def _on_turncap(self):
         """Live-set the yaw (turn) + roll caps. Pitch is owned by Max tilt."""
         try:
