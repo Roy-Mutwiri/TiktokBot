@@ -132,6 +132,24 @@ class LLMBrain:
             print(f"[BRAIN] respond error: {self.last_error}")
             return None
 
+    def warmup(self):
+        """Load the model into VRAM now (it stays resident via keep_alive) so the
+        first real question doesn't pay the ~45s cold-load. Safe to call in a
+        background thread at startup. Returns True if warmed."""
+        if not self.available:
+            self._check()
+        if not self.available:
+            return False
+        try:
+            self._post("/api/generate", {
+                "model": self.model, "prompt": "hi", "stream": False,
+                "keep_alive": KEEP_ALIVE, "options": {"num_predict": 1},
+            }, timeout=120)
+            return True
+        except Exception as exc:
+            self.last_error = f"warmup: {type(exc).__name__}: {exc}"
+            return False
+
     def reset(self):
         """Forget the conversation (fresh context)."""
         self.history = []
