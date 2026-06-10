@@ -53,7 +53,8 @@ SWAPPER_PATHS = [
     os.path.join(PROJECT_DIR, "models", "inswapper_128.onnx"),
     os.path.join(PROJECT_DIR, "ai-face", "models", "inswapper_128.onnx"),
 ]
-DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "640"))
+DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "320"))   # smaller = faster detect
+DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N frames
 # match the swapped face's colour to the target head (LAB Reinhard) so it blends
 # into the operator's real lighting instead of carrying the source clip's tone.
 COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
@@ -84,10 +85,18 @@ class FaceSwapEngine:
         self.swapper = None
         self.source_face = None
         self._provider = "?"
+        self._n = 0
+        self._cached_target = None
         try:
             import insightface
+            from insightface.app.common import Face
+            self._Face = Face
             providers = ["CUDAExecutionProvider", "CPUExecutionProvider"]
-            self.app = insightface.app.FaceAnalysis(name="buffalo_l", providers=providers)
+            # only detection (per-frame target needs bbox+kps) + recognition (source
+            # embedding, computed once) — skip landmark_2d_106 + genderage.
+            self.app = insightface.app.FaceAnalysis(
+                name="buffalo_l", providers=providers,
+                allowed_modules=["detection", "recognition"])
             self.app.prepare(ctx_id=0, det_size=(DET_SIZE, DET_SIZE))
             path = next((p for p in SWAPPER_PATHS if os.path.exists(p)), None)
             if path is None:
