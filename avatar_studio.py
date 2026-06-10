@@ -812,6 +812,14 @@ class AvatarStudio:
             # lazily on the first SPEAK press — freezing the live loop and making
             # SPEAK feel broken.
             self._log_msg("   -> " + tts.startup_check()[1])
+            # AI brain (Ollama) — optional; the avatar answers in character.
+            try:
+                from llm_brain import LLMBrain
+                self.brain = LLMBrain()
+                self._log_msg("   -> brain: " + self.brain.startup_check()[1])
+            except Exception as exc:
+                self.brain = None
+                self._log_msg(f"[studio] brain unavailable ({exc}).")
             self._log_msg("[studio] webcam...")
             cap = _open_webcam()
             if cap is None:
