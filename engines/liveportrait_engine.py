@@ -78,7 +78,10 @@ EURO_POSE = dict(min_cutoff=1.5, beta=0.02)    # pitch / yaw / roll (head pose)
 EURO_TRANS = dict(min_cutoff=1.5, beta=0.02)   # translation t
 EURO_SCALE = dict(min_cutoff=1.0, beta=0.01)   # scale (lean in/out)
 EURO_EXP = dict(min_cutoff=2.5, beta=0.05)     # expression (keep blinks crisp)
-EURO_BOX = dict(min_cutoff=1.0, beta=0.004)    # face-crop box (cx, cy, side)
+EURO_BOX = dict(min_cutoff=1.0, beta=0.02)     # face-crop box — higher beta so the
+#                                                crop SNAPS to fast head turns (no lag/trail)
+MISS_GRACE = 6                                 # keep driving this many frames after a
+#                                                detector miss before holding (no freeze flicker)
 
 # POSE-AWARE SOFT LIMITING — caps the head-pose DELTA (degrees) with a tanh knee
 # so turns stay inside the clean single-image range and never hit the distortion
@@ -127,6 +130,7 @@ class LivePortraitEngine:
         self._drive_box = None         # EMA-smoothed driving crop box (cx,cy,side)
         self._face_found = False       # did THIS frame have a good (large enough) face?
         self._face_size = 0.0          # detected face size as a fraction of frame
+        self._miss = 0                 # consecutive detector misses (grace window)
         self.min_good_face = MIN_GOOD_FACE   # live-tunable quality gate (see setter)
         self._last_output = None       # last good animated face (for hold-on-loss)
 
