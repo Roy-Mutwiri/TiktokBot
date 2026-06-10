@@ -60,7 +60,7 @@ MOTION_THRESH = 7.0            # mean 64x64 gray-diff above which LP runs every 
 # "Delulu" is the tuned default: restoration every 3rd frame (crisp filmed look)
 # + smooth head (motion-adaptive bumps to every-frame on movement) + subtle body.
 QUALITY_PRESETS = {
-    "Delulu (recommended)":  dict(lp=2, enhance="light", body=True,  restore_every=3),
+    "Delulu (recommended)":  dict(lp=3, enhance="light", body=True,  restore_every=3),
     "Smooth (max fps)":      dict(lp=3, enhance="light", body=False, restore_every=4),
     "Sharp (max detail)":    dict(lp=1, enhance="full",  body=True,  restore_every=2),
 }
