@@ -69,9 +69,10 @@ def _color_transfer(source, target):
     t_lab = cv2.cvtColor(t, cv2.COLOR_BGR2LAB)
     sm, ss = cv2.meanStdDev(s_lab)
     tm, ts = cv2.meanStdDev(t_lab)
-    sm = sm.reshape(1, 1, 3); tm = tm.reshape(1, 1, 3)
-    ss = np.maximum(ss.reshape(1, 1, 3), 1e-6); ts = ts.reshape(1, 1, 3)
-    out = (s_lab - sm) * (ts / ss) + tm
+    sm = sm.reshape(1, 1, 3).astype(np.float32); tm = tm.reshape(1, 1, 3).astype(np.float32)
+    ss = np.maximum(ss.reshape(1, 1, 3), 1e-6).astype(np.float32)
+    ts = ts.reshape(1, 1, 3).astype(np.float32)
+    out = ((s_lab - sm) * (ts / ss) + tm).astype(np.float32)   # keep float32 for cvtColor
     out = cv2.cvtColor(out, cv2.COLOR_LAB2BGR)
     return np.clip(out * 255.0, 0, 255).astype(np.uint8)
 

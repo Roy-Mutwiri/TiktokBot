@@ -32,6 +32,12 @@ GFPGAN_CANDIDATES = [
     os.path.join(PROJECT_DIR, "ai-face", "models", "GFPGANv1.4.pth"),
     os.path.join(PROJECT_DIR, "models", "GFPGANv1.4.pth"),
 ]
+# CodeFormer (preferred — more photoreal, less plastic than GFPGAN). Vendored
+# arch + weights already present. Set AVATAR_RESTORE_NET=gfpgan to force GFPGAN.
+RESTORE_NET = os.environ.get("AVATAR_RESTORE_NET", "codeformer").lower()
+CODEFORMER_ARCH_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   "codeformer_arch")
+CODEFORMER_PATH = os.path.join(PROJECT_DIR, "ai-face", "models", "codeformer.pth")
 
 NET_SIZE = 512                 # GFPGAN works at 512x512 aligned faces
 RESTORE_EVERY_N = 2            # restore every Nth frame; hold result between
@@ -48,6 +54,7 @@ class RestoreEngine:
         self.ready = False
         self.skin_detail = 0.70        # blend strength of the restored face
         self.every_n = RESTORE_EVERY_N
+        self._backend = "none"         # "codeformer" | "gfpgan"
         self._net = None
         self._device = "cpu"
         self._bf16 = False
