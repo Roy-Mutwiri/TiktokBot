@@ -135,23 +135,34 @@ def main(videos):
           f"multi-angle character.")
 
 
+_LAST_BOX = {}      # persistent (cx, cy, side) so profile frames (no detection)
+#                     still crop at the head's last known location
+
+
 def _face_crop(frame, mesh):
-    """Detect the largest face and return a padded square crop (512), or None."""
+    """Padded square crop around the face (512). At FULL profile the detector
+    fails, so we reuse the last good box (the head stays put, only rotates) — that
+    is exactly what lets us capture the ±90 profile frames."""
     h, w = frame.shape[:2]
+    box = None
     try:
         res = mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+        if res.detections:
+            r = max((d.location_data.relative_bounding_box for d in res.detections),
+                    key=lambda b: b.width * b.height)
+            fw, fh = r.width * w, r.height * h
+            if max(fw, fh) >= MIN_FACE_FRAC * max(w, h):
+                cx = (r.xmin + r.width / 2) * w
+                cy = (r.ymin + r.height / 2) * h
+                box = (cx, cy, max(fw, fh) * CROP_PAD)
+                _LAST_BOX["b"] = box
     except Exception:
-        return None
-    if not res.detections:
-        return None
-    r = max((d.location_data.relative_bounding_box for d in res.detections),
-            key=lambda b: b.width * b.height)
-    fw, fh = r.width * w, r.height * h
-    if max(fw, fh) < MIN_FACE_FRAC * max(w, h):
-        return None
-    cx = (r.xmin + r.width / 2) * w
-    cy = (r.ymin + r.height / 2) * h
-    side = max(fw, fh) * CROP_PAD
+        pass
+    if box is None:
+        box = _LAST_BOX.get("b")              # profile: reuse last head location
+    if box is None:
+        box = (w / 2.0, h * 0.40, min(w, h) * 0.9)   # first frames: center crop
+    cx, cy, side = box
     x1 = int(cx - side / 2); y1 = int(cy - side / 2)
     x2 = int(cx + side / 2); y2 = int(cy + side / 2)
     crop = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
