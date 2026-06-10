@@ -74,3 +74,18 @@ Thumbs.db
 
 # Claude Code runtime
 .claude/
+
+# --- data_prep generated data (keep the stage*.py code, drop the output) ---
+data_prep/cache/
+data_prep/thumbnails/
+data_prep/scan_videos/
+data_prep/seg_reps/
+data_prep/candidates_ranked.json
+data_prep/scan_*.json
+data_prep/thumb_scores.json
+data_prep/*_report.json
+
+# --- root temp artifacts ---
+_*.md
+_*.txt
+autosync_pid.txt

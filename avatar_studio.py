@@ -61,14 +61,18 @@ QUICK_PHRASES = [
     "Thank you all for the support, let's get into it.",
 ]
 
-# Voice modes shown in the dropdown -> TTS backend key. Kokoro is first (fast +
-# smooth for live webcam). The expressive/clone voices are heavier (a few
-# seconds to generate a NEW line) but cache, so repeats are instant.
+# Voice modes shown in the dropdown -> TTS backend key. Labels carry the honest
+# per-NEW-line latency so the live tradeoff is clear (all CACHE, so a repeated
+# line is instant whatever the voice):
+#   Kokoro  ~0.1s  smooth live
+#   Chatterbox ~3s clones a real human voice — best expressive option for live
+#   Maya1  ~10s + 25s load — laughs/emotion tags, but too slow for smooth live;
+#          best for pre-rendering / repeated (cached) lines
 VOICE_MODES = [
-    ("Fast (Kokoro)",            "kokoro"),
-    ("Expressive — laughs (Maya1)", "maya1"),
-    ("Clone a real voice (Chatterbox)", "chatterbox"),
-    ("Cloud (edge)",             "edge"),
+    ("Fast — instant (Kokoro)",            "kokoro"),
+    ("Real human voice ~3s (Chatterbox)",  "chatterbox"),
+    ("Laughs/emotion — SLOW ~10s (Maya1)", "maya1"),
+    ("Cloud (edge)",                       "edge"),
 ]
 VOICE_MODE_LABELS = [m[0] for m in VOICE_MODES]
 VOICE_MODE_KEY = dict(VOICE_MODES)
@@ -683,6 +687,12 @@ class AvatarStudio:
         heavy = key in ("maya1", "chatterbox")
         self._log_msg(f"[studio] voice mode -> {self.voicemode_var.get()}"
                       + (" (loading model, ~15-30s, please wait...)" if heavy else ""))
+        if key == "maya1":
+            self._log_msg("[studio] NOTE: Maya1 generates each NEW line in ~8-14s "
+                          "(preview holds while it works). It's too heavy for smooth "
+                          "live talking on one GPU — best for short/repeated lines "
+                          "(repeats are cached = instant). For smooth live use "
+                          "'Real human voice (Chatterbox)' or 'Fast (Kokoro)'.")
         if heavy:
             self.root.after(0, lambda: self.speak_btn.configure(
                 state="disabled", text="LOADING VOICE..."))
