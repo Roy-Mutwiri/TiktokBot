@@ -276,6 +276,18 @@ class LivePortraitEngine:
         self._f_s = self.wrapper.extract_feature_3d(I_s)
         self._x_s = self.wrapper.transform_keypoint(self._x_s_info)
 
+        # --- confirm FP16/CUDA + source caching (per perf checklist) ---
+        try:
+            dev = next(self.wrapper.warping_module.parameters()).device
+            fp16 = bool(getattr(self.wrapper.inference_cfg,
+                                "flag_use_half_precision", False))
+            cached = all(getattr(self, a, None) is not None
+                         for a in ("_f_s", "_x_s", "_x_s_info", "_R_s"))
+            print(f"[LP] device={dev} | FP16(autocast)={fp16} | "
+                  f"source features cached ONCE={cached} (not per-frame)")
+        except Exception:
+            pass
+
         # --- build the multi-reference view set (frontal + generated turns) ---
         self._frontal_yaw = float(self._x_s_info["yaw"])
         self._refs = [dict(f=self._f_s, xs=self._x_s, kp=self._x_s_info["kp"],
