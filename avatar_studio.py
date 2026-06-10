@@ -553,14 +553,21 @@ class AvatarStudio:
                     textvariable=self.minface_var, command=self._on_minface,
                     style="Studio.TSpinbox").pack(side="right")
 
-        r = self._row(c, "Max turn °  (LP clean ~60; 90 = stretched)")
-        self.turncap_var = tk.IntVar(value=55)
+        r = self._row(c, "Pose preset")
+        self.pose_var = tk.StringVar(value="Safe (no melt)")
+        ttk.Combobox(r, textvariable=self.pose_var, values=POSE_LABELS,
+                     state="readonly", width=16,
+                     style="Studio.TCombobox").pack(side="right")
+        self.pose_var.trace_add("write", self._on_pose)
+
+        r = self._row(c, "Max turn °  (Safe 30 = no melt)")
+        self.turncap_var = tk.IntVar(value=30)
         ttk.Spinbox(r, from_=20, to=90, increment=5, width=5,
                     textvariable=self.turncap_var, command=self._on_turncap,
                     style="Studio.TSpinbox").pack(side="right")
 
-        r = self._row(c, "Max tilt °  (up / down)")
-        self.tilt_var = tk.IntVar(value=15)
+        r = self._row(c, "Max tilt °  (Safe 10 = no melt)")
+        self.tilt_var = tk.IntVar(value=10)
         ttk.Spinbox(r, from_=8, to=30, increment=1, width=5,
                     textvariable=self.tilt_var, command=self._on_tilt,
                     style="Studio.TSpinbox").pack(side="right")
