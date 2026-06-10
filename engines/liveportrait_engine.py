@@ -105,6 +105,9 @@ AUTOCENTER_PITCH = float(os.environ.get("AVATAR_AUTOCENTER_PITCH", "0.02"))
 # delta that balloons the lower face; tanh-clamping each element to ±this keeps a
 # natural max jaw drop (GFPGAN then sharpens teeth). 0 disables.
 MOUTH_GUARD = float(os.environ.get("AVATAR_MOUTH_GUARD", "0.04"))
+# Gaze lock releases as the head turns past this many deg of yaw, so the eyes
+# follow the head on a turn instead of staying locked forward (looks wrong).
+GAZE_RELEASE = float(os.environ.get("AVATAR_GAZE_RELEASE", "18"))
 # SAFE-ZONE defaults: one-shot reenactment stays clean inside ~30deg yaw / ~10deg
 # pitch; beyond that the unseen geometry stretches/melts. Knee-eased (not hard
 # stop), and the Studio "Safe/Cinematic/Free" pose preset can widen this.
