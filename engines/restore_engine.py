@@ -67,38 +67,69 @@ class RestoreEngine:
         self._import()
 
     def _import(self):
-        model = next((p for p in GFPGAN_CANDIDATES if os.path.exists(p)), None)
-        if model is None:
-            print("[GFPGAN] weights not found (GFPGANv1.4.pth) — restoration off.")
+        import torch
+        from basicsr.utils import img2tensor, tensor2img
+        from torchvision.transforms.functional import normalize
+        self._torch = torch
+        self._img2tensor = img2tensor
+        self._tensor2img = tensor2img
+        self._normalize = normalize
+        self._device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._bf16 = self._device == "cuda"
+
+        # Prefer CodeFormer (more photoreal); fall back to GFPGAN.
+        if RESTORE_NET != "gfpgan" and self._load_codeformer():
+            self._backend = "codeformer"
+        elif self._load_gfpgan():
+            self._backend = "gfpgan"
+        else:
+            print("[RESTORE] no restoration model available — restoration off.")
             return
         try:
-            import torch
+            self._warmup()
+        except Exception:
+            pass
+        self.ready = True
+        self._print_gpu()
+        print(f"[RESTORE] Ready — {self._backend} crop restoration "
+              f"({self._device}, {'bf16' if self._bf16 else 'fp32'}).")
+
+    def _load_codeformer(self):
+        if not os.path.exists(CODEFORMER_PATH):
+            return False
+        try:
+            if CODEFORMER_ARCH_DIR not in sys.path:
+                sys.path.insert(0, CODEFORMER_ARCH_DIR)
+            from codeformer_arch import CodeFormer
+            net = CodeFormer(dim_embd=512, codebook_size=1024, n_head=8, n_layers=9,
+                             connect_list=["32", "64", "128", "256"]).to(self._device)
+            ck = self._torch.load(CODEFORMER_PATH, map_location="cpu", weights_only=False)
+            net.load_state_dict(ck["params_ema"] if "params_ema" in ck else ck)
+            self._net = net.eval()
+            return True
+        except Exception as exc:
+            print(f"[RESTORE] CodeFormer load failed ({exc}); trying GFPGAN.")
+            return False
+
+    def _load_gfpgan(self):
+        model = next((p for p in GFPGAN_CANDIDATES if os.path.exists(p)), None)
+        if model is None:
+            return False
+        try:
             from gfpgan import GFPGANer
-            from basicsr.utils import img2tensor, tensor2img
-            from torchvision.transforms.functional import normalize
-            self._torch = torch
-            self._img2tensor = img2tensor
-            self._tensor2img = tensor2img
-            self._normalize = normalize
-            self._device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._bf16 = self._device == "cuda"
             restorer = GFPGANer(model_path=model, upscale=1, arch="clean",
                                 channel_multiplier=2, bg_upsampler=None,
                                 device=self._device)
             self._net = restorer.gfpgan
-            self._warmup()
-            self.ready = True
-            self._print_gpu()
-            print(f"[GFPGAN] Ready — crop-only restoration ({self._device}, "
-                  f"{'bf16' if self._bf16 else 'fp32'}).")
+            return True
         except Exception as exc:
-            print(f"[GFPGAN] init failed ({exc}) — restoration off.")
-            self._net = None
+            print(f"[RESTORE] GFPGAN load failed ({exc}).")
+            return False
 
     def startup_check(self):
         if self.ready:
-            return True, "GFPGAN restoration active (face crop)."
-        return True, "GFPGAN restoration OFF (weights/deps missing)."
+            return True, f"{self._backend} restoration active (face crop)."
+        return True, "restoration OFF (weights/deps missing)."
 
     # -------------------------------------------------------------------------
     def _autocast(self):
