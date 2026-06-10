@@ -87,6 +87,7 @@ class FaceSwapEngine:
         self._provider = "?"
         self._n = 0
         self._cached_target = None
+        self.last_found = False        # did the last swap() see a face? (chart logic)
         try:
             import insightface
             from insightface.app.common import Face
@@ -133,6 +134,7 @@ class FaceSwapEngine:
         real webcam head). Returns the composited BGR frame; passes through on no
         face so the loop never stalls."""
         if not self.ready or self.source_face is None:
+            self.last_found = False
             return frame
         try:
             # per-frame TARGET needs only detection (bbox + 5 kps) — far faster than
