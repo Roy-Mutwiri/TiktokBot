@@ -130,6 +130,61 @@ class FaceSwapEngine:
         print(f"[SWAP] source face set from {os.path.basename(image_path)}")
         return True
 
+    def set_source_from_folder(self, folder):
+        """Build the CHARACTER identity by AVERAGING the arcface embedding across
+        every photo in `folder` (all angles/expressions) — more photos = a more
+        robust, consistent swap. Incremental: a cache stores the running sum +
+        which files are done, so daily-added photos only cost their own detection.
+        Returns the number of photos in the identity."""
+        if not self.ready or not os.path.isdir(folder):
+            return 0
+        exts = (".jpg", ".jpeg", ".png", ".webp", ".bmp")
+        files = sorted(f for f in os.listdir(folder) if f.lower().endswith(exts))
+        cache_path = os.path.join(folder, "_character_embedding.npz")
+        emb_sum = None
+        count = 0
+        done = set()
+        if os.path.exists(cache_path):
+            try:
+                z = np.load(cache_path, allow_pickle=True)
+                emb_sum = z["sum"].astype(np.float32)
+                count = int(z["count"])
+                done = set(z["files"].tolist())
+            except Exception:
+                emb_sum, count, done = None, 0, set()
+        template = self.source_face
+        new = 0
+        for fn in files:
+            if fn in done:
+                continue
+            img = cv2.imread(os.path.join(folder, fn))
+            if img is None:
+                done.add(fn); continue
+            faces = self.app.get(img)
+            if not faces:
+                done.add(fn); continue
+            face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            e = face.embedding.astype(np.float32)
+            emb_sum = e.copy() if emb_sum is None else emb_sum + e
+            count += 1; new += 1
+            done.add(fn)
+            template = face
+        if count == 0 or emb_sum is None:
+            print(f"[SWAP] no faces found in {folder}.")
+            return 0
+        try:
+            np.savez(cache_path, sum=emb_sum, count=count,
+                     files=np.array(sorted(done), dtype=object))
+        except Exception:
+            pass
+        # set the averaged identity onto a template face (normed_embedding follows)
+        if template is not None:
+            template.embedding = emb_sum / count
+            self.source_face = template
+        print(f"[SWAP] character identity = {count} photos averaged "
+              f"({new} new this run) from {os.path.basename(folder)}")
+        return count
+
     def swap(self, frame):
         """Swap the character face onto the largest face in `frame` (the operator's
         real webcam head). Returns the composited BGR frame; passes through on no
