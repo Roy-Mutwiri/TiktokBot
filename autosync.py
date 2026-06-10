@@ -99,9 +99,9 @@ def commit_and_push():
         return False
     _log(f"committed: {msg}")
 
-    # Push (fail fast on auth rather than hanging on a browser prompt).
-    env_args = ["-c", "credential.interactive=false"]
-    code, out = _git(env_args + ["push", "origin", BRANCH], timeout=PUSH_TIMEOUT)
+    # Push using the configured credential helper (Git Credential Manager reuses
+    # the token you authenticated with earlier — no prompt once stored).
+    code, out = _git(["push", "origin", BRANCH], timeout=PUSH_TIMEOUT)
     if code == 0:
         _log("pushed -> origin/" + BRANCH)
         return True
@@ -110,7 +110,7 @@ def commit_and_push():
     if "rejected" in out or "fetch first" in out or "non-fast-forward" in out:
         _log("remote ahead — rebasing and retrying push")
         _git(["pull", "--rebase", "origin", BRANCH], timeout=PUSH_TIMEOUT)
-        code, out = _git(env_args + ["push", "origin", BRANCH], timeout=PUSH_TIMEOUT)
+        code, out = _git(["push", "origin", BRANCH], timeout=PUSH_TIMEOUT)
         if code == 0:
             _log("pushed after rebase -> origin/" + BRANCH)
             return True
