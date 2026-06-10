@@ -548,8 +548,14 @@ class LivePortraitEngine:
             # how much of YOUR expression deviation is kept (blinks largely
             # survive as they're fast & symmetric; slow gaze drift is suppressed).
             if self.gaze_lock and self.gaze_strength > 0.01:
-                g = min(0.92, self.gaze_strength * 0.9)
                 try:
+                    # RELEASE the gaze lock as the head turns, so the eyes follow
+                    # the head naturally instead of staying locked forward (which
+                    # looks wrong / "error" on a turn). Full lock when frontal,
+                    # fully released by ~GAZE_RELEASE deg of yaw.
+                    yaw_delta = abs(float(x_d_info["yaw"] - ref["yaw"]))
+                    rel = max(0.0, 1.0 - yaw_delta / GAZE_RELEASE)
+                    g = min(0.92, self.gaze_strength * 0.9 * rel)
                     x_d_info["exp"] = ref["exp"] + (x_d_info["exp"] - ref["exp"]) * (1.0 - g)
                 except Exception:
                     pass
