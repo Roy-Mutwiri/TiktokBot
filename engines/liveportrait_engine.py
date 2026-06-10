@@ -268,15 +268,18 @@ class LivePortraitEngine:
                 except Exception as exc:
                     print(f"[LP] real view {os.path.basename(path)} failed ({exc}).")
             self._refs.sort(key=lambda r: r["base_yaw"])
-            self._multi = len(self._refs) > 1
             bases = ", ".join(f"{r['base_yaw']:+.0f}" for r in self._refs)
-            # only turn as far as the REAL views cover (+ a small clean residual);
-            # never extrapolate past the captured angles (that distorts again).
             cov = max(abs(r["base_yaw"]) for r in self._refs)
             self._multi_yaw_cap = min(YAW_CAP_MULTI, cov + 8.0)
-            print(f"[LP] multi-reference from {len(real_views)} REAL extracted views "
-                  f"(yaw {bases}). Clean turn range ~{self._multi_yaw_cap:.0f}deg "
-                  f"(limited by what the video covers).")
+            # IMPORTANT: views pooled from DIFFERENT videos have different body /
+            # clothing / background, so switching them mid-turn makes the body jump
+            # ("face vs body" mismatch). So multi-view is OFF by default — single
+            # consistent source = body never changes. Enable only when the views
+            # come from ONE session (env AVATAR_MULTIREF=1 or the Studio checkbox).
+            self._multi = MULTI_REF and len(self._refs) > 1
+            mode = "ON" if self._multi else "OFF (single consistent source)"
+            print(f"[LP] {len(real_views)} real views loaded (yaw {bases}); "
+                  f"multi-view {mode}. Cap ~{self._multi_yaw_cap:.0f}deg.")
         # 2) otherwise, optionally generate views (off by default; can bend).
         elif MULTI_REF:
             for off in MULTI_REF_YAWS:
