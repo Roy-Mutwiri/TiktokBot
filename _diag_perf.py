@@ -11,7 +11,8 @@ print(" CUDA:", torch.cuda.is_available(),
       "|", (torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU"))
 
 import realtime_avatar as r
-from liveportrait_engine import LivePortraitEngine, USE_HALF, LP_INTERVAL
+from liveportrait_engine import LivePortraitEngine, USE_HALF
+from realtime_avatar import LP_INTERVAL
 import enhance_engine
 from body_motion import BodyMotionEngine
 
