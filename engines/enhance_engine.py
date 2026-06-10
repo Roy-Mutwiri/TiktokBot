@@ -280,18 +280,36 @@ def draw_speaking_indicator(frame, is_speaking):
 # -----------------------------------------------------------------------------
 # PUBLIC ENTRY POINT
 # -----------------------------------------------------------------------------
+# Performance level (set by the Quality preset). "full" = everything;
+# "light" = skip the costly background segmentation + grain/soften (saves ~20ms);
+# overlays (ticker/badges) always stay since they're cheap.
+ENHANCE_LEVEL = "full"          # "full" | "light"
+
+
+def set_level(level):
+    global ENHANCE_LEVEL
+    ENHANCE_LEVEL = level if level in ("full", "light") else "full"
+
+
 def enhance_frame(frame, is_speaking=False):
-    """Run the full polish pipeline. Never raises — returns a frame regardless."""
+    """Run the polish pipeline. Never raises — returns a frame regardless.
+
+    'light' level skips background segmentation + grain/soften (the ~20ms CPU
+    cost) for higher fps, keeping the cheap overlays and grade.
+    """
     try:
         _ensure_assets()
         if frame.shape[0] != FRAME_SIZE or frame.shape[1] != FRAME_SIZE:
             frame = cv2.resize(frame, (FRAME_SIZE, FRAME_SIZE))
-        frame = background_composite(frame)
-        frame = apply_soften(frame)               # reduce the over-sharp AI look
+        full = ENHANCE_LEVEL == "full"
+        if full:
+            frame = background_composite(frame)
+            frame = apply_soften(frame)           # reduce the over-sharp AI look
         frame = apply_color_grade(frame)
         frame = apply_vignette(frame)
         frame = apply_camera_shake(frame)
-        frame = apply_grain(frame)                # sensor grain (before UI overlays)
+        if full:
+            frame = apply_grain(frame)            # sensor grain (before UI overlays)
         frame = draw_ticker(frame)
         frame = draw_live_badge(frame)
         frame = draw_speaking_indicator(frame, is_speaking)
