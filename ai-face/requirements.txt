@@ -1,0 +1,19 @@
+# Base engine dependencies
+edge-tts
+opencv-python
+pyvirtualcam
+numpy
+
+# Wav2Lip runtime (modern versions — NOT Wav2Lip's ancient pins)
+librosa
+numba
+scipy
+tqdm
+
+# Face restoration for sharp, human lips (clarity)
+gfpgan
+
+# NOTE: PyTorch is NOT listed here because it needs a GPU-specific index URL.
+# Install it separately (see README):
+#   RTX 50-series (Blackwell): pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   RTX 30/40-series:          pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121

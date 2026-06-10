@@ -1,0 +1,76 @@
+# Realtime AI Avatar — dependency list
+# Run `python setup_models.py` after installing to check models + weights.
+
+# --- core runtime ---
+edge-tts
+opencv-python
+pyvirtualcam
+numpy
+mediapipe
+huggingface_hub
+sounddevice
+librosa
+soundfile
+scipy
+tqdm
+
+# --- data_prep staged face harvester (stage1-3) ---
+yt-dlp                     # channel metadata + thumbnail + 720p/full downloads
+scikit-learn               # appearance clustering for the stage-3 consistency filter
+imageio-ffmpeg             # ffmpeg binary fallback (ffmpeg is not on PATH here):
+                           #   used for yt-dlp stream merge + stage-3 frame-accurate cuts
+# also uses: mediapipe, insightface, opencv-python, numpy (already listed above)
+# NOTE: insightface pulls numpy 2.x — keep numpy pinned to 1.26.4 for mediapipe.
+
+# --- LivePortrait (webcam -> AI face) ---
+insightface
+omegaconf
+onnx
+onnxruntime
+scikit-image
+imageio
+tyro
+rich
+
+# --- MuseTalk (mouth sync) ---
+diffusers
+transformers
+einops
+
+# --- Photoreal realism stack (HuggingFace models) ---
+# CodeFormer face restoration: arch vendored in engines/codeformer_arch/, weights
+#   ai-face/models/codeformer.pth (HF zhangbo2008/codeformer). Uses facexlib +
+#   basicsr (below) for detect/align/paste — no separate codeformer package.
+# Real-ESRGAN x2 detail pass: weights ai-face/models/RealESRGAN_x2.pth
+#   (HF ai-forever/Real-ESRGAN); RRDBNet arch ships inside basicsr.
+basicsr
+facexlib
+gfpgan                     # CodeFormer fallback restorer
+kokoro                     # local HF neural TTS (hexgrad/Kokoro-82M); pulls misaki + spaCy
+
+# --- Expressive / human voices (HuggingFace) ---
+# Maya1 (maya-research/maya1): 3B speech-LLM, laughs/emotion via inline <tags>.
+#   pip install transformers snac accelerate   (snac needs einops; all safe — no torch change)
+snac
+accelerate
+einops
+# Chatterbox (Resemble AI): clone a REAL voice from a reference clip.
+#   ⚠ INSTALL WITH --no-deps — its setup pins torch==2.6.0 which BREAKS the
+#   cu128/Blackwell GPU. Then add its runtime deps, also --no-deps:
+#   pip install chatterbox-tts resemble-perth s3tokenizer conformer omegaconf \
+#               diffusers antlr4-python3-runtime==4.9.3 --no-deps
+#   pip install torchaudio==2.11.0 --index-url https://download.pytorch.org/whl/cu128 --no-deps
+chatterbox-tts
+resemble-perth
+s3tokenizer
+conformer
+
+# --- PyTorch — install the build for YOUR GPU (NOT plain `pip install torch`) ---
+#   RTX 50-series (Blackwell):  pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+#   RTX 30/40-series:           pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+torch
+torchvision
+torchaudio
+
+# Optional: HD face restoration (already set up under ai-face/)
+#   gfpgan

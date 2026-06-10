@@ -1,0 +1,156 @@
+# =============================================================================
+# build_character.py
+# -----------------------------------------------------------------------------
+# Build a MULTI-ANGLE character from a video of a real person. Scans the video,
+# measures each frame's head yaw with LivePortrait's own pose estimator, and
+# saves the SHARPEST, best-framed face crop at each angle bucket as a reference
+# view. The realtime engine then drives whichever real view matches your head
+# turn — clean turning at every angle the video actually covers (real side data,
+# no hallucination, no training).
+#
+#   python build_character.py source_vids/char.mp4
+# =============================================================================
+
+import os
+import sys
+import glob
+
+sys.path.insert(0, "engines")
+import numpy as np
+import cv2
+
+OUT_DIR = "character_views"
+FRAME_SIZE = 512
+SAMPLE_EVERY = 4                 # minimum stride between analysed frames
+MAX_SAMPLES_PER_VIDEO = 500      # spread this many samples evenly across each video
+CROP_PAD = 2.0                   # square crop = this * face box (portrait framing)
+MIN_FACE_FRAC = 0.07             # ignore tiny faces (want sharp, large faces)
+# fine yaw buckets (deg) — more views = smoother multi-reference turning.
+YAW_BUCKETS = [-50, -42, -34, -26, -18, -10, -4, 4, 10, 18, 26, 34, 42, 50]
+BUCKET_HALF = 5.0                # a frame falls in a bucket if within this many deg
+MAX_PITCH = 16.0                 # reject strongly up/down frames for the main set
+MIN_SHARPNESS = 30.0             # reject blurry frames outright
+
+
+def main(videos):
+    if isinstance(videos, str):
+        videos = [videos]
+    videos = [v for v in videos if os.path.exists(v)]
+    if not videos:
+        print("[BUILD] no videos found.")
+        return
+    os.makedirs(OUT_DIR, exist_ok=True)
+
+    from liveportrait_engine import LivePortraitEngine
+    char = os.path.join("ai-face", "character.jpg")
+    if not os.path.exists(char):
+        char = "character.jpg"
+    eng = LivePortraitEngine(char)
+    if eng.fallback_mode:
+        print("[BUILD] LivePortrait unavailable — cannot measure pose.")
+        return
+    W = eng.wrapper
+    mesh = eng._get_mesh()
+
+    # best[bucket] = (score, crop_bgr, yaw, pitch)  — pooled across ALL videos
+    best = {}
+    analysed = 0
+    for video_path in videos:
+        cap = cv2.VideoCapture(video_path)
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        n = min(MAX_SAMPLES_PER_VIDEO, total // SAMPLE_EVERY) if total else 0
+        positions = ([int(k * total / n) for k in range(n)] if n > 0 else None)
+        print(f"[BUILD] scanning {os.path.basename(video_path)} ({total} frames, "
+              f"{n} samples by seek)...")
+        # SEEK to evenly spaced positions instead of decoding every frame (fast
+        # on long videos). Falls back to sequential read if seeking is unsupported.
+        for pos in (positions or []):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, pos)
+            ok, frame = cap.read()
+            if not ok or frame is None:
+                continue
+            crop = _face_crop(frame, mesh)
+            if crop is None:
+                continue
+            sharp = cv2.Laplacian(cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY),
+                                  cv2.CV_64F).var()
+            if sharp < MIN_SHARPNESS:
+                continue
+            analysed += 1
+            try:
+                rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB)
+                info = W.get_kp_info(W.prepare_source(rgb))
+                yaw = float(info["yaw"]); pitch = float(info["pitch"])
+            except Exception:
+                continue
+            if abs(pitch) > MAX_PITCH:
+                continue
+            b = min(YAW_BUCKETS, key=lambda c: abs(c - yaw))
+            if abs(b - yaw) > BUCKET_HALF:
+                continue
+            if b not in best or sharp > best[b][0]:
+                best[b] = (sharp, crop.copy(), yaw, pitch)
+        cap.release()
+
+    if not best:
+        print("[BUILD] no usable face frames found.")
+        return
+
+    # save references
+    for old in glob.glob(os.path.join(OUT_DIR, "*.jpg")):
+        os.remove(old)
+    covered = []
+    for b in sorted(best):
+        score, crop, yaw, pitch = best[b]
+        path = os.path.join(OUT_DIR, f"yaw_{b:+03d}.jpg")
+        cv2.imwrite(path, crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        covered.append((b, yaw, score))
+        # the most-frontal one also becomes the primary character image
+        if b == 0 or (0 not in best and abs(b) == min(abs(x) for x in best)):
+            cv2.imwrite(os.path.join(OUT_DIR, "character.jpg"), crop,
+                        [cv2.IMWRITE_JPEG_QUALITY, 95])
+
+    print(f"[BUILD] analysed {analysed} face frames; built {len(best)} angle views:")
+    for b, yaw, score in covered:
+        print(f"   bucket {b:+4d}deg  (measured {yaw:+5.1f}, sharpness {score:.0f})")
+    yaws = [b for b in best]
+    print(f"[BUILD] yaw coverage: {min(yaws):+d} to {max(yaws):+d} deg")
+    print(f"[BUILD] saved to {OUT_DIR}/  -> the engine will load these as the "
+          f"multi-angle character.")
+
+
+def _face_crop(frame, mesh):
+    """Detect the largest face and return a padded square crop (512), or None."""
+    h, w = frame.shape[:2]
+    try:
+        res = mesh.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+    except Exception:
+        return None
+    if not res.detections:
+        return None
+    r = max((d.location_data.relative_bounding_box for d in res.detections),
+            key=lambda b: b.width * b.height)
+    fw, fh = r.width * w, r.height * h
+    if max(fw, fh) < MIN_FACE_FRAC * max(w, h):
+        return None
+    cx = (r.xmin + r.width / 2) * w
+    cy = (r.ymin + r.height / 2) * h
+    side = max(fw, fh) * CROP_PAD
+    x1 = int(cx - side / 2); y1 = int(cy - side / 2)
+    x2 = int(cx + side / 2); y2 = int(cy + side / 2)
+    crop = frame[max(0, y1):min(h, y2), max(0, x1):min(w, x2)]
+    if crop.size == 0:
+        return None
+    top = max(0, -y1); left = max(0, -x1)
+    bottom = max(0, y2 - h); right = max(0, x2 - w)
+    if top or bottom or left or right:
+        crop = cv2.copyMakeBorder(crop, top, bottom, left, right, cv2.BORDER_REPLICATE)
+    return cv2.resize(crop, (FRAME_SIZE, FRAME_SIZE))
+
+
+if __name__ == "__main__":
+    if len(sys.argv) > 1:
+        vids = sys.argv[1:]
+    else:
+        vids = sorted(glob.glob("source_vids/*.mp4")) or ["source_vids/char.mp4"]
+    main(vids)

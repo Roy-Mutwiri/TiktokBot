@@ -1,0 +1,73 @@
+# =============================================================================
+# .gitignore — keep code, exclude model weights, media, caches, logs
+# (GitHub rejects files >100MB; weights are downloaded via setup, not committed)
+# =============================================================================
+
+# --- model weights / binaries (re-downloaded by setup) ---
+*.pth
+*.onnx
+*.safetensors
+*.ckpt
+*.bin
+*.pt
+*.npz
+*.tar
+*.tar.gz
+
+# --- downloaded / generated media ---
+*.mp4
+*.mkv
+*.webm
+*.avi
+*.mov
+*.wav
+*.mp3
+*.flac
+
+# --- large generated / downloaded folders ---
+source_vids/
+harvester/raw_videos/
+harvester/raw_audio/
+motion_clips/
+character_views/
+tts_cache/
+data_prep/data/
+pretrained_weights/
+
+# --- facexlib / gfpgan auto-download weight caches ---
+gfpgan/weights/
+ai-face/gfpgan/weights/
+ai-face/models/
+ai-face/Wav2Lip/checkpoints/
+ai-face/Wav2Lip/face_detection/detection/sfd/*.pth
+ai-face/Wav2Lip/results/
+ai-face/Wav2Lip/temp/
+models/
+
+# --- runtime artifacts / logs / temp ---
+*.log
+*_pid.txt
+_*.jpg
+_*.png
+_*.wav
+_*.mp4
+_build_log.txt
+speech_output.*
+result_voice.mp4
+.harvester_checkpoint.json
+clips/
+
+# --- python ---
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.venv/
+venv/
+.env
+
+# --- editor / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
