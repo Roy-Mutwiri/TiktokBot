@@ -189,6 +189,10 @@ class LivePortraitEngine:
         cut = 3.0 - 2.6 * self._stab          # 3.0 (raw) -> 0.4 (very smooth)
         for k in ("pitch", "yaw", "roll", "t", "scale"):
             self._euro[k].min_cutoff = cut
+        # keep pose beta HIGH so fast turns stay snappy (low lag) at ANY
+        # stabilization level — stabilization only smooths SLOW/still motion.
+        for k in ("pitch", "yaw", "roll"):
+            self._euro[k].beta = POSE_BETA
         self._euro["exp"].min_cutoff = max(1.0, cut + 1.2)   # keep blinks crisp-ish
         self._euro_box.min_cutoff = max(0.6, cut)
 
