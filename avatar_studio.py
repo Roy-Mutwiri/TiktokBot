@@ -149,6 +149,8 @@ class AvatarStudio:
         self.booting = False
         self.engines = None
         self.tts = None
+        self.brain = None                    # Ollama LLM brain (answers in character)
+        self._thinking = False               # True while the brain is generating
         self.cap = None
         self.obs_cam = None
         self.lp_interval = 2
