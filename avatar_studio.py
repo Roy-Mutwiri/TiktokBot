@@ -148,6 +148,7 @@ class AvatarStudio:
         self.running = False
         self.booting = False
         self.engines = None
+        self.swap_engine = None              # lazy inswapper face-swap (real head)
         self.tts = None
         self.brain = None                    # Ollama LLM brain (answers in character)
         self._thinking = False               # True while the brain is generating
@@ -599,6 +600,9 @@ class AvatarStudio:
         self.multiref_var = tk.BooleanVar(value=False)
         self._check(c, "Extended turning  ·  multi-view (wider, less stable)",
                     self.multiref_var, self._on_multiref).pack(fill="x", pady=3)
+        self.swap_var = tk.BooleanVar(value=False)
+        self._check(c, "FACE-SWAP mode  ·  real head, perfect 90° turns (GPU)",
+                    self.swap_var).pack(fill="x", pady=3)
 
         # ---- SCENE & OUTPUT ------------------------------------------------
         c = self._card(right, "SCENE & OUTPUT")
@@ -1032,7 +1036,7 @@ class AvatarStudio:
             # Runs every frame (full webcam rate) so the body stays alive even on
             # cached-LP frames. Only when a face is present (else chart/hold).
             _t = time.perf_counter()
-            if self.body_var.get() and getattr(lp, "_face_found", False):
+            if self.body_var.get() and not did_swap and getattr(lp, "_face_found", False):
                 try:
                     ai = self.engines["body"].process(driving, ai)
                 except Exception:
