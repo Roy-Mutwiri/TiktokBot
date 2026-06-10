@@ -930,13 +930,18 @@ class AvatarStudio:
             # frame. Running them concurrently with the 3B TTS thrashes the GPU
             # and can OOM (which poisons the CUDA context -> everything freezes).
             # Hold the last frame with a clear overlay so it reads as "working".
-            if self.tts is not None and getattr(self.tts, "synthesizing", False):
+            _busy = None
+            if self._thinking:
+                _busy = "thinking..."
+            elif self.tts is not None and getattr(self.tts, "synthesizing", False):
+                _busy = "generating voice..."
+            if _busy is not None:
                 hold = last_final.copy()
                 ov = hold.copy()
                 cv2.rectangle(ov, (0, FRAME_SIZE // 2 - 26),
                               (FRAME_SIZE, FRAME_SIZE // 2 + 26), (0, 0, 0), -1)
                 cv2.addWeighted(ov, 0.55, hold, 0.45, 0, hold)
-                cv2.putText(hold, "generating voice...",
+                cv2.putText(hold, _busy,
                             (FRAME_SIZE // 2 - 150, FRAME_SIZE // 2 + 8),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 215, 255), 2, cv2.LINE_AA)
                 with self._frame_lock:
