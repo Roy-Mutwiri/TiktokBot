@@ -544,9 +544,9 @@ class AvatarStudio:
                     textvariable=self.minface_var, command=self._on_minface,
                     style="Studio.TSpinbox").pack(side="right")
 
-        r = self._row(c, "Max turn °  (smaller = cleaner)")
-        self.turncap_var = tk.IntVar(value=30)
-        ttk.Spinbox(r, from_=10, to=44, increment=2, width=5,
+        r = self._row(c, "Max turn °  (LP clean ~60; 90 = stretched)")
+        self.turncap_var = tk.IntVar(value=55)
+        ttk.Spinbox(r, from_=20, to=90, increment=5, width=5,
                     textvariable=self.turncap_var, command=self._on_turncap,
                     style="Studio.TSpinbox").pack(side="right")
 
