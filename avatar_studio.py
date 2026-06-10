@@ -208,7 +208,7 @@ class AvatarStudio:
         tk.Checkbutton(grow, text="Lock gaze", variable=self.gaze_var, bg=BG, fg=FG,
                        selectcolor=BG2, activebackground=BG, activeforeground=FG,
                        command=self._on_gaze, font=("Segoe UI", 8)).pack(side="left")
-        self.gaze_var2 = tk.IntVar(value=80)
+        self.gaze_var2 = tk.IntVar(value=55)   # gentler default — keeps iris life
         ttk.Scale(grow, from_=0, to=100, variable=self.gaze_var2, length=120,
                   command=lambda e: self._on_gaze()).pack(side="right")
 
@@ -234,6 +234,28 @@ class AvatarStudio:
         ttk.Spinbox(trow, from_=10, to=40, increment=2, width=4,
                     textvariable=self.turncap_var,
                     command=self._on_turncap).pack(side="right")
+
+        # max head tilt (pitch) before it clamps — stops the uncanny up/down stretch
+        tirow = tk.Frame(right, bg=BG); tirow.pack(fill="x", pady=2)
+        tk.Label(tirow, text="Max tilt deg (up/down)", bg=BG, fg=FG,
+                 font=("Segoe UI", 8)).pack(side="left")
+        self.tilt_var = tk.IntVar(value=15)
+        ttk.Spinbox(tirow, from_=8, to=30, increment=1, width=4,
+                    textvariable=self.tilt_var,
+                    command=self._on_tilt).pack(side="right")
+
+        # GFPGAN restoration: fix the plastic look (face crop) + skin detail
+        self.restore_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(right, text="Face restoration (GFPGAN — fixes plastic look)",
+                       variable=self.restore_var, bg=BG, fg=FG, selectcolor=BG2,
+                       activebackground=BG, activeforeground=FG,
+                       font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
+        skrow = tk.Frame(right, bg=BG); skrow.pack(fill="x", pady=2)
+        tk.Label(skrow, text="Skin detail", bg=BG, fg=FG,
+                 font=("Segoe UI", 8)).pack(side="left")
+        self.skin_var = tk.IntVar(value=70)
+        ttk.Scale(skrow, from_=0, to=100, variable=self.skin_var, length=140,
+                  command=lambda e: self._on_skin()).pack(side="right")
 
         # OBS toggle
         self.obs_var = tk.BooleanVar(value=False)
@@ -466,6 +488,7 @@ class AvatarStudio:
                             "chart": TradingView("XAUUSD"), "body": BodyMotionEngine(),
                             "restore": restore}
             self._on_quality()        # apply the selected quality preset at boot
+            self._on_tilt()           # apply max-tilt (pitch) cap at boot
             self.tts = tts
             self.cap = cap
             self.obs_cam = obs
@@ -508,7 +531,7 @@ class AvatarStudio:
         fps_t = time.perf_counter()
         next_tick = time.monotonic()
         # per-stage timing accumulators (for the [DIAG] readout)
-        t_read = t_lp = t_body = t_enh = 0.0
+        t_read = t_lp = t_body = t_enh = t_gfp = 0.0
         prev_small = None                # for motion-adaptive LP scheduling
 
         while self.running:
@@ -605,6 +628,15 @@ class AvatarStudio:
                     pass
             t_body += time.perf_counter() - _t
 
+            # --- GFPGAN restoration: fix the plastic look on the FACE crop ----
+            _t = time.perf_counter()
+            if self.restore_var.get() and getattr(lp, "_face_found", False):
+                try:
+                    ai = self.engines["restore"].restore(ai)
+                except Exception:
+                    pass
+            t_gfp += time.perf_counter() - _t
+
             # --- face-loss -> trading chart scene -----------------------------
             # When the webcam can't see the face (operator looks away/down) the
             # output crossfades to a live-moving trading chart, then back when the
@@ -671,11 +703,12 @@ class AvatarStudio:
                 now = time.perf_counter()
                 self._fps = 15.0 / (now - fps_t)
                 fps_t = now
-                rd, lpm, bd, en = (x / 15 * 1000 for x in (t_read, t_lp, t_body, t_enh))
+                rd, lpm, gf, bd, en = (x / 15 * 1000 for x in
+                                       (t_read, t_lp, t_gfp, t_body, t_enh))
                 self._diag = (f"{self._fps:.1f}fps | read {rd:.0f} | LP {lpm:.0f} | "
-                              f"body {bd:.0f} | enh {en:.0f} ms")
+                              f"gfpgan {gf:.0f} | body {bd:.0f} | enh {en:.0f} ms")
                 print("[DIAG] " + self._diag)
-                t_read = t_lp = t_body = t_enh = 0.0
+                t_read = t_lp = t_body = t_enh = t_gfp = 0.0
 
             next_tick += TARGET_FRAME_TIME
             sleep_for = next_tick - time.monotonic()
@@ -865,17 +898,32 @@ class AvatarStudio:
                 pass
 
     def _on_turncap(self):
-        """Live-set the head-turn caps (module globals read per frame). Pitch and
-        roll scale with yaw. No restart needed."""
+        """Live-set the yaw (turn) + roll caps. Pitch is owned by Max tilt."""
         try:
             import liveportrait_engine as lpe
             v = float(self.turncap_var.get())
             lpe.YAW_CAP = v
-            lpe.PITCH_CAP = max(8.0, v * 0.72)
             lpe.ROLL_CAP = max(10.0, v * 0.9)
             self._log_msg(f"[studio] max turn -> {v:.0f}deg (cleaner if smaller)")
         except Exception:
             pass
+
+    def _on_tilt(self):
+        """Live-set the pitch (up/down tilt) cap — stops the uncanny stretch."""
+        try:
+            import liveportrait_engine as lpe
+            lpe.PITCH_CAP = float(self.tilt_var.get())
+            self._log_msg(f"[studio] max tilt -> {self.tilt_var.get()}deg")
+        except Exception:
+            pass
+
+    def _on_skin(self):
+        """Live-set GFPGAN restoration blend strength (skin detail)."""
+        if self.engines:
+            try:
+                self.engines["restore"].skin_detail = self.skin_var.get() / 100.0
+            except Exception:
+                pass
 
     def _on_multiref(self):
         """Live A/B: extended multi-view turning vs safe single-image (capped)."""
