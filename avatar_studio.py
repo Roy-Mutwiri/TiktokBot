@@ -423,6 +423,8 @@ class AvatarStudio:
             try:
                 lp.min_good_face = max(0.04, self.minface_var.get() / 100.0)
                 lp._multi = bool(self.multiref_var.get()) and len(getattr(lp, "_refs", [])) > 1
+                lp.set_stabilization(self.stab_var.get() / 100.0)
+                lp.set_gaze(self.gaze_var.get(), self.gaze_var2.get() / 100.0)
             except Exception:
                 pass
             self._log_msg("   -> " + lp.startup_check()[1])
@@ -457,6 +459,7 @@ class AvatarStudio:
             from body_motion import BodyMotionEngine
             self.engines = {"lp": lp, "mt": mt, "comp": comp, "enh": enhance_engine,
                             "chart": TradingView("XAUUSD"), "body": BodyMotionEngine()}
+            self._on_quality()        # apply the selected quality preset at boot
             self.tts = tts
             self.cap = cap
             self.obs_cam = obs
