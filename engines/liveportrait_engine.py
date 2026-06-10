@@ -100,12 +100,11 @@ SCALE_BAND = float(os.environ.get("AVATAR_SCALE_BAND", "0.05"))
 # up/down/tilt offset decays to level over a few seconds (your movement still
 # shows as the transient delta). 0 disables. ~0.02 ≈ correct in ~4-5s.
 AUTOCENTER_PITCH = float(os.environ.get("AVATAR_AUTOCENTER_PITCH", "0.02"))
-# Measured (turn sweep): LivePortrait turns CLEANLY to ~60deg, acceptable to ~75,
-# stretched at 90. So the yaw cap is generous now — follows you 1:1 to ~43deg
-# (knee) then eases to 62, letting big head turns actually track instead of the
-# old 30deg clamp that made the avatar under-rotate.
-YAW_CAP = float(os.environ.get("AVATAR_YAW_CAP", "62"))    # left/right turn
-PITCH_CAP = float(os.environ.get("AVATAR_PITCH_CAP", "16"))  # up/down (breaks sooner)
+# SAFE-ZONE defaults: one-shot reenactment stays clean inside ~30deg yaw / ~10deg
+# pitch; beyond that the unseen geometry stretches/melts. Knee-eased (not hard
+# stop), and the Studio "Safe/Cinematic/Free" pose preset can widen this.
+YAW_CAP = float(os.environ.get("AVATAR_YAW_CAP", "30"))     # left/right turn
+PITCH_CAP = float(os.environ.get("AVATAR_PITCH_CAP", "10"))  # up/down (melts worst)
 ROLL_CAP = float(os.environ.get("AVATAR_ROLL_CAP", "24"))   # head tilt
 
 # MULTI-REFERENCE reenactment: the single character image has no side-of-head
