@@ -552,7 +552,8 @@ class LivePortraitEngine:
         view = self._select_ref(dyaw)                   # nearest side-view (hysteresis)
 
         delta_new = view["exp"] + (x_d_info["exp"] - ref["exp"])
-        scale_new = view["scale"] * (x_d_info["scale"] / ref["scale"])
+        ratio = (x_d_info["scale"] / ref["scale"]).clamp(1.0 - SCALE_BAND, 1.0 + SCALE_BAND)
+        scale_new = view["scale"] * ratio
         t_new = view["t"] + (x_d_info["t"] - ref["t"])
         t_new[..., 2] = 0
         # canonical kp of the chosen view, posed to the SAME absolute target; the
