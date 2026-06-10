@@ -124,7 +124,7 @@ ROLL_CAP = float(os.environ.get("AVATAR_ROLL_CAP", "24"))   # head tilt
 # Default OFF: the multi-view path can introduce profile artifacts on some live
 # motion. The single-image path + soft pose-limit is bulletproof (never bends).
 # Opt in with AVATAR_MULTIREF=1 (or the Studio "Extended turning" checkbox).
-MULTI_REF = os.environ.get("AVATAR_MULTIREF", "1") == "1"
+MULTI_REF = os.environ.get("AVATAR_MULTIREF", "0") == "1"
 MULTI_REF_YAWS = [-45.0, -30.0, -15.0, 15.0, 30.0, 45.0]  # generated view yaw offsets
 YAW_CAP_MULTI = float(os.environ.get("AVATAR_YAW_CAP_MULTI", "66"))  # cap when multi-ref on
 #  (real profile clip gives views to ~±60 -> turn that far cleanly with REAL data)
