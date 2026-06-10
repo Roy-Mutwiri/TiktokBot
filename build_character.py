@@ -100,19 +100,34 @@ def main(videos):
     for old in glob.glob(os.path.join(OUT_DIR, "*.jpg")):
         os.remove(old)
     covered = []
+    from collections import Counter
+    vid_per_bucket = {}
     for b in sorted(best):
-        score, crop, yaw, pitch = best[b]
+        score, crop, yaw, pitch, vid = best[b]
         path = os.path.join(OUT_DIR, f"yaw_{b:+03d}.jpg")
         cv2.imwrite(path, crop, [cv2.IMWRITE_JPEG_QUALITY, 95])
-        covered.append((b, yaw, score))
-        # the most-frontal one also becomes the primary character image
+        covered.append((b, yaw, score, vid))
+        vid_per_bucket[b] = vid
         if b == 0 or (0 not in best and abs(b) == min(abs(x) for x in best)):
             cv2.imwrite(os.path.join(OUT_DIR, "character.jpg"), crop,
                         [cv2.IMWRITE_JPEG_QUALITY, 95])
 
     print(f"[BUILD] analysed {analysed} face frames; built {len(best)} angle views:")
-    for b, yaw, score in covered:
-        print(f"   bucket {b:+4d}deg  (measured {yaw:+5.1f}, sharpness {score:.0f})")
+    for b, yaw, score, vid in covered:
+        print(f"   bucket {b:+4d}deg  (measured {yaw:+5.1f}, sharp {score:.0f})  <- {vid}")
+    ys = sorted(best)
+    print(f"[BUILD] yaw coverage: {min(ys):+d} to {max(ys):+d} deg")
+    # Which single video gives the widest CONSISTENT span (same body/background)?
+    by_vid = {}
+    for b, _, _, vid in covered:
+        by_vid.setdefault(vid, []).append(b)
+    best_vid = max(by_vid, key=lambda v: max(by_vid[v]) - min(by_vid[v]))
+    span = by_vid[best_vid]
+    print(f"[BUILD] widest SINGLE-video span: {best_vid} covers "
+          f"{min(span):+d}..{max(span):+d} deg ({len(span)} views) — a consistent "
+          f"multi-view set comes from ONE video.")
+    print(f"[BUILD] (wide views from DIFFERENT videos = body/background jump on "
+          f"turn; same-video views are seamless.)")
     yaws = [b for b in best]
     print(f"[BUILD] yaw coverage: {min(yaws):+d} to {max(yaws):+d} deg")
     print(f"[BUILD] saved to {OUT_DIR}/  -> the engine will load these as the "
