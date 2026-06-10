@@ -68,6 +68,15 @@ QUALITY_PRESETS = {
 }
 QUALITY_LABELS = list(QUALITY_PRESETS.keys())
 
+# Pose presets -> (max turn deg, max tilt deg). Safe never melts (best for
+# streaming); Free is the wide-range testing mode.
+POSE_PRESETS = {
+    "Safe (no melt)":   dict(turn=30, tilt=10),
+    "Cinematic":        dict(turn=40, tilt=14),
+    "Free (testing)":   dict(turn=62, tilt=22),
+}
+POSE_LABELS = list(POSE_PRESETS.keys())
+
 QUICK_PHRASES = [
     "Hey everyone, welcome back to the stream.",
     "Gold is pushing into a key resistance level right now.",

@@ -553,6 +553,14 @@ class LivePortraitEngine:
                     x_d_info["exp"] = ref["exp"] + (x_d_info["exp"] - ref["exp"]) * (1.0 - g)
                 except Exception:
                     pass
+            # WIDE-MOUTH GUARD: soft-clamp the per-element expression delta so a
+            # wide phoneme / open mouth can't balloon the lower face.
+            if MOUTH_GUARD > 0.0:
+                try:
+                    d = x_d_info["exp"] - ref["exp"]
+                    x_d_info["exp"] = ref["exp"] + MOUTH_GUARD * self._torch.tanh(d / MOUTH_GUARD)
+                except Exception:
+                    pass
             if self._multi:
                 bgr = self._drive_multiref(x_d_info, ref)
             else:
