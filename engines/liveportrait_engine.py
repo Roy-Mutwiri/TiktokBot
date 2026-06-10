@@ -636,9 +636,13 @@ class LivePortraitEngine:
         # clip). Head GEOMETRY still comes from view["kp"]/R_new, so the profile
         # stays real while the eyes stay open and follow the operator.
         delta_new = self._x_s_info["exp"] + (x_d_info["exp"] - ref["exp"])
+        # CONSISTENT scale + position from the FRONTAL source (not the per-view
+        # scale/t — those differ frame-to-frame in the turn clip and made the head
+        # ZOOM + JUMP when switching views mid-turn). Only the head GEOMETRY +
+        # appearance come from the view, so the size/position stay rock-steady.
         ratio = (x_d_info["scale"] / ref["scale"]).clamp(1.0 - SCALE_BAND, 1.0 + SCALE_BAND)
-        scale_new = view["scale"] * ratio
-        t_new = view["t"] + (x_d_info["t"] - ref["t"])
+        scale_new = self._x_s_info["scale"] * ratio
+        t_new = self._x_s_info["t"] + (x_d_info["t"] - ref["t"])
         t_new[..., 2] = 0
         # canonical kp of the chosen view, posed to the SAME absolute target; the
         # warp then runs from the view's base pose to the target (small residual).
