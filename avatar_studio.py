@@ -632,13 +632,27 @@ class AvatarStudio:
             self._chip(erow, tag, lambda t=tag: self._insert_tag(t)).pack(
                 side="left", padx=(0, 4))
 
-        # ---- SPEAK ---------------------------------------------------------
+        # ---- ASK THE AVATAR (Ollama answers, avatar speaks it) -------------
+        c = self._card(right, "ASK THE AVATAR")
+        tk.Label(c, text="Type a question — the AI answers in character and speaks it",
+                 bg=SURFACE, fg=FAINT, font=("Segoe UI", 8),
+                 wraplength=300, justify="left").pack(anchor="w", pady=(0, 4))
+        self.ask_entry = tk.Text(c, height=2, bg=SURFACE2, fg=FG, insertbackground=MAG,
+                                 font=("Segoe UI", 11), relief="flat", wrap="word",
+                                 padx=9, pady=7, highlightthickness=1,
+                                 highlightbackground=BORDER, highlightcolor=MAG)
+        self.ask_entry.pack(fill="x", pady=(0, 7))
+        self.ask_entry.bind("<Return>", self._on_ask_enter)
+        self.ask_btn = self._btn(
+            c, "ASK  ▸  the avatar answers", self.ask, bg=MAG, fg=CYAN_INK,
+            hover=self._mix(MAG, "#ffffff", 0.18), border=MAG, hover_border="#ffffff",
+            font=("Consolas", 11, "bold"), state="disabled")
+        self.ask_btn.pack(fill="x", ipady=6)
+
+        # ---- SPEAK (verbatim — the avatar says exactly this) ---------------
         c = self._card(right, "SPEAK")
-        # AI brain: when ON, the avatar ANSWERS your prompt in character (Ollama)
-        # instead of reading it verbatim.
-        self.brain_var = tk.BooleanVar(value=False)
-        self._check(c, "AI brain (Ollama) — answer in character",
-                    self.brain_var, self._on_brain_toggle).pack(anchor="w", pady=(0, 6))
+        tk.Label(c, text="Make the avatar say this text exactly",
+                 bg=SURFACE, fg=FAINT, font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 4))
         self.entry = tk.Text(c, height=3, bg=SURFACE2, fg=FG, insertbackground=ACCENT,
                              font=("Segoe UI", 11), relief="flat", wrap="word",
                              padx=9, pady=7, highlightthickness=1,
