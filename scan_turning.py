@@ -28,16 +28,21 @@ def yaw_estimate(frame):
 
 
 vids = sorted(glob.glob("source_vids/*.mp4"))
-print(f"[PREP] scanning {len(vids)} videos for turning footage...\n")
+print(f"[PREP] scanning {len(vids)} videos for turning footage...\n", flush=True)
+STRIDE = 12          # process every Nth frame (sequential read — fast, no seek)
+MAX_PROC = 200       # stop after this many processed frames per video
 rows = []
 for v in vids:
-    cap = cv2.VideoCapture(v); tot = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 1
-    step = max(1, tot // SAMPLES)
-    yaws = []
-    for k in range(SAMPLES):
-        cap.set(cv2.CAP_PROP_POS_FRAMES, k * step); ok, f = cap.read()
+    cap = cv2.VideoCapture(v)
+    yaws = []; i = 0; proc = 0
+    while proc < MAX_PROC:
+        ok, f = cap.read()
         if not ok:
+            break
+        i += 1
+        if i % STRIDE:
             continue
+        proc += 1
         y = yaw_estimate(cv2.resize(f, (480, 480)))
         if y is not None:
             yaws.append(y)
