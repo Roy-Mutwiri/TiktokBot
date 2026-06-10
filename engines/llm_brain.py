@@ -68,8 +68,42 @@ class LLMBrain:
     def ok(self):
         return self.available
 
+    def _ensure_server(self):
+        """If the Ollama server isn't reachable, try to launch it once (the CLI
+        daemon). Best-effort; returns True if reachable afterward."""
+        try:
+            self._get("/api/tags", timeout=3)
+            return True
+        except Exception:
+            pass
+        import shutil
+        import subprocess
+        exe = shutil.which("ollama")
+        if not exe:
+            cand = os.path.join(os.environ.get("LOCALAPPDATA", ""),
+                                "Programs", "Ollama", "ollama.exe")
+            exe = cand if os.path.exists(cand) else None
+        if not exe:
+            return False
+        try:
+            subprocess.Popen([exe, "serve"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        except Exception:
+            return False
+        import time as _t
+        for _ in range(8):                       # wait up to ~8s for it to bind
+            _t.sleep(1)
+            try:
+                self._get("/api/tags", timeout=2)
+                return True
+            except Exception:
+                continue
+        return False
+
     def _check(self):
-        """Ping the server and verify the model is pulled."""
+        """Ping the server (starting it if needed) and verify the model is pulled."""
+        self._ensure_server()
         try:
             tags = self._get("/api/tags", timeout=4)
             names = [m.get("name", "") for m in (tags.get("models") or [])]

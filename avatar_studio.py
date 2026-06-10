@@ -824,6 +824,13 @@ class AvatarStudio:
                 from llm_brain import LLMBrain
                 self.brain = LLMBrain()
                 self._log_msg("   -> brain: " + self.brain.startup_check()[1])
+                # Pre-load the model into VRAM in the background so the first
+                # question isn't a ~45s cold-load. Keeps it resident after.
+                if self.brain.ok:
+                    def _warm_brain():
+                        if self.brain.warmup():
+                            self._log_msg("[studio] AI brain warmed (resident, fast now).")
+                    threading.Thread(target=_warm_brain, daemon=True).start()
             except Exception as exc:
                 self.brain = None
                 self._log_msg(f"[studio] brain unavailable ({exc}).")
