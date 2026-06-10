@@ -517,7 +517,11 @@ class LivePortraitEngine:
         R_d0 = self._get_rotation_matrix(ref["pitch"], ref["yaw"], ref["roll"])
         R_new = (R_d @ R_d0.permute(0, 2, 1)) @ self._R_s
         delta_new = self._x_s_info["exp"] + (x_d_info["exp"] - ref["exp"])
-        scale_new = self._x_s_info["scale"] * (x_d_info["scale"] / ref["scale"])
+        # FREEZE scale (clamped to a tiny band): the driving scale estimate jumps
+        # when you turn your head, which used to ZOOM the avatar's face. A talking
+        # head shouldn't zoom on rotation, so we clamp the scale ratio tight.
+        ratio = (x_d_info["scale"] / ref["scale"]).clamp(1.0 - SCALE_BAND, 1.0 + SCALE_BAND)
+        scale_new = self._x_s_info["scale"] * ratio
         t_new = self._x_s_info["t"] + (x_d_info["t"] - ref["t"])
         t_new[..., 2] = 0
         x_d_new = scale_new * (self._x_s_info["kp"] @ R_new + delta_new) + t_new
