@@ -84,11 +84,12 @@ EURO_BOX = dict(min_cutoff=1.0, beta=0.004)    # face-crop box (cx, cy, side)
 # so turns stay inside the clean single-image range and never hit the distortion
 # zone (measured: clean to ~30deg yaw, breaks 40deg+). Tune via env.
 POSE_LIMIT = os.environ.get("AVATAR_POSE_LIMIT", "1") == "1"
-# Caps kept INSIDE the clean single-image range (measured: clean to ~22deg yaw,
-# starts distorting by 30, breaks at 40). Tighter = cleaner turns, less range.
-YAW_CAP = float(os.environ.get("AVATAR_YAW_CAP", "22"))    # left/right turn
+# Turns FOLLOW you 1:1 up to KNEE_FRAC*cap, then ease smoothly to the cap (so the
+# avatar tracks your head naturally and only the extreme is clamped to stay clean).
+KNEE_FRAC = 0.7
+YAW_CAP = float(os.environ.get("AVATAR_YAW_CAP", "30"))    # left/right turn
 PITCH_CAP = float(os.environ.get("AVATAR_PITCH_CAP", "16"))  # up/down (breaks sooner)
-ROLL_CAP = float(os.environ.get("AVATAR_ROLL_CAP", "20"))   # head tilt
+ROLL_CAP = float(os.environ.get("AVATAR_ROLL_CAP", "24"))   # head tilt
 
 # MULTI-REFERENCE reenactment: the single character image has no side-of-head
 # data, so hard turns hallucinate. We generate extra VIEWS of the SAME character
