@@ -1095,6 +1095,11 @@ class AvatarStudio:
                             self._log_msg(f"[studio] mouth error: {exc}")
                 _t = time.perf_counter()
                 try:
+                    # FACE-SWAP streamer look: force FULL enhance so the person is
+                    # cut from their room and composited onto the trading studio
+                    # background, with the lighting grade + ticker + LIVE badge.
+                    if did_swap:
+                        enh.set_level("full")
                     final = enh.enhance_frame(ai, is_speaking=self._speaking)
                 except Exception:
                     final = ai
