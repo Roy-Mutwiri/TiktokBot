@@ -117,8 +117,8 @@ class AvatarStudio:
 
         root.title("AVATAR STUDIO — live test")
         root.configure(bg=BG)
-        root.geometry("980x640")
-        root.minsize(900, 600)
+        root.geometry("1000x780")
+        root.minsize(900, 560)
 
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
