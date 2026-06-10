@@ -99,8 +99,10 @@ class Maya1TTS:
         print("[MAYA1] Ready — expressive human voice with emotion tags enabled.")
 
     def _warmup(self):
+        # Short warm (few tokens) just to trigger cuDNN autotune without paying a
+        # full ~3s synth at load — keeps the load wait shorter.
         try:
-            self.synthesize("Warming up the voice now.", max_new_tokens=256)
+            self.synthesize("Hello.", max_new_tokens=48)
         except Exception:
             pass
 
