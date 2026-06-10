@@ -134,23 +134,6 @@ class LivePortraitEngine:
         self.gaze_strength = 0.8     # 0..1 how strongly to re-center eyes to camera
         self._stab = 0.4
         self.set_stabilization(0.4)
-
-    def set_stabilization(self, level):
-        """0 = raw/responsive, 1 = very smooth. Lowers the 1€ cutoff (more
-        temporal smoothing) on pose/translation/scale/box; expression kept a bit
-        more responsive so blinks survive."""
-        self._stab = max(0.0, min(1.0, float(level)))
-        cut = 3.0 - 2.6 * self._stab          # 3.0 (raw) -> 0.4 (very smooth)
-        for k in ("pitch", "yaw", "roll", "t", "scale"):
-            self._euro[k].min_cutoff = cut
-        self._euro["exp"].min_cutoff = max(1.0, cut + 1.2)   # keep blinks crisp-ish
-        self._euro_box.min_cutoff = max(0.6, cut)
-
-    def set_gaze(self, on, strength=None):
-        """Enable/disable gaze re-centering and set its strength (0..1)."""
-        self.gaze_lock = bool(on)
-        if strength is not None:
-            self.gaze_strength = max(0.0, min(1.0, float(strength)))
         self.wrapper = None
 
         # Load + cache the source image regardless of mode.
