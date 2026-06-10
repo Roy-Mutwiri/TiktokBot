@@ -170,10 +170,16 @@ def background_composite(frame):
         if _seg_mask_cache is None or (_seg_counter % SEG_INTERVAL) == 0:
             res = seg.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             if res.segmentation_mask is not None:
-                m = (res.segmentation_mask > 0.5).astype(np.float32)
-                # Wider feather = the subject melts into the blurred bg instead
-                # of a hard cut-out edge (a big "this is composited" giveaway).
-                _seg_mask_cache = cv2.GaussianBlur(m, (0, 0), EDGE_FEATHER)[:, :, None]
+                # higher threshold + ERODE pulls the cut INWARD so the background
+                # fringe (the white-wall HALO) is removed, then a tight feather.
+                m = (res.segmentation_mask > 0.62).astype(np.float32)
+                m = cv2.erode(m, np.ones((5, 5), np.uint8), iterations=1)
+                m = cv2.GaussianBlur(m, (0, 0), EDGE_FEATHER)
+                # TEMPORAL smoothing: blend with the previous mask so the edge
+                # doesn't flicker/tear as you move (the "background errors").
+                if _seg_mask_cache is not None and _seg_mask_cache.shape[:2] == m.shape[:2]:
+                    m = 0.6 * m + 0.4 * _seg_mask_cache[:, :, 0]
+                _seg_mask_cache = m[:, :, None]
         if _seg_mask_cache is None or _seg_mask_cache.shape[:2] != frame.shape[:2]:
             return frame
         bg = _bg_image
