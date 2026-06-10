@@ -817,6 +817,37 @@ class AvatarStudio:
     def _on_interval(self):
         self.lp_interval = max(1, int(self.interval_var.get()))
 
+    def _on_quality(self, *args):
+        p = QUALITY_PRESETS.get(self.quality_var.get())
+        if not p:
+            return
+        self.lp_interval = p["lp"]
+        self.interval_var.set(p["lp"])
+        self.body_var.set(p["body"])
+        try:
+            import enhance_engine as ee
+            ee.set_level(p["enhance"])
+        except Exception:
+            pass
+        self._log_msg(f"[studio] quality: {self.quality_var.get()} "
+                      f"(LP every {p['lp']}, enhance {p['enhance']}, "
+                      f"body {'on' if p['body'] else 'off'})")
+
+    def _on_stab(self):
+        if self.engines:
+            try:
+                self.engines["lp"].set_stabilization(self.stab_var.get() / 100.0)
+            except Exception:
+                pass
+
+    def _on_gaze(self):
+        if self.engines:
+            try:
+                self.engines["lp"].set_gaze(self.gaze_var.get(),
+                                            self.gaze_var2.get() / 100.0)
+            except Exception:
+                pass
+
     def _on_minface(self):
         if self.engines:
             try:

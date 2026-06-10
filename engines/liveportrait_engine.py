@@ -475,6 +475,16 @@ class LivePortraitEngine:
                 self._ref_kp_info = x_d_info
 
             ref = self._ref_kp_info
+            # GAZE LOCK: pull the expression delta toward the source (camera-
+            # facing) so the eyes/face don't wander off-camera. Strength scales
+            # how much of YOUR expression deviation is kept (blinks largely
+            # survive as they're fast & symmetric; slow gaze drift is suppressed).
+            if self.gaze_lock and self.gaze_strength > 0.01:
+                g = min(0.92, self.gaze_strength * 0.9)
+                try:
+                    x_d_info["exp"] = ref["exp"] + (x_d_info["exp"] - ref["exp"]) * (1.0 - g)
+                except Exception:
+                    pass
             if self._multi:
                 bgr = self._drive_multiref(x_d_info, ref)
             else:
