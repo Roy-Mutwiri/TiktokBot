@@ -134,10 +134,29 @@ class AvatarStudio:
         self.preview.pack(fill="both", expand=True)
         self._show_placeholder()
 
-        # right: controls
-        right = tk.Frame(self.root, bg=BG, width=360)
-        right.pack(side="right", fill="y", padx=(0, 12), pady=12)
-        right.pack_propagate(False)
+        # right: controls — SCROLLABLE (there are more controls than fit a short
+        # window, so the speak box at the bottom must stay reachable).
+        right_outer = tk.Frame(self.root, bg=BG, width=372)
+        right_outer.pack(side="right", fill="y", padx=(0, 4), pady=12)
+        right_outer.pack_propagate(False)
+        _canvas = tk.Canvas(right_outer, bg=BG, highlightthickness=0)
+        _vsb = ttk.Scrollbar(right_outer, orient="vertical", command=_canvas.yview)
+        _canvas.configure(yscrollcommand=_vsb.set)
+        _vsb.pack(side="right", fill="y")
+        _canvas.pack(side="left", fill="both", expand=True)
+        right = tk.Frame(_canvas, bg=BG)          # inner frame holds ALL controls
+        _win = _canvas.create_window((0, 0), window=right, anchor="nw")
+
+        def _sync_scroll(_=None):
+            _canvas.configure(scrollregion=_canvas.bbox("all"))
+            _canvas.itemconfigure(_win, width=_canvas.winfo_width())
+        right.bind("<Configure>", _sync_scroll)
+        _canvas.bind("<Configure>", _sync_scroll)
+
+        def _wheel(e):                            # mouse-wheel scrolls the panel
+            _canvas.yview_scroll(int(-(e.delta or 0) / 120), "units")
+        _canvas.bind_all("<MouseWheel>", _wheel)
+        self._ctrl_canvas = _canvas
 
         tk.Label(right, text="AVATAR STUDIO", bg=BG, fg=ACCENT,
                  font=("Segoe UI", 15, "bold")).pack(anchor="w")
