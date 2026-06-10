@@ -135,10 +135,18 @@ class FaceSwapEngine:
         if not self.ready or self.source_face is None:
             return frame
         try:
-            faces = self.app.get(frame)
-            if not faces:
-                return frame
-            target = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
+            # per-frame TARGET needs only detection (bbox + 5 kps) — far faster than
+            # full app.get(). Reuse the box for DET_EVERY frames (head barely moves).
+            self._n += 1
+            target = self._cached_target
+            if target is None or self._n % DET_EVERY == 0:
+                bboxes, kpss = self.app.det_model.detect(frame, max_num=1, metric="default")
+                if bboxes is None or len(bboxes) == 0:
+                    self._cached_target = None
+                    return frame
+                i = int(np.argmax((bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])))
+                target = self._Face(bbox=bboxes[i, :4], kps=kpss[i], det_score=bboxes[i, 4])
+                self._cached_target = target
             out = self.swapper.get(frame, target, self.source_face, paste_back=True)
             if COLOR_MATCH:
                 # recolour only the swapped face box to the original lighting
