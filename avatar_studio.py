@@ -1124,7 +1124,7 @@ class AvatarStudio:
         self.cap = None; self.obs_cam = None
         self._latest = None
         self.stop_btn.configure(state="disabled")
-        for b in (self.speak_btn, self.mute_btn, self.recenter_btn):
+        for b in (self.speak_btn, self.ask_btn, self.mute_btn, self.recenter_btn):
             b.configure(state="disabled")
         self.start_btn.configure(state="normal", text="START")
         self._set_status("stopped", RED)
