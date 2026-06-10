@@ -1133,19 +1133,42 @@ class AvatarStudio:
         self._speak_text(txt)
 
     def _speak_text(self, txt):
+        """SPEAK box / quick phrases: the avatar says EXACTLY this text."""
         if self.tts is None or not self.running:
             self._log_msg("[studio] press START first.")
             return
-        use_brain = (self.brain is not None
-                     and getattr(self, "brain_var", None) is not None
-                     and self.brain_var.get() and self.brain.ok)
-        if not use_brain:
+        self.tts.speak(txt)
+        self._log_msg("> " + txt)
+
+    # ---- ASK (Ollama answers, avatar speaks the reply) ----------------------
+    def _on_ask_enter(self, event):
+        self.ask()
+        return "break"
+
+    def ask(self):
+        txt = self.ask_entry.get("1.0", "end").strip()
+        if not txt:
+            return
+        self.ask_entry.delete("1.0", "end")
+        self._ask_text(txt)
+
+    def _ask_text(self, txt):
+        """Send a question to the Ollama brain; the avatar speaks the answer."""
+        if self.tts is None or not self.running:
+            self._log_msg("[studio] press START first.")
+            return
+        if self.brain is None or not self.brain.ok:
+            why = self.brain.startup_check()[1] if self.brain else "brain not started"
+            self._log_msg(f"[studio] AI brain unavailable ({why}) — speaking as-is.")
             self.tts.speak(txt)
             self._log_msg("> " + txt)
             return
+        self._brain_answer(txt)
 
-        # AI brain ON: generate the avatar's in-character answer first (on the
-        # GPU, so the loop pauses via self._thinking), then speak the reply.
+    def _brain_answer(self, txt):
+        """Generate the in-character answer on the GPU (loop pauses via
+        self._thinking, 'thinking...' overlay), then speak it. Runs in a thread
+        so the UI stays responsive."""
         self._log_msg("you> " + txt)
 
         def _think():
@@ -1160,7 +1183,7 @@ class AvatarStudio:
                 self._log_msg("avatar> " + reply)
                 self.tts.speak(reply)
             else:
-                self._log_msg("[studio] brain gave no answer — speaking text as-is.")
+                self._log_msg("[studio] no answer — speaking your text as-is.")
                 self.tts.speak(txt)
         threading.Thread(target=_think, daemon=True).start()
 
