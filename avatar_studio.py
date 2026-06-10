@@ -1251,6 +1251,21 @@ class AvatarStudio:
         except Exception:
             pass
 
+    def _on_brain_toggle(self):
+        """Feedback when the AI-brain checkbox flips."""
+        on = bool(self.brain_var.get())
+        if not on:
+            self._log_msg("[studio] AI brain OFF — avatar speaks your text verbatim.")
+            return
+        if self.brain is None or not self.brain.ok:
+            why = self.brain.startup_check()[1] if self.brain else "not started (press START)"
+            self._log_msg(f"[studio] AI brain unavailable: {why}")
+            self._log_msg("[studio] install/run Ollama + pull a model "
+                          "(see console), then toggle again.")
+        else:
+            self._log_msg("[studio] AI brain ON — type a question; the avatar "
+                          "answers in character, then speaks it.")
+
     def _on_interval(self):
         self.lp_interval = max(1, int(self.interval_var.get()))
 
