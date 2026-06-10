@@ -25,11 +25,12 @@ SAMPLE_EVERY = 4                 # minimum stride between analysed frames
 MAX_SAMPLES_PER_VIDEO = 500      # spread this many samples evenly across each video
 CROP_PAD = 2.0                   # square crop = this * face box (portrait framing)
 MIN_FACE_FRAC = 0.07             # ignore tiny faces (want sharp, large faces)
-# fine yaw buckets (deg) — more views = smoother multi-reference turning.
-YAW_BUCKETS = [-50, -42, -34, -26, -18, -10, -4, 4, 10, 18, 26, 34, 42, 50]
-BUCKET_HALF = 5.0                # a frame falls in a bucket if within this many deg
-MAX_PITCH = 16.0                 # reject strongly up/down frames for the main set
-MIN_SHARPNESS = 30.0             # reject blurry frames outright
+# fine yaw buckets (deg) across the FULL profile range — a dedicated turn clip
+# has real data all the way to ±90, so capture it.
+YAW_BUCKETS = [-85, -72, -60, -48, -38, -28, -18, -9, 0, 9, 18, 28, 38, 48, 60, 72, 85]
+BUCKET_HALF = 7.0                # a frame falls in a bucket if within this many deg
+MAX_PITCH = 22.0                 # reject strongly up/down frames for the main set
+MIN_SHARPNESS = 18.0             # reject blurry frames outright (clip is sharp)
 
 
 def main(videos):
