@@ -74,8 +74,10 @@ HOLD_ON_FACE_LOSS = True       # hold last good face when no (good) face is dete
 # = more responsive (less smoothing). These are deliberately light: kill shimmer
 # without making the avatar feel laggy. Set SMOOTH_MOTION=False to disable.
 SMOOTH_MOTION = os.environ.get("AVATAR_SMOOTH", "1") == "1"
-EURO_POSE = dict(min_cutoff=1.5, beta=0.02)    # pitch / yaw / roll (head pose)
-EURO_TRANS = dict(min_cutoff=1.5, beta=0.02)   # translation t
+EURO_POSE = dict(min_cutoff=1.5, beta=0.07)    # pitch/yaw/roll — high beta = snappy on
+#                                                FAST turns (low lag), smooth when still
+POSE_BETA = 0.07                               # kept responsive regardless of stabilization
+EURO_TRANS = dict(min_cutoff=1.5, beta=0.03)   # translation t
 EURO_SCALE = dict(min_cutoff=1.0, beta=0.01)   # scale (lean in/out)
 EURO_EXP = dict(min_cutoff=2.5, beta=0.05)     # expression (keep blinks crisp)
 EURO_BOX = dict(min_cutoff=1.0, beta=0.02)     # face-crop box — higher beta so the
