@@ -395,8 +395,10 @@ class LivePortraitEngine:
         self._mesh_tried = True
         try:
             import mediapipe as mp
+            # lower confidence catches more frames (fewer track drops) — the
+            # grace window in _crop_driving_face handles the occasional miss.
             self._mesh = mp.solutions.face_detection.FaceDetection(
-                model_selection=0, min_detection_confidence=0.4)
+                model_selection=0, min_detection_confidence=0.3)
         except Exception as exc:
             print(f"[LP] face detector unavailable ({exc}) — driving uncropped.")
             self._mesh = None
