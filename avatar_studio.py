@@ -1114,11 +1114,36 @@ class AvatarStudio:
         self._speak_text(txt)
 
     def _speak_text(self, txt):
-        if self.tts is not None and self.running:
+        if self.tts is None or not self.running:
+            self._log_msg("[studio] press START first.")
+            return
+        use_brain = (self.brain is not None
+                     and getattr(self, "brain_var", None) is not None
+                     and self.brain_var.get() and self.brain.ok)
+        if not use_brain:
             self.tts.speak(txt)
             self._log_msg("> " + txt)
-        else:
-            self._log_msg("[studio] press START first.")
+            return
+
+        # AI brain ON: generate the avatar's in-character answer first (on the
+        # GPU, so the loop pauses via self._thinking), then speak the reply.
+        self._log_msg("you> " + txt)
+
+        def _think():
+            self._thinking = True
+            reply = None
+            try:
+                reply = self.brain.respond(txt)
+            except Exception as exc:
+                self._log_msg(f"[studio] brain error: {exc}")
+            self._thinking = False
+            if reply:
+                self._log_msg("avatar> " + reply)
+                self.tts.speak(reply)
+            else:
+                self._log_msg("[studio] brain gave no answer — speaking text as-is.")
+                self.tts.speak(txt)
+        threading.Thread(target=_think, daemon=True).start()
 
     def _load_character(self):
         """Pick ANY face image as the avatar character (no training needed).
