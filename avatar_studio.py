@@ -88,9 +88,35 @@ VOICE_MODES = [
 VOICE_MODE_LABELS = [m[0] for m in VOICE_MODES]
 VOICE_MODE_KEY = dict(VOICE_MODES)
 
-# Dark palette
-BG = "#15171c"; BG2 = "#1e2128"; FG = "#e6e6e6"
-ACCENT = "#00d7ff"; GREEN = "#22cc55"; RED = "#dd3344"; ENTRY_BG = "#0f1115"
+# -----------------------------------------------------------------------------
+# DESIGN TOKENS — a small, cohesive dark "studio" palette.
+#   BG       app canvas (near-black, faint blue)
+#   SURFACE  floating card faces            SURFACE2  insets / fields / entries
+#   BORDER   hairline card + field edges
+#   FG/MUTED/FAINT  text hierarchy (primary / secondary / labels)
+#   ACCENT   single brand accent (cyan) + matching hover; semantic green/red/amber
+# Legacy names (BG2/ENTRY_BG) kept as aliases so the rest of the class is unchanged.
+# -----------------------------------------------------------------------------
+BG       = "#0c0e13"      # app canvas
+SURFACE  = "#161b24"      # cards
+SURFACE2 = "#0f131a"      # fields / entries / insets
+BORDER   = "#262e3b"      # hairline borders
+FG       = "#e9edf4"      # primary text
+MUTED    = "#8b95a8"      # secondary text / control labels
+FAINT    = "#5a6677"      # section headers / faint captions
+
+ACCENT     = "#2dd4ff"    # brand accent (cyan)
+ACCENT_HI  = "#62e2ff"    # accent hover
+ACCENT_INK = "#04222c"    # text on accent
+GREEN      = "#2bd576"    # live / success
+GREEN_HI   = "#46e189"
+GREEN_INK  = "#04240f"    # text on green
+RED        = "#f0556a"    # stopped / error
+AMBER      = "#f5b13d"    # warnings / recenter
+
+# Back-compat aliases (referenced elsewhere in this module).
+BG2      = "#1b212c"      # ghost-button / mute base surface
+ENTRY_BG = SURFACE2
 
 
 class AvatarStudio:
@@ -115,32 +141,188 @@ class AvatarStudio:
         self._speaking = False
         self._worker = None
 
-        root.title("AVATAR STUDIO — live test")
+        root.title("Avatar Studio")
         root.configure(bg=BG)
-        root.geometry("1000x780")
-        root.minsize(900, 560)
+        root.geometry("1200x880")
+        root.minsize(1000, 640)
 
+        self._init_style()
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_ui()                     # start the UI refresh loop
 
     # -------------------------------------------------------------------------
+    # STYLING + SMALL UI BUILDERS
+    # -------------------------------------------------------------------------
+    def _init_style(self):
+        """Theme every ttk widget (combobox/spinbox/scale/scrollbar) to match the
+        dark studio palette — the default clam look is too light otherwise."""
+        style = ttk.Style(self.root)
+        try:
+            style.theme_use("clam")
+        except Exception:
+            pass
+
+        style.configure("Studio.TCombobox",
+                        fieldbackground=SURFACE2, background=SURFACE2, foreground=FG,
+                        arrowcolor=MUTED, bordercolor=BORDER, lightcolor=BORDER,
+                        darkcolor=BORDER, relief="flat", padding=5)
+        style.map("Studio.TCombobox",
+                  fieldbackground=[("readonly", SURFACE2)],
+                  foreground=[("readonly", FG), ("disabled", FAINT)],
+                  selectbackground=[("readonly", SURFACE2)],
+                  selectforeground=[("readonly", FG)],
+                  bordercolor=[("focus", ACCENT)], lightcolor=[("focus", ACCENT)],
+                  darkcolor=[("focus", ACCENT)], arrowcolor=[("active", ACCENT)])
+        # popdown list (the dropdown itself is a classic Tk Listbox)
+        self.root.option_add("*TCombobox*Listbox.background", SURFACE2)
+        self.root.option_add("*TCombobox*Listbox.foreground", FG)
+        self.root.option_add("*TCombobox*Listbox.selectBackground", ACCENT)
+        self.root.option_add("*TCombobox*Listbox.selectForeground", ACCENT_INK)
+        self.root.option_add("*TCombobox*Listbox.font", ("Segoe UI", 9))
+        self.root.option_add("*TCombobox*Listbox.borderWidth", 0)
+
+        style.configure("Studio.TSpinbox",
+                        fieldbackground=SURFACE2, background=SURFACE, foreground=FG,
+                        arrowcolor=MUTED, bordercolor=BORDER, lightcolor=BORDER,
+                        darkcolor=BORDER, relief="flat", padding=4)
+        style.map("Studio.TSpinbox",
+                  bordercolor=[("focus", ACCENT)], arrowcolor=[("active", ACCENT)])
+
+        style.configure("Studio.Horizontal.TScale",
+                        background=ACCENT, troughcolor=SURFACE2, bordercolor=SURFACE2,
+                        lightcolor=ACCENT, darkcolor=ACCENT)
+
+        style.configure("Studio.Vertical.TScrollbar",
+                        background=BG2, troughcolor=BG, bordercolor=BG,
+                        arrowcolor=MUTED, relief="flat")
+        style.map("Studio.Vertical.TScrollbar", background=[("active", BORDER)])
+
+    def _add_hover(self, btn, base, hover):
+        """Lighten a flat button on hover (skips disabled state)."""
+        def on_enter(_):
+            if str(btn["state"]) != "disabled":
+                btn.configure(bg=hover)
+        def on_leave(_):
+            if str(btn["state"]) != "disabled":
+                btn.configure(bg=base)
+        btn.bind("<Enter>", on_enter)
+        btn.bind("<Leave>", on_leave)
+
+    def _btn(self, parent, text, cmd, *, bg, fg, hover,
+             font=("Segoe UI", 10, "bold"), state="normal"):
+        b = tk.Button(parent, text=text, command=cmd, bg=bg, fg=fg, font=font,
+                      relief="flat", bd=0, cursor="hand2", activebackground=hover,
+                      activeforeground=fg, state=state, highlightthickness=0,
+                      disabledforeground=FAINT)
+        self._add_hover(b, bg, hover)
+        return b
+
+    def _chip(self, parent, text, cmd, full=False):
+        b = tk.Button(parent, text=text, command=cmd, bg=SURFACE2, fg=MUTED,
+                      font=("Segoe UI", 8) if full else ("Consolas", 8),
+                      relief="flat", bd=0, cursor="hand2", padx=8, pady=4,
+                      activebackground=BORDER, activeforeground=FG,
+                      highlightthickness=0, anchor="w" if full else "center")
+        self._add_hover(b, SURFACE2, BORDER)
+        return b
+
+    def _check(self, parent, text, var, cmd=None):
+        return tk.Checkbutton(parent, text=text, variable=var, command=cmd,
+                              bg=SURFACE, fg=FG, selectcolor=SURFACE2,
+                              activebackground=SURFACE, activeforeground=FG,
+                              font=("Segoe UI", 9), anchor="w", justify="left",
+                              highlightthickness=0, bd=0, padx=0, cursor="hand2")
+
+    def _card(self, parent, title=None):
+        """A floating SURFACE card with a 1px border and an accent-dotted title."""
+        border = tk.Frame(parent, bg=BORDER)
+        border.pack(fill="x", pady=(0, 11))
+        inner = tk.Frame(border, bg=SURFACE)
+        inner.pack(fill="both", padx=1, pady=1)
+        body = tk.Frame(inner, bg=SURFACE)
+        body.pack(fill="both", padx=14, pady=(11, 13))
+        if title:
+            head = tk.Frame(body, bg=SURFACE); head.pack(fill="x", pady=(0, 9))
+            tk.Label(head, text="●", bg=SURFACE, fg=ACCENT,
+                     font=("Segoe UI", 7)).pack(side="left", padx=(0, 6))
+            tk.Label(head, text=title, bg=SURFACE, fg=FAINT,
+                     font=("Segoe UI", 8, "bold")).pack(side="left")
+        return body
+
+    def _row(self, parent, label):
+        r = tk.Frame(parent, bg=SURFACE); r.pack(fill="x", pady=5)
+        tk.Label(r, text=label, bg=SURFACE, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(side="left")
+        return r
+
+    # -------------------------------------------------------------------------
     def _build_ui(self):
-        # left: live preview
-        left = tk.Frame(self.root, bg=BG)
-        left.pack(side="left", fill="both", expand=True, padx=12, pady=12)
-        self.preview = tk.Label(left, bg="#000000", width=PREVIEW_SIZE,
-                                height=PREVIEW_SIZE)
+        # ===== TOP APP BAR (full width) =====================================
+        bar = tk.Frame(self.root, bg=BG, height=58)
+        bar.pack(side="top", fill="x", padx=18, pady=(14, 0))
+        bar.pack_propagate(False)
+        tk.Label(bar, text="◆", bg=BG, fg=ACCENT, font=("Segoe UI", 16)).pack(side="left")
+        tk.Label(bar, text="  AVATAR  STUDIO", bg=BG, fg=FG,
+                 font=("Segoe UI", 16, "bold")).pack(side="left")
+        tk.Label(bar, text="LIVE TEST", bg=SURFACE2, fg=MUTED,
+                 font=("Segoe UI", 8, "bold"), padx=9, pady=3).pack(side="left", padx=12)
+        tk.Label(bar, text="real-time AI avatar pipeline", bg=BG, fg=FAINT,
+                 font=("Segoe UI", 9)).pack(side="right")
+        tk.Frame(self.root, bg=BORDER, height=1).pack(side="top", fill="x")
+
+        # ===== BODY: preview (left) + control rail (right) ==================
+        bodyf = tk.Frame(self.root, bg=BG)
+        bodyf.pack(side="top", fill="both", expand=True)
+
+        # ---- LEFT: framed live preview with status + fps + diagnostics -----
+        left = tk.Frame(bodyf, bg=BG)
+        left.pack(side="left", fill="both", expand=True, padx=(18, 9), pady=16)
+
+        pv_border = tk.Frame(left, bg=BORDER)
+        pv_border.pack(fill="both", expand=True)
+        pv = tk.Frame(pv_border, bg=SURFACE)
+        pv.pack(fill="both", expand=True, padx=1, pady=1)
+
+        # preview header: live status dot + label (left), fps (right)
+        ph = tk.Frame(pv, bg=SURFACE, height=40); ph.pack(side="top", fill="x")
+        ph.pack_propagate(False)
+        self.status_canvas = tk.Canvas(ph, width=14, height=14, bg=SURFACE,
+                                       highlightthickness=0)
+        self.status_canvas.pack(side="left", padx=(15, 0))
+        self.status_dot = self.status_canvas.create_oval(2, 2, 12, 12,
+                                                         fill=RED, outline="")
+        self.status_lbl = tk.Label(ph, text="stopped", bg=SURFACE, fg=FG,
+                                   font=("Segoe UI", 10, "bold"))
+        self.status_lbl.pack(side="left", padx=8)
+        self.fps_lbl = tk.Label(ph, text="", bg=SURFACE, fg=MUTED,
+                                font=("Consolas", 10))
+        self.fps_lbl.pack(side="right", padx=15)
+        tk.Frame(pv, bg=BORDER, height=1).pack(side="top", fill="x")
+
+        # the composited frame (black stage)
+        stage = tk.Frame(pv, bg="#000000")
+        stage.pack(side="top", fill="both", expand=True, padx=10, pady=10)
+        self.preview = tk.Label(stage, bg="#000000", bd=0)
         self.preview.pack(fill="both", expand=True)
+
+        # footer: per-stage timing readout
+        tk.Frame(pv, bg=BORDER, height=1).pack(side="top", fill="x")
+        pf = tk.Frame(pv, bg=SURFACE, height=30); pf.pack(side="top", fill="x")
+        pf.pack_propagate(False)
+        self.diag_lbl = tk.Label(pf, text="ready", bg=SURFACE, fg=FAINT,
+                                 font=("Consolas", 9))
+        self.diag_lbl.pack(side="left", padx=15)
+
         self._show_placeholder()
 
-        # right: controls — SCROLLABLE (there are more controls than fit a short
-        # window, so the speak box at the bottom must stay reachable).
-        right_outer = tk.Frame(self.root, bg=BG, width=372)
-        right_outer.pack(side="right", fill="y", padx=(0, 4), pady=12)
+        # ---- RIGHT: scrollable control rail --------------------------------
+        right_outer = tk.Frame(bodyf, bg=BG, width=412)
+        right_outer.pack(side="right", fill="y", padx=(9, 12), pady=16)
         right_outer.pack_propagate(False)
         _canvas = tk.Canvas(right_outer, bg=BG, highlightthickness=0)
-        _vsb = ttk.Scrollbar(right_outer, orient="vertical", command=_canvas.yview)
+        _vsb = ttk.Scrollbar(right_outer, orient="vertical", command=_canvas.yview,
+                             style="Studio.Vertical.TScrollbar")
         _canvas.configure(yscrollcommand=_vsb.set)
         _vsb.pack(side="right", fill="y")
         _canvas.pack(side="left", fill="both", expand=True)
@@ -158,79 +340,76 @@ class AvatarStudio:
         _canvas.bind_all("<MouseWheel>", _wheel)
         self._ctrl_canvas = _canvas
 
-        tk.Label(right, text="AVATAR STUDIO", bg=BG, fg=ACCENT,
-                 font=("Segoe UI", 15, "bold")).pack(anchor="w")
+        # ---- SESSION -------------------------------------------------------
+        c = self._card(right, "SESSION")
+        self.start_btn = self._btn(c, "START", self.start, bg=GREEN, fg=GREEN_INK,
+                                   hover=GREEN_HI, font=("Segoe UI", 12, "bold"))
+        self.start_btn.pack(fill="x", ipady=9, pady=(0, 6))
+        self.stop_btn = self._btn(c, "STOP", self.stop, bg=BG2, fg=FG, hover=BORDER,
+                                  font=("Segoe UI", 12, "bold"), state="disabled")
+        self.stop_btn.pack(fill="x", ipady=9, pady=(0, 9))
+        self.char_btn = self._btn(c, "LOAD CHARACTER", self._load_character,
+                                  bg=SURFACE2, fg=ACCENT, hover=BORDER,
+                                  font=("Segoe UI", 9, "bold"))
+        self.char_btn.pack(fill="x", ipady=6, pady=(0, 4))
+        tk.Label(c, text="any face image — celebrity, AI render, cartoon",
+                 bg=SURFACE, fg=FAINT, font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 9))
+        self.recenter_btn = self._btn(c, "RECENTER POSE", self.recenter,
+                                      bg=SURFACE2, fg=AMBER, hover=BORDER,
+                                      font=("Segoe UI", 9, "bold"), state="disabled")
+        self.recenter_btn.pack(fill="x", ipady=6)
+        tk.Label(c, text="sit upright facing the camera, then click",
+                 bg=SURFACE, fg=FAINT, font=("Segoe UI", 8)).pack(anchor="w", pady=(4, 0))
 
-        # status row
-        srow = tk.Frame(right, bg=BG); srow.pack(fill="x", pady=(8, 4))
-        self.status_canvas = tk.Canvas(srow, width=16, height=16, bg=BG,
-                                       highlightthickness=0)
-        self.status_canvas.pack(side="left")
-        self.status_dot = self.status_canvas.create_oval(2, 2, 14, 14,
-                                                         fill=RED, outline="")
-        self.status_lbl = tk.Label(srow, text="stopped", bg=BG, fg=FG,
-                                   font=("Segoe UI", 10))
-        self.status_lbl.pack(side="left", padx=6)
-        self.fps_lbl = tk.Label(srow, text="", bg=BG, fg="#8a93a3",
-                                font=("Consolas", 9))
-        self.fps_lbl.pack(side="right")
-
-        # start/stop
-        self.start_btn = tk.Button(right, text="START", command=self.start,
-                                   bg=GREEN, fg="#04240f", font=("Segoe UI", 12, "bold"),
-                                   relief="flat", cursor="hand2", activebackground="#33dd6a")
-        self.start_btn.pack(fill="x", ipady=6, pady=(8, 4))
-        self.stop_btn = tk.Button(right, text="STOP", command=self.stop,
-                                  bg=BG2, fg=FG, font=("Segoe UI", 12, "bold"),
-                                  relief="flat", cursor="hand2", state="disabled")
-        self.stop_btn.pack(fill="x", ipady=6, pady=(0, 4))
-        self.char_btn = tk.Button(
-            right, text="LOAD CHARACTER…  (any face image)",
-            command=self._load_character, bg="#16263a", fg="#7fc8ff",
-            font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
-            activebackground="#1d3550")
-        self.char_btn.pack(fill="x", ipady=4, pady=(0, 4))
-        self.recenter_btn = tk.Button(
-            right, text="RECENTER POSE  (face camera upright)",
-            command=self.recenter, bg="#3a2f12", fg="#ffcf66",
-            font=("Segoe UI", 9, "bold"), relief="flat", cursor="hand2",
-            state="disabled", activebackground="#4a3c18")
-        self.recenter_btn.pack(fill="x", ipady=4, pady=(0, 8))
-
-        # head-update interval
-        irow = tk.Frame(right, bg=BG); irow.pack(fill="x", pady=2)
-        tk.Label(irow, text="Head update (LP every N frames)", bg=BG, fg=FG,
-                 font=("Segoe UI", 8)).pack(side="left")
-        self.interval_var = tk.IntVar(value=2)
-        ttk.Spinbox(irow, from_=1, to=4, width=4, textvariable=self.interval_var,
-                    command=self._on_interval).pack(side="right")
-
-        # quality preset (sets fps/detail tradeoff: LP interval + enhance + body)
-        qrow = tk.Frame(right, bg=BG); qrow.pack(fill="x", pady=2)
-        tk.Label(qrow, text="Quality", bg=BG, fg=FG, font=("Segoe UI", 8)).pack(side="left")
+        # ---- PERFORMANCE ---------------------------------------------------
+        c = self._card(right, "PERFORMANCE")
+        r = self._row(c, "Quality preset")
         self.quality_var = tk.StringVar(value="Balanced")
-        ttk.Combobox(qrow, textvariable=self.quality_var, values=QUALITY_LABELS,
-                     state="readonly", width=18).pack(side="right")
+        ttk.Combobox(r, textvariable=self.quality_var, values=QUALITY_LABELS,
+                     state="readonly", width=18,
+                     style="Studio.TCombobox").pack(side="right")
         self.quality_var.trace_add("write", self._on_quality)
 
-        # stabilization (smooths head pose/expression — reduces melt/jitter)
-        srow2 = tk.Frame(right, bg=BG); srow2.pack(fill="x", pady=2)
-        tk.Label(srow2, text="Stabilization", bg=BG, fg=FG,
-                 font=("Segoe UI", 8)).pack(side="left")
+        r = self._row(c, "Head update · LP every N")
+        self.interval_var = tk.IntVar(value=2)
+        ttk.Spinbox(r, from_=1, to=4, width=5, textvariable=self.interval_var,
+                    command=self._on_interval, style="Studio.TSpinbox").pack(side="right")
+
+        r = self._row(c, "Stabilization")
         self.stab_var = tk.IntVar(value=40)
-        ttk.Scale(srow2, from_=0, to=100, variable=self.stab_var, length=140,
+        ttk.Scale(r, from_=0, to=100, variable=self.stab_var, length=150,
+                  style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_stab()).pack(side="right")
 
-        # gaze lock (keep eyes toward camera even when you glance away)
-        grow = tk.Frame(right, bg=BG); grow.pack(fill="x", pady=2)
+        r = self._row(c, "Min face size %")
+        self.minface_var = tk.IntVar(value=9)
+        ttk.Spinbox(r, from_=6, to=40, increment=2, width=5,
+                    textvariable=self.minface_var, command=self._on_minface,
+                    style="Studio.TSpinbox").pack(side="right")
+
+        r = self._row(c, "Max turn °  (smaller = cleaner)")
+        self.turncap_var = tk.IntVar(value=22)
+        ttk.Spinbox(r, from_=10, to=40, increment=2, width=5,
+                    textvariable=self.turncap_var, command=self._on_turncap,
+                    style="Studio.TSpinbox").pack(side="right")
+
+        r = self._row(c, "Max tilt °  (up / down)")
+        self.tilt_var = tk.IntVar(value=15)
+        ttk.Spinbox(r, from_=8, to=30, increment=1, width=5,
+                    textvariable=self.tilt_var, command=self._on_tilt,
+                    style="Studio.TSpinbox").pack(side="right")
+
+        # ---- REALISM -------------------------------------------------------
+        c = self._card(right, "REALISM")
+        r = tk.Frame(c, bg=SURFACE); r.pack(fill="x", pady=3)
         self.gaze_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(grow, text="Lock gaze", variable=self.gaze_var, bg=BG, fg=FG,
-                       selectcolor=BG2, activebackground=BG, activeforeground=FG,
-                       command=self._on_gaze, font=("Segoe UI", 8)).pack(side="left")
+        self._check(r, "Lock gaze", self.gaze_var, self._on_gaze).pack(side="left")
         self.gaze_var2 = tk.IntVar(value=55)   # gentler default — keeps iris life
-        ttk.Scale(grow, from_=0, to=100, variable=self.gaze_var2, length=120,
+        ttk.Scale(r, from_=0, to=100, variable=self.gaze_var2, length=120,
+                  style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_gaze()).pack(side="right")
 
+<<<<<<< HEAD
         # live per-stage timing readout
         self.diag_lbl = tk.Label(right, text="", bg=BG, fg="#7fa6c0",
                                  font=("Consolas", 8))
@@ -264,120 +443,111 @@ class AvatarStudio:
                     command=self._on_tilt).pack(side="right")
 
         # GFPGAN restoration: fix the plastic look (face crop) + skin detail
+=======
+>>>>>>> worktree-studio-ui-redesign
         self.restore_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(right, text="Face restoration (GFPGAN — fixes plastic look)",
-                       variable=self.restore_var, bg=BG, fg=FG, selectcolor=BG2,
-                       activebackground=BG, activeforeground=FG,
-                       font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
-        skrow = tk.Frame(right, bg=BG); skrow.pack(fill="x", pady=2)
-        tk.Label(skrow, text="Skin detail", bg=BG, fg=FG,
-                 font=("Segoe UI", 8)).pack(side="left")
+        self._check(c, "Face restoration  ·  GFPGAN (fixes plastic look)",
+                    self.restore_var).pack(fill="x", pady=3)
+        r = self._row(c, "Skin detail")
         self.skin_var = tk.IntVar(value=70)
-        ttk.Scale(skrow, from_=0, to=100, variable=self.skin_var, length=140,
+        ttk.Scale(r, from_=0, to=100, variable=self.skin_var, length=150,
+                  style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_skin()).pack(side="right")
 
-        # OBS toggle
-        self.obs_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(right, text="Also send to OBS virtual camera",
-                       variable=self.obs_var, bg=BG, fg=FG, selectcolor=BG2,
-                       activebackground=BG, activeforeground=FG,
-                       font=("Segoe UI", 9)).pack(anchor="w", pady=(4, 0))
-
-        # face-loss -> trading chart scene toggle
-        self.chart_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(right, text="Show live charts when face is lost",
-                       variable=self.chart_var, bg=BG, fg=FG, selectcolor=BG2,
-                       activebackground=BG, activeforeground=FG,
-                       font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 0))
-
-        # webcam-driven upper-body motion (shoulders sway/lean with you)
         self.body_var = tk.BooleanVar(value=True)
-        tk.Checkbutton(right, text="Live body motion (torso follows you)",
-                       variable=self.body_var, bg=BG, fg=FG, selectcolor=BG2,
-                       activebackground=BG, activeforeground=FG,
-                       font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 0))
-
-        # extended turning via multi-view references (OFF = bulletproof default)
+        self._check(c, "Live body motion  ·  torso follows you",
+                    self.body_var).pack(fill="x", pady=3)
         self.multiref_var = tk.BooleanVar(value=False)
-        tk.Checkbutton(right, text="Extended turning (multi-view)  [experimental]",
-                       variable=self.multiref_var, bg=BG, fg=FG, selectcolor=BG2,
-                       activebackground=BG, activeforeground=FG,
-                       command=self._on_multiref,
-                       font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 8))
+        self._check(c, "Extended turning  ·  multi-view  [experimental]",
+                    self.multiref_var, self._on_multiref).pack(fill="x", pady=3)
 
-        # voice mode (which TTS backend) — switch live
-        vmrow = tk.Frame(right, bg=BG); vmrow.pack(fill="x", pady=(6, 2))
-        tk.Label(vmrow, text="Voice mode", bg=BG, fg=FG,
-                 font=("Segoe UI", 9)).pack(side="left")
+        # ---- SCENE & OUTPUT ------------------------------------------------
+        c = self._card(right, "SCENE & OUTPUT")
+        self.chart_var = tk.BooleanVar(value=True)
+        self._check(c, "Show live charts when face is lost",
+                    self.chart_var).pack(fill="x", pady=3)
+        self.obs_var = tk.BooleanVar(value=False)
+        self._check(c, "Also send to OBS virtual camera",
+                    self.obs_var).pack(fill="x", pady=3)
+
+        # ---- VOICE ---------------------------------------------------------
+        c = self._card(right, "VOICE")
+        tk.Label(c, text="Mode", bg=SURFACE, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(anchor="w")
         self.voicemode_var = tk.StringVar(value=VOICE_MODE_LABELS[0])
-        ttk.Combobox(vmrow, textvariable=self.voicemode_var,
-                     values=VOICE_MODE_LABELS, state="readonly", width=24
-                     ).pack(side="left", padx=6)
+        ttk.Combobox(c, textvariable=self.voicemode_var, values=VOICE_MODE_LABELS,
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(3, 9))
         self.voicemode_var.trace_add("write", self._on_voice_mode)
 
-        # emotion-tag quick inserts (Maya1 performs these; other voices ignore)
-        erow = tk.Frame(right, bg=BG); erow.pack(fill="x", pady=(0, 2))
-        tk.Label(erow, text="Insert:", bg=BG, fg="#8a93a3",
-                 font=("Segoe UI", 8)).pack(side="left")
-        for tag in ("<laugh>", "<sigh>", "<chuckle>", "<gasp>", "<whisper>"):
-            tk.Button(erow, text=tag, bg=BG2, fg=FG, relief="flat",
-                      font=("Consolas", 8), cursor="hand2", padx=3,
-                      command=lambda t=tag: self._insert_tag(t)).pack(side="left", padx=1)
-
-        # speak entry
-        tk.Label(right, text="Make the avatar speak:", bg=BG, fg=FG,
+        tk.Label(c, text="Speaker", bg=SURFACE, fg=MUTED,
                  font=("Segoe UI", 9)).pack(anchor="w")
-        self.entry = tk.Text(right, height=3, bg=ENTRY_BG, fg=FG, insertbackground=FG,
-                             font=("Segoe UI", 11), relief="flat", wrap="word",
-                             padx=6, pady=4)
-        self.entry.pack(fill="x", pady=(2, 4))
-        self.entry.bind("<Return>", self._on_enter)
-
-        brow = tk.Frame(right, bg=BG); brow.pack(fill="x")
-        self.speak_btn = tk.Button(brow, text="SPEAK", command=self.speak,
-                                   bg=ACCENT, fg="#04222a", font=("Segoe UI", 11, "bold"),
-                                   relief="flat", cursor="hand2", state="disabled")
-        self.speak_btn.pack(side="left", fill="x", expand=True, ipady=3)
-        self.mute_btn = tk.Button(brow, text="MUTE", command=self.toggle_mute,
-                                  bg=BG2, fg=FG, font=("Segoe UI", 11, "bold"),
-                                  relief="flat", width=8, cursor="hand2", state="disabled")
-        self.mute_btn.pack(side="left", padx=(6, 0), ipady=3)
-
-        # quick phrases
-        qp = tk.Frame(right, bg=BG); qp.pack(fill="x", pady=(8, 4))
-        for i, t in enumerate(QUICK_PHRASES):
-            tk.Button(qp, text=t[:30] + ("..." if len(t) > 30 else ""),
-                      bg=BG2, fg=FG, relief="flat", font=("Segoe UI", 8),
-                      anchor="w", cursor="hand2",
-                      command=lambda x=t: self._speak_text(x)).pack(fill="x", pady=1)
-
-        # voice
-        vrow = tk.Frame(right, bg=BG); vrow.pack(fill="x", pady=(6, 4))
-        tk.Label(vrow, text="Voice", bg=BG, fg=FG, font=("Segoe UI", 9)).pack(side="left")
         self.voice_var = tk.StringVar(value=MALE_VOICES[0])
-        style = ttk.Style()
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        ttk.Combobox(vrow, textvariable=self.voice_var, values=MALE_VOICES,
-                     state="readonly", width=26).pack(side="left", padx=6)
+        ttk.Combobox(c, textvariable=self.voice_var, values=MALE_VOICES,
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(3, 9))
         self.voice_var.trace_add("write", self._on_voice)
 
-        # log
-        tk.Label(right, text="Log", bg=BG, fg=FG, font=("Segoe UI", 9)).pack(anchor="w",
-                                                                             pady=(6, 0))
-        self.log = tk.Text(right, height=7, bg=ENTRY_BG, fg="#9aa3b2", relief="flat",
-                           font=("Consolas", 8), wrap="word", state="disabled")
-        self.log.pack(fill="both", expand=True, pady=(2, 0))
+        tk.Label(c, text="Insert emotion tag  (Maya1 performs these)", bg=SURFACE,
+                 fg=FAINT, font=("Segoe UI", 8)).pack(anchor="w")
+        erow = tk.Frame(c, bg=SURFACE); erow.pack(fill="x", pady=(4, 0))
+        for tag in ("<laugh>", "<sigh>", "<chuckle>", "<gasp>", "<whisper>"):
+            self._chip(erow, tag, lambda t=tag: self._insert_tag(t)).pack(
+                side="left", padx=(0, 4))
+
+        # ---- SPEAK ---------------------------------------------------------
+        c = self._card(right, "SPEAK")
+        self.entry = tk.Text(c, height=3, bg=SURFACE2, fg=FG, insertbackground=ACCENT,
+                             font=("Segoe UI", 11), relief="flat", wrap="word",
+                             padx=9, pady=7, highlightthickness=1,
+                             highlightbackground=BORDER, highlightcolor=ACCENT)
+        self.entry.pack(fill="x", pady=(0, 7))
+        self.entry.bind("<Return>", self._on_enter)
+
+        brow = tk.Frame(c, bg=SURFACE); brow.pack(fill="x")
+        self.speak_btn = self._btn(brow, "SPEAK", self.speak, bg=ACCENT, fg=ACCENT_INK,
+                                   hover=ACCENT_HI, font=("Segoe UI", 11, "bold"),
+                                   state="disabled")
+        self.speak_btn.pack(side="left", fill="x", expand=True, ipady=6)
+        self.mute_btn = tk.Button(brow, text="MUTE", command=self.toggle_mute,
+                                  bg=BG2, fg=FG, font=("Segoe UI", 11, "bold"),
+                                  relief="flat", bd=0, width=8, cursor="hand2",
+                                  activebackground=BORDER, state="disabled",
+                                  highlightthickness=0)
+        self.mute_btn.pack(side="left", padx=(7, 0), ipady=6)
+
+        tk.Label(c, text="Quick phrases", bg=SURFACE, fg=FAINT,
+                 font=("Segoe UI", 8)).pack(anchor="w", pady=(10, 3))
+        for t in QUICK_PHRASES:
+            self._chip(c, t[:34] + ("…" if len(t) > 34 else ""),
+                       lambda x=t: self._speak_text(x), full=True).pack(fill="x", pady=2)
+
+        # ---- ACTIVITY LOG --------------------------------------------------
+        c = self._card(right, "ACTIVITY LOG")
+        self.log = tk.Text(c, height=8, bg=SURFACE2, fg=MUTED, relief="flat",
+                           font=("Consolas", 8), wrap="word", state="disabled",
+                           padx=8, pady=6, highlightthickness=1,
+                           highlightbackground=BORDER, highlightcolor=BORDER)
+        self.log.pack(fill="both", expand=True)
 
     # -------------------------------------------------------------------------
     # PREVIEW / UI REFRESH (Tk main thread only)
     # -------------------------------------------------------------------------
     def _show_placeholder(self):
-        img = np.full((PREVIEW_SIZE, PREVIEW_SIZE, 3), 22, np.uint8)
-        cv2.putText(img, "press START", (150, 256), cv2.FONT_HERSHEY_SIMPLEX,
-                    1.0, (90, 90, 90), 2, cv2.LINE_AA)
+        # A soft vertical gradient (BGR) so the idle stage reads as "designed",
+        # not just a blank black box — with a centered call-to-action.
+        top = np.array((26, 19, 14), np.float32)      # ~ #0e131a
+        bot = np.array((42, 33, 24), np.float32)      # ~ #18212a
+        ramp = np.linspace(0.0, 1.0, PREVIEW_SIZE, dtype=np.float32)[:, None, None]
+        img = (top * (1 - ramp) + bot * ramp).astype(np.uint8)
+        img = np.repeat(img, PREVIEW_SIZE, axis=1)
+        cx = PREVIEW_SIZE // 2
+        cv2.circle(img, (cx, 232), 30, (255, 212, 45), 2, cv2.LINE_AA)   # accent ring
+        cv2.circle(img, (cx, 232), 4, (255, 212, 45), -1, cv2.LINE_AA)
+        for txt, y, sc, col, th in (("PRESS  START", 300, 1.0, (235, 237, 233), 2),
+                                    ("to bring the avatar to life", 336, 0.5,
+                                     (140, 130, 118), 1)):
+            (w, _), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, sc, th)
+            cv2.putText(img, txt, (cx - w // 2, y), cv2.FONT_HERSHEY_SIMPLEX,
+                        sc, col, th, cv2.LINE_AA)
         self._draw(img)
 
     def _draw(self, bgr):
