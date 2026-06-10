@@ -89,6 +89,15 @@ class FaceSwapEngine:
         self._n = 0
         self._cached_target = None
         self.last_found = False        # did the last swap() see a face? (chart logic)
+        self._kps_euro = None          # temporal smoothing of target keypoints
+        self.enhancer = None           # CodeFormer HD face enhancement (lazy)
+        try:
+            from one_euro import OneEuroFilter
+            # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
+            self._kps_euro = [[OneEuroFilter(min_cutoff=1.2, beta=0.02) for _ in range(2)]
+                              for _ in range(5)]
+        except Exception:
+            self._kps_euro = None
         try:
             import insightface
             from insightface.app.common import Face
