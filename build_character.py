@@ -21,8 +21,8 @@ import cv2
 
 OUT_DIR = "character_views"
 FRAME_SIZE = 512
-SAMPLE_EVERY = 4                 # minimum stride between analysed frames
-MAX_SAMPLES_PER_VIDEO = 500      # spread this many samples evenly across each video
+SAMPLE_EVERY = 2                 # dense sampling (smooth profile transitions)
+MAX_SAMPLES_PER_VIDEO = 800      # spread this many samples evenly across each video
 CROP_PAD = 2.0                   # square crop = this * face box (portrait framing)
 MIN_FACE_FRAC = 0.07             # ignore tiny faces (want sharp, large faces)
 # fine yaw buckets (deg) across the FULL profile range — a dedicated turn clip
