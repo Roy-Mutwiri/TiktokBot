@@ -93,6 +93,7 @@ class FaceSwapEngine:
         self.last_found = False        # did the last swap() see a face? (chart logic)
         self._kps_euro = None          # temporal smoothing of target keypoints
         self.enhancer = None           # CodeFormer HD face enhancement (lazy)
+        self._enh_tried = False
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
