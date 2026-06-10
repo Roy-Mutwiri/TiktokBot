@@ -16,6 +16,7 @@
 
 import os
 import sys
+import math
 import time
 import queue
 import threading
@@ -90,34 +91,43 @@ VOICE_MODE_LABELS = [m[0] for m in VOICE_MODES]
 VOICE_MODE_KEY = dict(VOICE_MODES)
 
 # -----------------------------------------------------------------------------
-# DESIGN TOKENS — a small, cohesive dark "studio" palette.
-#   BG       app canvas (near-black, faint blue)
-#   SURFACE  floating card faces            SURFACE2  insets / fields / entries
-#   BORDER   hairline card + field edges
-#   FG/MUTED/FAINT  text hierarchy (primary / secondary / labels)
-#   ACCENT   single brand accent (cyan) + matching hover; semantic green/red/amber
-# Legacy names (BG2/ENTRY_BG) kept as aliases so the rest of the class is unchanged.
+# DESIGN TOKENS — a futuristic "HUD / neon" palette on a deep-space canvas.
+#   BG       near-black navy app canvas
+#   SURFACE  panel faces (drawn as glowing rounded rects on a Canvas)
+#   SURFACE2 insets / fields / entries
+#   CYAN     primary neon  ·  MAG secondary neon  ·  MINT live/go  ·  AMBER warn
+#   FG/MUTED/FAINT  cool-white text hierarchy
+# Legacy names (ACCENT*/GREEN*/BG2/ENTRY_BG) are aliases so the rest of the
+# class — and the runtime engine logic — stay byte-for-byte unchanged.
 # -----------------------------------------------------------------------------
-BG       = "#0c0e13"      # app canvas
-SURFACE  = "#161b24"      # cards
-SURFACE2 = "#0f131a"      # fields / entries / insets
-BORDER   = "#262e3b"      # hairline borders
-FG       = "#e9edf4"      # primary text
-MUTED    = "#8b95a8"      # secondary text / control labels
-FAINT    = "#5a6677"      # section headers / faint captions
+BG       = "#05070e"      # deep-space canvas
+SURFACE  = "#0a0f1a"      # panel fill
+SURFACE2 = "#070b14"      # fields / entries / insets
+BORDER   = "#16243a"      # hairline borders
+FG       = "#e3ecf7"      # cool-white primary text
+MUTED    = "#6f87a0"      # secondary text / control labels
+FAINT    = "#3b4f66"      # captions / dim chrome
 
-ACCENT     = "#2dd4ff"    # brand accent (cyan)
-ACCENT_HI  = "#62e2ff"    # accent hover
-ACCENT_INK = "#04222c"    # text on accent
-GREEN      = "#2bd576"    # live / success
-GREEN_HI   = "#46e189"
-GREEN_INK  = "#04240f"    # text on green
-RED        = "#f0556a"    # stopped / error
-AMBER      = "#f5b13d"    # warnings / recenter
+CYAN     = "#26e8ff"      # primary neon accent
+CYAN_HI  = "#7af2ff"
+CYAN_INK = "#02181f"
+MAG      = "#ff2f9e"      # secondary neon accent
+MAG_HI   = "#ff74bf"
+MINT     = "#27ffb0"      # live / go
+MINT_HI  = "#73ffcb"
+MINT_INK = "#02160e"
+AMBER    = "#ffb43d"      # warnings / recenter
+RED      = "#ff3b5c"      # stopped / error
 
-# Back-compat aliases (referenced elsewhere in this module).
-BG2      = "#1b212c"      # ghost-button / mute base surface
-ENTRY_BG = SURFACE2
+# Back-compat aliases (referenced elsewhere in this module + engine glue).
+ACCENT     = CYAN
+ACCENT_HI  = CYAN_HI
+ACCENT_INK = CYAN_INK
+GREEN      = MINT
+GREEN_HI   = MINT_HI
+GREEN_INK  = MINT_INK
+BG2        = "#0d1626"    # ghost-button / mute base surface
+ENTRY_BG   = SURFACE2
 
 
 class AvatarStudio:
@@ -142,15 +152,16 @@ class AvatarStudio:
         self._speaking = False
         self._worker = None
 
-        root.title("Avatar Studio")
+        root.title("AVATAR STUDIO ◆ neural pipeline")
         root.configure(bg=BG)
-        root.geometry("1200x880")
-        root.minsize(1000, 640)
+        root.geometry("1240x900")
+        root.minsize(1040, 660)
 
         self._init_style()
         self._build_ui()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_ui()                     # start the UI refresh loop
+        self._animate()                     # start the HUD animation loop
 
     # -------------------------------------------------------------------------
     # STYLING + SMALL UI BUILDERS
@@ -199,57 +210,146 @@ class AvatarStudio:
                         arrowcolor=MUTED, relief="flat")
         style.map("Studio.Vertical.TScrollbar", background=[("active", BORDER)])
 
-    def _add_hover(self, btn, base, hover):
-        """Lighten a flat button on hover (skips disabled state)."""
-        def on_enter(_):
-            if str(btn["state"]) != "disabled":
-                btn.configure(bg=hover)
-        def on_leave(_):
-            if str(btn["state"]) != "disabled":
-                btn.configure(bg=base)
-        btn.bind("<Enter>", on_enter)
-        btn.bind("<Leave>", on_leave)
+    # ---- low-level drawing helpers (neon HUD chrome on Canvas) -------------
+    @staticmethod
+    def _mix(c1, c2, t):
+        """Blend two #rrggbb colors (t=0 -> c1, t=1 -> c2)."""
+        a = [int(c1[i:i+2], 16) for i in (1, 3, 5)]
+        b = [int(c2[i:i+2], 16) for i in (1, 3, 5)]
+        return "#%02x%02x%02x" % tuple(
+            max(0, min(255, int(round(a[k] + (b[k] - a[k]) * t)))) for k in range(3))
 
-    def _btn(self, parent, text, cmd, *, bg, fg, hover,
-             font=("Segoe UI", 10, "bold"), state="normal"):
+    def _round_rect(self, cv, x1, y1, x2, y2, r, **kw):
+        pts = [x1+r, y1, x2-r, y1, x2, y1, x2, y1+r, x2, y2-r, x2, y2,
+               x2-r, y2, x1+r, y2, x1, y2, x1, y2-r, x1, y1+r, x1, y1]
+        return cv.create_polygon(pts, smooth=True, **kw)
+
+    def _glow_text(self, cv, x, y, text, color, font, anchor="w", tags="chrome"):
+        """Fake a neon bloom: dim 1px-offset copies beneath a bright top layer."""
+        dim = self._mix(BG, color, 0.42)
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            cv.create_text(x+dx, y+dy, text=text, fill=dim, font=font,
+                           anchor=anchor, tags=tags)
+        return cv.create_text(x, y, text=text, fill=color, font=font,
+                              anchor=anchor, tags=tags)
+
+    def _draw_panel(self, cv, x1, y1, x2, y2, accent, title, code):
+        """Render one glowing HUD panel: halo + body + corner brackets + header."""
+        R = 14
+        cv.delete("chrome")
+        self._round_rect(cv, x1-1, y1-1, x2+1, y2+1, R+1, fill="",
+                         outline=self._mix(BG, accent, 0.20), width=1, tags="chrome")
+        self._round_rect(cv, x1, y1, x2, y2, R, fill=SURFACE,
+                         outline=self._mix(BG, accent, 0.55), width=1, tags="chrome")
+        L, o = 13, 10
+        for cx, cy, dx, dy in ((x1+o, y1+o, 1, 1), (x2-o, y1+o, -1, 1),
+                               (x1+o, y2-o, 1, -1), (x2-o, y2-o, -1, -1)):
+            cv.create_line(cx, cy, cx+dx*L, cy, fill=accent, width=2,
+                           capstyle="round", tags="chrome")
+            cv.create_line(cx, cy, cx, cy+dy*L, fill=accent, width=2,
+                           capstyle="round", tags="chrome")
+        if title:
+            cv.create_rectangle(x1+18, y1+17, x1+21, y1+30, fill=accent,
+                                outline="", tags="chrome")
+            self._glow_text(cv, x1+30, y1+24, title, accent, ("Consolas", 10, "bold"))
+            if code:
+                cv.create_text(x2-18, y1+24, text=code, anchor="e",
+                               fill=self._mix(accent, BG, 0.35),
+                               font=("Consolas", 9), tags="chrome")
+            cv.create_line(x1+18, y1+39, x2-18, y1+39,
+                           fill=self._mix(SURFACE, accent, 0.22), width=1, tags="chrome")
+
+    def _panel(self, parent, title=None, accent=None, code=""):
+        """A glowing HUD panel drawn on a Canvas; returns the inner content Frame.
+        The canvas auto-resizes to the content's requested height and redraws the
+        chrome, so panels grow/shrink with their widgets."""
+        accent = accent or CYAN
+        holder = tk.Frame(parent, bg=BG); holder.pack(fill="x", pady=(0, 14))
+        cv = tk.Canvas(holder, bg=BG, highlightthickness=0, bd=0, height=64)
+        cv.pack(fill="x")
+        content = tk.Frame(cv, bg=SURFACE)
+        PAD = 18
+        TOP = 48 if title else 18
+        win = cv.create_window(PAD, TOP, anchor="nw", window=content)
+        st = {"h": 0}
+
+        def redraw(_=None):
+            w = cv.winfo_width()
+            if w <= 1:
+                return
+            content.update_idletasks()
+            H = content.winfo_reqheight() + TOP + PAD + 8     # extra bottom breathing room
+            if abs(H - st["h"]) > 1:
+                st["h"] = H
+                cv.configure(height=H)
+            cv.itemconfigure(win, width=w - 2*PAD)
+            self._draw_panel(cv, 3, 3, w - 3, H - 3, accent, title, code)
+        content.bind("<Configure>", redraw)
+        cv.bind("<Configure>", redraw)
+        return content
+
+    def _card(self, parent, title=None):
+        """Back-compat shim: the old flat card is now a glowing HUD panel. Each
+        section gets its own neon accent + console code so the rail reads like a
+        cockpit."""
+        accent, code = CYAN, ""
+        theme = {
+            "SESSION":        (CYAN,  "SYS·00"),
+            "PERFORMANCE":    (CYAN,  "PERF·01"),
+            "REALISM":        (MAG,   "RND·02"),
+            "SCENE & OUTPUT": (MINT,  "OUT·03"),
+            "VOICE":          (MAG,   "TTS·04"),
+            "SPEAK":          (MINT,  "MSG·05"),
+            "ACTIVITY LOG":   (self._mix(CYAN, BG, 0.35), "LOG·06"),
+        }.get(title)
+        if theme:
+            accent, code = theme
+        return self._panel(parent, title, accent=accent, code=code)
+
+    # ---- neon controls -----------------------------------------------------
+    def _btn(self, parent, text, cmd, *, bg, fg, hover, border=None,
+             hover_border=None, font=("Consolas", 11, "bold"), state="normal"):
+        """Flat button with a 1px neon outline that lights up on hover."""
+        border = border or fg
+        hover_border = hover_border or self._mix(border, "#ffffff", 0.3)
         b = tk.Button(parent, text=text, command=cmd, bg=bg, fg=fg, font=font,
                       relief="flat", bd=0, cursor="hand2", activebackground=hover,
-                      activeforeground=fg, state=state, highlightthickness=0,
+                      activeforeground=fg, state=state, highlightthickness=1,
+                      highlightbackground=border, highlightcolor=border,
                       disabledforeground=FAINT)
-        self._add_hover(b, bg, hover)
+
+        def en(_):
+            if str(b["state"]) != "disabled":
+                b.configure(bg=hover, highlightbackground=hover_border)
+
+        def lv(_):
+            if str(b["state"]) != "disabled":
+                b.configure(bg=bg, highlightbackground=border)
+        b.bind("<Enter>", en); b.bind("<Leave>", lv)
         return b
 
     def _chip(self, parent, text, cmd, full=False):
-        b = tk.Button(parent, text=text, command=cmd, bg=SURFACE2, fg=MUTED,
+        base = SURFACE2
+        brd = self._mix(SURFACE2, CYAN, 0.30)
+        hov = self._mix(SURFACE2, CYAN, 0.16)
+        b = tk.Button(parent, text=text, command=cmd, bg=base, fg=MUTED,
                       font=("Segoe UI", 8) if full else ("Consolas", 8),
                       relief="flat", bd=0, cursor="hand2", padx=8, pady=4,
-                      activebackground=BORDER, activeforeground=FG,
-                      highlightthickness=0, anchor="w" if full else "center")
-        self._add_hover(b, SURFACE2, BORDER)
+                      activebackground=hov, activeforeground=CYAN,
+                      highlightthickness=1, highlightbackground=brd,
+                      highlightcolor=brd, anchor="w" if full else "center")
+
+        def en(_): b.configure(bg=hov, fg=FG, highlightbackground=CYAN)
+        def lv(_): b.configure(bg=base, fg=MUTED, highlightbackground=brd)
+        b.bind("<Enter>", en); b.bind("<Leave>", lv)
         return b
 
     def _check(self, parent, text, var, cmd=None):
         return tk.Checkbutton(parent, text=text, variable=var, command=cmd,
                               bg=SURFACE, fg=FG, selectcolor=SURFACE2,
-                              activebackground=SURFACE, activeforeground=FG,
+                              activebackground=SURFACE, activeforeground=CYAN,
                               font=("Segoe UI", 9), anchor="w", justify="left",
                               highlightthickness=0, bd=0, padx=0, cursor="hand2")
-
-    def _card(self, parent, title=None):
-        """A floating SURFACE card with a 1px border and an accent-dotted title."""
-        border = tk.Frame(parent, bg=BORDER)
-        border.pack(fill="x", pady=(0, 11))
-        inner = tk.Frame(border, bg=SURFACE)
-        inner.pack(fill="both", padx=1, pady=1)
-        body = tk.Frame(inner, bg=SURFACE)
-        body.pack(fill="both", padx=14, pady=(11, 13))
-        if title:
-            head = tk.Frame(body, bg=SURFACE); head.pack(fill="x", pady=(0, 9))
-            tk.Label(head, text="●", bg=SURFACE, fg=ACCENT,
-                     font=("Segoe UI", 7)).pack(side="left", padx=(0, 6))
-            tk.Label(head, text=title, bg=SURFACE, fg=FAINT,
-                     font=("Segoe UI", 8, "bold")).pack(side="left")
-        return body
 
     def _row(self, parent, label):
         r = tk.Frame(parent, bg=SURFACE); r.pack(fill="x", pady=5)
@@ -257,63 +357,112 @@ class AvatarStudio:
                  font=("Segoe UI", 9)).pack(side="left")
         return r
 
+    def _animate(self):
+        """Lightweight ~16fps loop: breathing status ring + header sweep dot."""
+        self._anim = getattr(self, "_anim", 0) + 1
+        p = abs((self._anim % 24) / 12.0 - 1.0)          # 0..1 triangle wave
+        try:
+            if getattr(self, "running", False):
+                glow = self._mix(SURFACE, MINT, 0.25 + 0.55 * (1 - p))
+            else:
+                glow = self._mix(SURFACE, RED, 0.12 + 0.28 * (1 - p))
+            self.status_canvas.itemconfig(self.status_glow, outline=glow)
+        except Exception:
+            pass
+        try:
+            cvt = self._topcv
+            w = cvt.winfo_width()
+            if w > 160:
+                x = 26 + ((self._anim * 7) % (w - 200))
+                cvt.coords(self._sweep, x-2, self._sweep_y-2, x+2, self._sweep_y+2)
+                cvt.itemconfig(self._sweep, fill=self._mix(CYAN, BG, 0.2 + 0.6*(1-p)))
+        except Exception:
+            pass
+        self.root.after(60, self._animate)
+
     # -------------------------------------------------------------------------
     def _build_ui(self):
-        # ===== TOP APP BAR (full width) =====================================
-        bar = tk.Frame(self.root, bg=BG, height=58)
-        bar.pack(side="top", fill="x", padx=18, pady=(14, 0))
-        bar.pack_propagate(False)
-        tk.Label(bar, text="◆", bg=BG, fg=ACCENT, font=("Segoe UI", 16)).pack(side="left")
-        tk.Label(bar, text="  AVATAR  STUDIO", bg=BG, fg=FG,
-                 font=("Segoe UI", 16, "bold")).pack(side="left")
-        tk.Label(bar, text="LIVE TEST", bg=SURFACE2, fg=MUTED,
-                 font=("Segoe UI", 8, "bold"), padx=9, pady=3).pack(side="left", padx=12)
-        tk.Label(bar, text="real-time AI avatar pipeline", bg=BG, fg=FAINT,
-                 font=("Segoe UI", 9)).pack(side="right")
-        tk.Frame(self.root, bg=BORDER, height=1).pack(side="top", fill="x")
+        # ===== TOP APP BAR (full-width Canvas — glowing brand + telemetry) ==
+        topcv = tk.Canvas(self.root, bg=BG, height=70, highlightthickness=0, bd=0)
+        topcv.pack(side="top", fill="x")
+        self._topcv = topcv
+        self._sweep_y = 56
+        self._sweep = topcv.create_oval(0, 0, 0, 0, fill=CYAN, outline="")
+
+        def _topdraw(_=None):
+            w = topcv.winfo_width()
+            if w <= 1:
+                return
+            topcv.delete("tb")
+            # brand hexagon
+            hx, hy, r = 30, 32, 12
+            pts = []
+            for k in range(6):
+                ang = math.pi / 3 * k - math.pi / 6
+                pts += [hx + r * math.cos(ang), hy + r * math.sin(ang)]
+            topcv.create_polygon(pts, outline=CYAN, fill=self._mix(BG, CYAN, 0.12),
+                                 width=2, tags="tb")
+            topcv.create_oval(hx-3, hy-3, hx+3, hy+3, fill=CYAN, outline="", tags="tb")
+            # wordmark + neon slash
+            self._glow_text(topcv, 56, 32, "AVATAR", FG, ("Consolas", 18, "bold"),
+                            tags="tb")
+            self._glow_text(topcv, 56 + 112, 32, "// STUDIO", CYAN,
+                            ("Consolas", 18, "bold"), tags="tb")
+            # right-side telemetry
+            topcv.create_text(w-26, 24, text="SYS > ONLINE    v2.0", anchor="e",
+                              fill=self._mix(FG, BG, 0.3), font=("Consolas", 9), tags="tb")
+            topcv.create_text(w-26, 42, text="NEURAL AVATAR PIPELINE", anchor="e",
+                              fill=self._mix(CYAN, BG, 0.35), font=("Consolas", 8), tags="tb")
+            # underline rail (fading neon ticks)
+            y = self._sweep_y
+            span = w - 52
+            for i in range(0, span, 7):
+                topcv.create_line(26+i, y, 26+i+4, y,
+                                  fill=self._mix(CYAN, BG, 0.55 + 0.4*(i/float(span))),
+                                  width=1, tags="tb")
+            topcv.tag_raise(self._sweep)
+        topcv.bind("<Configure>", _topdraw)
+        tk.Frame(self.root, bg=self._mix(BG, CYAN, 0.18), height=1).pack(
+            side="top", fill="x")
 
         # ===== BODY: preview (left) + control rail (right) ==================
         bodyf = tk.Frame(self.root, bg=BG)
         bodyf.pack(side="top", fill="both", expand=True)
 
-        # ---- LEFT: framed live preview with status + fps + diagnostics -----
+        # ---- LEFT: glowing HUD feed panel (status ring + fps + diagnostics)
         left = tk.Frame(bodyf, bg=BG)
-        left.pack(side="left", fill="both", expand=True, padx=(18, 9), pady=16)
+        left.pack(side="left", fill="both", expand=True, padx=(18, 9), pady=14)
+        pv = self._panel(left, "LIVE FEED", accent=CYAN, code="CAM·00")
 
-        pv_border = tk.Frame(left, bg=BORDER)
-        pv_border.pack(fill="both", expand=True)
-        pv = tk.Frame(pv_border, bg=SURFACE)
-        pv.pack(fill="both", expand=True, padx=1, pady=1)
-
-        # preview header: live status dot + label (left), fps (right)
-        ph = tk.Frame(pv, bg=SURFACE, height=40); ph.pack(side="top", fill="x")
-        ph.pack_propagate(False)
-        self.status_canvas = tk.Canvas(ph, width=14, height=14, bg=SURFACE,
+        # header: breathing status ring + state label (left), fps (right)
+        ph = tk.Frame(pv, bg=SURFACE); ph.pack(fill="x", pady=(0, 8))
+        self.status_canvas = tk.Canvas(ph, width=22, height=22, bg=SURFACE,
                                        highlightthickness=0)
-        self.status_canvas.pack(side="left", padx=(15, 0))
-        self.status_dot = self.status_canvas.create_oval(2, 2, 12, 12,
-                                                         fill=RED, outline="")
-        self.status_lbl = tk.Label(ph, text="stopped", bg=SURFACE, fg=FG,
-                                   font=("Segoe UI", 10, "bold"))
+        self.status_canvas.pack(side="left")
+        self.status_glow = self.status_canvas.create_oval(3, 3, 19, 19,
+                                                          outline=SURFACE, width=2)
+        self.status_dot = self.status_canvas.create_oval(7, 7, 15, 15,
+                                                        fill=RED, outline="")
+        self.status_lbl = tk.Label(ph, text="OFFLINE", bg=SURFACE, fg=FG,
+                                   font=("Consolas", 10, "bold"))
         self.status_lbl.pack(side="left", padx=8)
-        self.fps_lbl = tk.Label(ph, text="", bg=SURFACE, fg=MUTED,
+        self.fps_lbl = tk.Label(ph, text="", bg=SURFACE, fg=CYAN,
                                 font=("Consolas", 10))
-        self.fps_lbl.pack(side="right", padx=15)
-        tk.Frame(pv, bg=BORDER, height=1).pack(side="top", fill="x")
+        self.fps_lbl.pack(side="right")
 
-        # the composited frame (black stage)
-        stage = tk.Frame(pv, bg="#000000")
-        stage.pack(side="top", fill="both", expand=True, padx=10, pady=10)
+        # the composited frame (black stage with a neon hairline frame)
+        stageb = tk.Frame(pv, bg=self._mix(BG, CYAN, 0.22))
+        stageb.pack(fill="both", expand=True)
+        stage = tk.Frame(stageb, bg="#000000")
+        stage.pack(fill="both", expand=True, padx=1, pady=1)
         self.preview = tk.Label(stage, bg="#000000", bd=0)
         self.preview.pack(fill="both", expand=True)
 
         # footer: per-stage timing readout
-        tk.Frame(pv, bg=BORDER, height=1).pack(side="top", fill="x")
-        pf = tk.Frame(pv, bg=SURFACE, height=30); pf.pack(side="top", fill="x")
-        pf.pack_propagate(False)
-        self.diag_lbl = tk.Label(pf, text="ready", bg=SURFACE, fg=FAINT,
-                                 font=("Consolas", 9))
-        self.diag_lbl.pack(side="left", padx=15)
+        pf = tk.Frame(pv, bg=SURFACE); pf.pack(fill="x", pady=(8, 0))
+        self.diag_lbl = tk.Label(pf, text="// ready", bg=SURFACE,
+                                 fg=self._mix(CYAN, BG, 0.3), font=("Consolas", 9))
+        self.diag_lbl.pack(side="left")
 
         self._show_placeholder()
 
@@ -343,24 +492,30 @@ class AvatarStudio:
 
         # ---- SESSION -------------------------------------------------------
         c = self._card(right, "SESSION")
-        self.start_btn = self._btn(c, "START", self.start, bg=GREEN, fg=GREEN_INK,
-                                   hover=GREEN_HI, font=("Segoe UI", 12, "bold"))
-        self.start_btn.pack(fill="x", ipady=9, pady=(0, 6))
-        self.stop_btn = self._btn(c, "STOP", self.stop, bg=BG2, fg=FG, hover=BORDER,
-                                  font=("Segoe UI", 12, "bold"), state="disabled")
-        self.stop_btn.pack(fill="x", ipady=9, pady=(0, 9))
-        self.char_btn = self._btn(c, "LOAD CHARACTER", self._load_character,
-                                  bg=SURFACE2, fg=ACCENT, hover=BORDER,
-                                  font=("Segoe UI", 9, "bold"))
+        self.start_btn = self._btn(
+            c, "START", self.start, bg=MINT, fg=MINT_INK,
+            hover=self._mix(MINT, "#ffffff", 0.18), border=MINT, hover_border="#ffffff",
+            font=("Consolas", 12, "bold"))
+        self.start_btn.pack(fill="x", ipady=9, pady=(0, 7))
+        self.stop_btn = self._btn(
+            c, "STOP", self.stop, bg=self._mix(SURFACE2, RED, 0.06), fg=RED,
+            hover=self._mix(SURFACE2, RED, 0.16), border=self._mix(RED, BG, 0.35),
+            hover_border=RED, font=("Consolas", 12, "bold"), state="disabled")
+        self.stop_btn.pack(fill="x", ipady=9, pady=(0, 10))
+        self.char_btn = self._btn(
+            c, "LOAD CHARACTER", self._load_character, bg=SURFACE2, fg=CYAN,
+            hover=self._mix(SURFACE2, CYAN, 0.14), border=self._mix(CYAN, BG, 0.35),
+            hover_border=CYAN, font=("Consolas", 9, "bold"))
         self.char_btn.pack(fill="x", ipady=6, pady=(0, 4))
         tk.Label(c, text="any face image — celebrity, AI render, cartoon",
-                 bg=SURFACE, fg=FAINT, font=("Segoe UI", 8)).pack(anchor="w", pady=(0, 9))
-        self.recenter_btn = self._btn(c, "RECENTER POSE", self.recenter,
-                                      bg=SURFACE2, fg=AMBER, hover=BORDER,
-                                      font=("Segoe UI", 9, "bold"), state="disabled")
+                 bg=SURFACE, fg=FAINT, font=("Consolas", 8)).pack(anchor="w", pady=(0, 9))
+        self.recenter_btn = self._btn(
+            c, "RECENTER POSE", self.recenter, bg=SURFACE2, fg=AMBER,
+            hover=self._mix(SURFACE2, AMBER, 0.14), border=self._mix(AMBER, BG, 0.35),
+            hover_border=AMBER, font=("Consolas", 9, "bold"), state="disabled")
         self.recenter_btn.pack(fill="x", ipady=6)
         tk.Label(c, text="sit upright facing the camera, then click",
-                 bg=SURFACE, fg=FAINT, font=("Segoe UI", 8)).pack(anchor="w", pady=(4, 0))
+                 bg=SURFACE, fg=FAINT, font=("Consolas", 8)).pack(anchor="w", pady=(4, 0))
 
         # ---- PERFORMANCE ---------------------------------------------------
         c = self._card(right, "PERFORMANCE")
@@ -468,15 +623,19 @@ class AvatarStudio:
         self.entry.bind("<Return>", self._on_enter)
 
         brow = tk.Frame(c, bg=SURFACE); brow.pack(fill="x")
-        self.speak_btn = self._btn(brow, "SPEAK", self.speak, bg=ACCENT, fg=ACCENT_INK,
-                                   hover=ACCENT_HI, font=("Segoe UI", 11, "bold"),
-                                   state="disabled")
+        self.speak_btn = self._btn(
+            brow, "SPEAK", self.speak, bg=CYAN, fg=CYAN_INK,
+            hover=self._mix(CYAN, "#ffffff", 0.18), border=CYAN, hover_border="#ffffff",
+            font=("Consolas", 11, "bold"), state="disabled")
         self.speak_btn.pack(side="left", fill="x", expand=True, ipady=6)
+        # plain Button (no hover binding) so toggle_mute's color change persists
         self.mute_btn = tk.Button(brow, text="MUTE", command=self.toggle_mute,
-                                  bg=BG2, fg=FG, font=("Segoe UI", 11, "bold"),
+                                  bg=SURFACE2, fg=MUTED, font=("Consolas", 11, "bold"),
                                   relief="flat", bd=0, width=8, cursor="hand2",
-                                  activebackground=BORDER, state="disabled",
-                                  highlightthickness=0)
+                                  activebackground=self._mix(SURFACE2, RED, 0.16),
+                                  state="disabled", highlightthickness=1,
+                                  highlightbackground=self._mix(MUTED, BG, 0.45),
+                                  highlightcolor=RED)
         self.mute_btn.pack(side="left", padx=(7, 0), ipady=6)
 
         tk.Label(c, text="Quick phrases", bg=SURFACE, fg=FAINT,
@@ -497,21 +656,38 @@ class AvatarStudio:
     # PREVIEW / UI REFRESH (Tk main thread only)
     # -------------------------------------------------------------------------
     def _show_placeholder(self):
-        # A soft vertical gradient (BGR) so the idle stage reads as "designed",
-        # not just a blank black box — with a centered call-to-action.
-        top = np.array((26, 19, 14), np.float32)      # ~ #0e131a
-        bot = np.array((42, 33, 24), np.float32)      # ~ #18212a
-        ramp = np.linspace(0.0, 1.0, PREVIEW_SIZE, dtype=np.float32)[:, None, None]
-        img = (top * (1 - ramp) + bot * ramp).astype(np.uint8)
-        img = np.repeat(img, PREVIEW_SIZE, axis=1)
-        cx = PREVIEW_SIZE // 2
-        cv2.circle(img, (cx, 232), 30, (255, 212, 45), 2, cv2.LINE_AA)   # accent ring
-        cv2.circle(img, (cx, 232), 4, (255, 212, 45), -1, cv2.LINE_AA)
-        for txt, y, sc, col, th in (("PRESS  START", 300, 1.0, (235, 237, 233), 2),
-                                    ("to bring the avatar to life", 336, 0.5,
-                                     (140, 130, 118), 1)):
+        # A sci-fi HUD "standby" feed: faint grid, corner brackets, a targeting
+        # reticle and telemetry — so the idle stage reads like a cockpit display.
+        S = PREVIEW_SIZE
+        img = np.full((S, S, 3), 8, np.uint8)                 # near-black
+        grid = (30, 24, 14)
+        for x in range(0, S, 32):
+            cv2.line(img, (x, 0), (x, S), grid, 1, cv2.LINE_AA)
+        for y in range(0, S, 32):
+            cv2.line(img, (0, y), (S, y), grid, 1, cv2.LINE_AA)
+        cyan = (255, 232, 38)            # BGR of #26e8ff
+        dim = (110, 86, 28)
+        m, L = 18, 42                    # corner brackets
+        for px, py, dx, dy in ((m, m, 1, 1), (S-m, m, -1, 1),
+                               (m, S-m, 1, -1), (S-m, S-m, -1, -1)):
+            cv2.line(img, (px, py), (px+dx*L, py), cyan, 2, cv2.LINE_AA)
+            cv2.line(img, (px, py), (px, py+dy*L), cyan, 2, cv2.LINE_AA)
+        c = S // 2                       # targeting reticle
+        cv2.circle(img, (c, c-12), 46, dim, 1, cv2.LINE_AA)
+        cv2.circle(img, (c, c-12), 62, (60, 48, 18), 1, cv2.LINE_AA)
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            cv2.line(img, (c+dx*58, c-12+dy*58), (c+dx*78, c-12+dy*78),
+                     cyan, 1, cv2.LINE_AA)
+        cv2.circle(img, (c, c-12), 3, cyan, -1, cv2.LINE_AA)
+        cv2.putText(img, "FEED // STANDBY", (24, 40), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45, cyan, 1, cv2.LINE_AA)
+        cv2.putText(img, "00:00:00", (S-120, 40), cv2.FONT_HERSHEY_SIMPLEX,
+                    0.45, dim, 1, cv2.LINE_AA)
+        for txt, y, sc, col, th in (("AWAITING SIGNAL", c+104, 0.72, cyan, 2),
+                                    ("press START to initialise avatar", c+134, 0.45,
+                                     (150, 140, 120), 1)):
             (w, _), _ = cv2.getTextSize(txt, cv2.FONT_HERSHEY_SIMPLEX, sc, th)
-            cv2.putText(img, txt, (cx - w // 2, y), cv2.FONT_HERSHEY_SIMPLEX,
+            cv2.putText(img, txt, (c - w // 2, y), cv2.FONT_HERSHEY_SIMPLEX,
                         sc, col, th, cv2.LINE_AA)
         self._draw(img)
 
