@@ -87,6 +87,10 @@ POSE_LIMIT = os.environ.get("AVATAR_POSE_LIMIT", "1") == "1"
 # Turns FOLLOW you 1:1 up to KNEE_FRAC*cap, then ease smoothly to the cap (so the
 # avatar tracks your head naturally and only the extreme is clamped to stay clean).
 KNEE_FRAC = 0.7
+# Clamp the driving->avatar scale ratio: the scale estimate jumps on head turns
+# and zoomed the face. A talking head holds a near-constant size, so we allow
+# only tiny variation (breathing) and never the big zoom.
+SCALE_BAND = float(os.environ.get("AVATAR_SCALE_BAND", "0.05"))
 YAW_CAP = float(os.environ.get("AVATAR_YAW_CAP", "30"))    # left/right turn
 PITCH_CAP = float(os.environ.get("AVATAR_PITCH_CAP", "16"))  # up/down (breaks sooner)
 ROLL_CAP = float(os.environ.get("AVATAR_ROLL_CAP", "24"))   # head tilt
