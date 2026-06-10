@@ -91,6 +91,10 @@ KNEE_FRAC = 0.7
 # and zoomed the face. A talking head holds a near-constant size, so we allow
 # only tiny variation (breathing) and never the big zoom.
 SCALE_BAND = float(os.environ.get("AVATAR_SCALE_BAND", "0.05"))
+# Per-frame leak of the pitch/roll neutral toward your current pose, so a baked-in
+# up/down/tilt offset decays to level over a few seconds (your movement still
+# shows as the transient delta). 0 disables. ~0.02 ≈ correct in ~4-5s.
+AUTOCENTER_PITCH = float(os.environ.get("AVATAR_AUTOCENTER_PITCH", "0.02"))
 YAW_CAP = float(os.environ.get("AVATAR_YAW_CAP", "30"))    # left/right turn
 PITCH_CAP = float(os.environ.get("AVATAR_PITCH_CAP", "16"))  # up/down (breaks sooner)
 ROLL_CAP = float(os.environ.get("AVATAR_ROLL_CAP", "24"))   # head tilt
