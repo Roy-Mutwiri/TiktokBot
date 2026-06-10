@@ -157,35 +157,39 @@ class BodyMotionEngine:
                 if self._mask is None:
                     self._build_mask()
             h, w = webcam_frame.shape[:2]
-            res = pose.process(cv2.cvtColor(webcam_frame, cv2.COLOR_BGR2RGB))
-            lm = getattr(res, "pose_landmarks", None)
-            if lm is None:
+            # Pose detection is the cost — run it every POSE_INTERVAL frames and
+            # reuse the last warp params between (the warp+blend below is cheap and
+            # still runs every frame, so the body stays smooth).
+            if self._fc % POSE_INTERVAL == 0 or self._params is None:
+                res = pose.process(cv2.cvtColor(webcam_frame, cv2.COLOR_BGR2RGB))
+                lm = getattr(res, "pose_landmarks", None)
+                if lm is not None:
+                    ls = lm.landmark[11]; rs = lm.landmark[12]   # shoulders
+                    if ls.visibility >= 0.4 and rs.visibility >= 0.4:
+                        lx, ly = ls.x * w, ls.y * h
+                        rx, ry = rs.x * w, rs.y * h
+                        cx = (lx + rx) / 2.0; cy = (ly + ry) / 2.0
+                        width = float(np.hypot(lx - rx, ly - ry)) + 1e-3
+                        roll = float(np.degrees(np.arctan2(ly - ry, lx - rx)))
+                        if self._ref is None:
+                            self._ref = (cx, cy, width, roll)
+                        else:
+                            ref_cx, ref_cy, ref_w, ref_roll = self._ref
+                            d_roll = self._f_roll(-(roll - ref_roll))
+                            d_x = self._f_dx(-(cx - ref_cx) / ref_w)
+                            d_y = self._f_dy((cy - ref_cy) / ref_w)
+                            d_sc = self._f_sc(width / ref_w - 1.0)
+                            angle = float(np.clip(d_roll * ROLL_GAIN, -MAX_ROLL, MAX_ROLL))
+                            tx = float(np.clip(d_x * ref_w * SHIFT_GAIN * (FRAME / w),
+                                               -MAX_SHIFT, MAX_SHIFT))
+                            ty = float(np.clip(d_y * ref_w * LEAN_GAIN * (FRAME / h),
+                                               -MAX_SHIFT, MAX_SHIFT))
+                            scale = 1.0 + float(np.clip(d_sc * SCALE_GAIN,
+                                                        -MAX_SCALE, MAX_SCALE))
+                            self._params = (angle, tx, ty, scale)
+            if self._params is None:
                 return avatar_frame
-            ls = lm.landmark[11]; rs = lm.landmark[12]   # left / right shoulder
-            if ls.visibility < 0.4 or rs.visibility < 0.4:
-                return avatar_frame
-
-            lx, ly = ls.x * w, ls.y * h
-            rx, ry = rs.x * w, rs.y * h
-            cx = (lx + rx) / 2.0; cy = (ly + ry) / 2.0
-            width = float(np.hypot(lx - rx, ly - ry)) + 1e-3
-            roll = float(np.degrees(np.arctan2(ly - ry, lx - rx)))   # shoulder tilt
-
-            if self._ref is None:
-                self._ref = (cx, cy, width, roll)
-                return avatar_frame
-            ref_cx, ref_cy, ref_w, ref_roll = self._ref
-
-            # relative, normalized motion (mirror x: webcam is mirrored vs avatar)
-            d_roll = self._f_roll(-(roll - ref_roll))
-            d_x = self._f_dx(-(cx - ref_cx) / ref_w)     # in shoulder-widths
-            d_y = self._f_dy((cy - ref_cy) / ref_w)
-            d_sc = self._f_sc(width / ref_w - 1.0)
-
-            angle = float(np.clip(d_roll * ROLL_GAIN, -MAX_ROLL, MAX_ROLL))
-            tx = float(np.clip(d_x * ref_w * SHIFT_GAIN * (FRAME / w), -MAX_SHIFT, MAX_SHIFT))
-            ty = float(np.clip(d_y * ref_w * LEAN_GAIN * (FRAME / h), -MAX_SHIFT, MAX_SHIFT))
-            scale = 1.0 + float(np.clip(d_sc * SCALE_GAIN, -MAX_SCALE, MAX_SCALE))
+            angle, tx, ty, scale = self._params
 
             M = cv2.getRotationMatrix2D((FRAME / 2.0, float(self._pivot_y)), angle, scale)
             M[0, 2] += tx
