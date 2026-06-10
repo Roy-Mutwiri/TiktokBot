@@ -315,7 +315,8 @@ def _open_webcam():
             if cap is not None:
                 name = dict(cams).get(idx, "?")
                 print(f"[MAIN] webcam: '{name}' (index {idx}) delivering frames.")
-                return cap
+                from webcam_thread import ThreadedCamera
+                return ThreadedCamera(cap)        # latest-frame buffer (low latency)
         names = ", ".join(f"{i}:'{n}'" for i, n in cams)
         busy = real[0][1] if real else "your webcam"
         print(f"[MAIN] REAL webcam unavailable — '{busy}' is busy or off. "
@@ -328,7 +329,8 @@ def _open_webcam():
             cap = _try_open(idx)
             if cap is not None:
                 print(f"[MAIN] webcam: index {idx} (backend {be}) delivering frames.")
-                return cap
+                from webcam_thread import ThreadedCamera
+                return ThreadedCamera(cap)        # latest-frame buffer (low latency)
     print("[MAIN] no webcam delivered frames (in use by another app?).")
     return None
 
