@@ -100,6 +100,11 @@ SCALE_BAND = float(os.environ.get("AVATAR_SCALE_BAND", "0.05"))
 # up/down/tilt offset decays to level over a few seconds (your movement still
 # shows as the transient delta). 0 disables. ~0.02 ≈ correct in ~4-5s.
 AUTOCENTER_PITCH = float(os.environ.get("AVATAR_AUTOCENTER_PITCH", "0.02"))
+# WIDE-MOUTH GUARD: per-element soft-clamp on the expression delta (LP exp values
+# are ~0.003 typical, 0.027 max). A wide-open mouth/phoneme drives a big jaw exp
+# delta that balloons the lower face; tanh-clamping each element to ±this keeps a
+# natural max jaw drop (GFPGAN then sharpens teeth). 0 disables.
+MOUTH_GUARD = float(os.environ.get("AVATAR_MOUTH_GUARD", "0.04"))
 # SAFE-ZONE defaults: one-shot reenactment stays clean inside ~30deg yaw / ~10deg
 # pitch; beyond that the unseen geometry stretches/melts. Knee-eased (not hard
 # stop), and the Studio "Safe/Cinematic/Free" pose preset can widen this.
