@@ -27,8 +27,9 @@ CROP_PAD = 2.0                   # square crop = this * face box (portrait frami
 MIN_FACE_FRAC = 0.07             # ignore tiny faces (want sharp, large faces)
 # fine yaw buckets (deg) across the FULL profile range — a dedicated turn clip
 # has real data all the way to ±90, so capture it.
-YAW_BUCKETS = [-85, -72, -60, -48, -38, -28, -18, -9, 0, 9, 18, 28, 38, 48, 60, 72, 85]
-BUCKET_HALF = 7.0                # a frame falls in a bucket if within this many deg
+YAW_BUCKETS = [-85, -72, -60, -52, -44, -36, -28, -21, -14, -7, 0,
+               7, 14, 21, 28, 36, 44, 52, 60, 72, 85]   # ~7deg steps = smooth
+BUCKET_HALF = 5.0                # a frame falls in a bucket if within this many deg
 MAX_PITCH = 22.0                 # reject strongly up/down frames for the main set
 MIN_SHARPNESS = 4.0              # phone turn-clips read "soft" on Laplacian; keep them
 
@@ -52,6 +53,10 @@ def main(videos):
         return
     W = eng.wrapper
     mesh = eng._get_mesh()
+    import mediapipe as mp
+    eye_mesh = mp.solutions.face_mesh.FaceMesh(static_image_mode=True,
+                                               max_num_faces=1, refine_landmarks=False,
+                                               min_detection_confidence=0.4)
 
     # best[bucket] = (score, crop_bgr, yaw, pitch)  — pooled across ALL videos
     best = {}
@@ -89,8 +94,11 @@ def main(videos):
             b = min(YAW_BUCKETS, key=lambda c: abs(c - yaw))
             if abs(b - yaw) > BUCKET_HALF:
                 continue
-            if b not in best or sharp > best[b][0]:
-                best[b] = (sharp, crop.copy(), yaw, pitch, os.path.basename(video_path))
+            # prefer EYES-OPEN frames (reject blinks); profiles can't be measured
+            # (one eye hidden) so they're not penalised.
+            score = sharp * _eye_open(crop, eye_mesh)
+            if b not in best or score > best[b][0]:
+                best[b] = (score, crop.copy(), yaw, pitch, os.path.basename(video_path))
         cap.release()
 
     if not best:
@@ -133,6 +141,26 @@ def main(videos):
     print(f"[BUILD] yaw coverage: {min(yaws):+d} to {max(yaws):+d} deg")
     print(f"[BUILD] saved to {OUT_DIR}/  -> the engine will load these as the "
           f"multi-angle character.")
+
+
+def _eye_open(crop, eye_mesh):
+    """EAR-based eyes-open score: 1.0 open, ~0.25 closed (blink), 1.0 if the eyes
+    can't be measured (profile) so we never penalise valid profile frames."""
+    try:
+        h, w = crop.shape[:2]
+        res = eye_mesh.process(cv2.cvtColor(crop, cv2.COLOR_BGR2RGB))
+        if not res.multi_face_landmarks:
+            return 1.0
+        lm = res.multi_face_landmarks[0].landmark
+        def ear(top, bot, l, r):
+            import math
+            v = abs(lm[top].y - lm[bot].y) * h
+            hor = math.hypot((lm[l].x - lm[r].x) * w, (lm[l].y - lm[r].y) * h) + 1e-6
+            return v / hor
+        e = max(ear(159, 145, 33, 133), ear(386, 374, 362, 263))   # best of both eyes
+        return 1.0 if e > 0.16 else 0.25
+    except Exception:
+        return 1.0
 
 
 _LAST_BOX = {}      # persistent (cx, cy, side) so profile frames (no detection)
