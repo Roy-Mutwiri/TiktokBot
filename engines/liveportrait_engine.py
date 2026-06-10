@@ -126,7 +126,8 @@ ROLL_CAP = float(os.environ.get("AVATAR_ROLL_CAP", "24"))   # head tilt
 # Opt in with AVATAR_MULTIREF=1 (or the Studio "Extended turning" checkbox).
 MULTI_REF = os.environ.get("AVATAR_MULTIREF", "1") == "1"
 MULTI_REF_YAWS = [-45.0, -30.0, -15.0, 15.0, 30.0, 45.0]  # generated view yaw offsets
-YAW_CAP_MULTI = float(os.environ.get("AVATAR_YAW_CAP_MULTI", "52"))  # cap when multi-ref on
+YAW_CAP_MULTI = float(os.environ.get("AVATAR_YAW_CAP_MULTI", "66"))  # cap when multi-ref on
+#  (real profile clip gives views to ~±60 -> turn that far cleanly with REAL data)
 REF_SWITCH_HYST = 5.0          # deg hysteresis so the active view doesn't flicker
 
 
