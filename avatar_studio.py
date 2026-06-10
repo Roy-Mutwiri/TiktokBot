@@ -365,7 +365,7 @@ class AvatarStudio:
         # ---- PERFORMANCE ---------------------------------------------------
         c = self._card(right, "PERFORMANCE")
         r = self._row(c, "Quality preset")
-        self.quality_var = tk.StringVar(value="Balanced")
+        self.quality_var = tk.StringVar(value="Delulu (recommended)")
         ttk.Combobox(r, textvariable=self.quality_var, values=QUALITY_LABELS,
                      state="readonly", width=18,
                      style="Studio.TCombobox").pack(side="right")
@@ -1026,9 +1026,15 @@ class AvatarStudio:
             ee.set_level(p["enhance"])
         except Exception:
             pass
+        if self.engines and "restore" in self.engines:
+            try:
+                self.engines["restore"].every_n = p.get("restore_every", 2)
+            except Exception:
+                pass
         self._log_msg(f"[studio] quality: {self.quality_var.get()} "
                       f"(LP every {p['lp']}, enhance {p['enhance']}, "
-                      f"body {'on' if p['body'] else 'off'})")
+                      f"body {'on' if p['body'] else 'off'}, "
+                      f"restore every {p.get('restore_every', 2)})")
 
     def _on_stab(self):
         if self.engines:
