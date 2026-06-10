@@ -1004,6 +1004,13 @@ class AvatarStudio:
                         from faceswap_engine import FaceSwapEngine
                         self._log_msg("[studio] loading face-swap (insightface + inswapper)...")
                         self.swap_engine = FaceSwapEngine(self._char_path or _character_path())
+                        # CHARACTER identity from the training folder (all angles),
+                        # averaged + incremental so daily-added photos fold in.
+                        tdir = os.path.join(PROJECT_DIR, "Haddan")
+                        if self.swap_engine.ready and os.path.isdir(tdir):
+                            n = self.swap_engine.set_source_from_folder(tdir)
+                            if n:
+                                self._log_msg(f"[studio] character trained from {n} photos (Haddan)")
                     except Exception as exc:
                         self._log_msg(f"[studio] face-swap load failed: {exc}")
                         self.swap_var.set(False)
