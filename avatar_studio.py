@@ -206,6 +206,13 @@ class AvatarStudio:
                        activebackground=BG, activeforeground=FG,
                        font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 0))
 
+        # webcam-driven upper-body motion (shoulders sway/lean with you)
+        self.body_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(right, text="Live body motion (torso follows you)",
+                       variable=self.body_var, bg=BG, fg=FG, selectcolor=BG2,
+                       activebackground=BG, activeforeground=FG,
+                       font=("Segoe UI", 9)).pack(anchor="w", pady=(0, 0))
+
         # extended turning via multi-view references (OFF = bulletproof default)
         self.multiref_var = tk.BooleanVar(value=False)
         tk.Checkbutton(right, text="Extended turning (multi-view)  [experimental]",
@@ -402,8 +409,9 @@ class AvatarStudio:
                     self._log_msg(f"[studio] OBS cam unavailable ({exc}) — preview only.")
                     obs = None
 
+            from body_motion import BodyMotionEngine
             self.engines = {"lp": lp, "mt": mt, "comp": comp, "enh": enhance_engine,
-                            "chart": TradingView("XAUUSD")}
+                            "chart": TradingView("XAUUSD"), "body": BodyMotionEngine()}
             self.tts = tts
             self.cap = cap
             self.obs_cam = obs
@@ -494,6 +502,7 @@ class AvatarStudio:
             if not recentered and frame_count == int(FPS * 2):
                 try:
                     lp.recenter()
+                    self.engines["body"].recenter()
                     self._log_msg("[studio] neutral pose set (auto). "
                                   "Press RECENTER if it still looks tilted.")
                 except Exception:
@@ -514,6 +523,15 @@ class AvatarStudio:
                 errs += 1
                 if errs <= 3:
                     self._log_msg(f"[studio] LP frame error: {exc}")
+
+            # --- upper-body motion: warp the torso to follow YOUR shoulders ----
+            # Runs every frame (full webcam rate) so the body stays alive even on
+            # cached-LP frames. Only when a face is present (else chart/hold).
+            if self.body_var.get() and getattr(lp, "_face_found", False):
+                try:
+                    ai = self.engines["body"].process(driving, ai)
+                except Exception:
+                    pass
 
             # --- face-loss -> trading chart scene -----------------------------
             # When the webcam can't see the face (operator looks away/down) the
@@ -658,6 +676,7 @@ class AvatarStudio:
         if self.engines and self.running:
             try:
                 self.engines["lp"].recenter()
+                self.engines["body"].recenter()
                 self._log_msg("[studio] pose recentered — hold still, facing forward.")
             except Exception as exc:
                 self._log_msg(f"[studio] recenter failed: {exc}")
