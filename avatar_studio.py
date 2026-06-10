@@ -508,6 +508,7 @@ class AvatarStudio:
                             "restore": restore}
             self._on_quality()        # apply the selected quality preset at boot
             self._on_tilt()           # apply max-tilt (pitch) cap at boot
+            self._on_turncap()        # apply max-turn (yaw) cap at boot
             self.tts = tts
             self.cap = cap
             self.obs_cam = obs
