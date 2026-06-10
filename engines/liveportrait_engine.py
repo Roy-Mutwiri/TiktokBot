@@ -200,21 +200,26 @@ class LivePortraitEngine:
             f.reset()
         self._euro_box.reset()
 
-    def _soft_limit(self, angle_d, angle_ref, cap_deg):
-        """tanh soft-clip of (driving - reference) head angle to +/- cap_deg.
-
-        Small deltas pass ~1:1 (natural movement); large deltas saturate smoothly
-        so the head never turns past the clean reenactment range. Works on the
-        torch tensors LivePortrait uses for pitch/yaw/roll (degrees)."""
+    def _knee_limit(self, delta, cap_deg):
+        """Soft-clip with a KNEE: pass the angle through 1:1 up to KNEE_FRAC*cap
+        (so normal turns follow you exactly), then smoothly ease to the cap. This
+        avoids the tanh's habit of shrinking even moderate turns. Tensor-safe."""
         torch = self._torch
-        delta = angle_d - angle_ref
-        return angle_ref + cap_deg * torch.tanh(delta / cap_deg)
+        knee = KNEE_FRAC * cap_deg
+        span = max(1e-3, cap_deg - knee)
+        ad = delta.abs()
+        sgn = torch.sign(delta)
+        excess = (ad - knee).clamp(min=0.0)
+        mag = torch.where(ad <= knee, ad, knee + span * torch.tanh(excess / span))
+        return sgn * mag
+
+    def _soft_limit(self, angle_d, angle_ref, cap_deg):
+        """Knee-limited absolute angle: follows 1:1 until ~KNEE_FRAC*cap, eases to cap."""
+        return angle_ref + self._knee_limit(angle_d - angle_ref, cap_deg)
 
     def _limited_delta(self, angle_d, angle_ref, cap_deg):
-        """tanh-saturated DELTA (driving - reference), capped to +/- cap_deg."""
-        torch = self._torch
-        delta = angle_d - angle_ref
-        return cap_deg * torch.tanh(delta / cap_deg)
+        """Knee-limited DELTA (driving - reference)."""
+        return self._knee_limit(angle_d - angle_ref, cap_deg)
 
     def _select_ref(self, dyaw):
         """Pick the reference view whose base yaw is nearest the desired turn,
