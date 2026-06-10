@@ -159,7 +159,12 @@ def _eye_open(crop, eye_mesh):
             hor = math.hypot((lm[l].x - lm[r].x) * w, (lm[l].y - lm[r].y) * h) + 1e-6
             return v / hor
         e = max(ear(159, 145, 33, 133), ear(386, 374, 362, 263))   # best of both eyes
-        return 1.0 if e > 0.16 else 0.25
+        # stricter: heavily penalise droopy/half-closed lids, not just full blinks
+        if e > 0.22:
+            return 1.0
+        if e > 0.17:
+            return 0.5
+        return 0.12
     except Exception:
         return 1.0
 

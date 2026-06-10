@@ -31,6 +31,9 @@ MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "llama3.2:3b")
 HISTORY_TURNS = int(os.environ.get("AVATAR_BRAIN_HISTORY", "6"))   # user+assistant pairs kept
 MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "120"))  # short = fast + speakable
 TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.8"))
+# Keep the model RESIDENT in VRAM so it doesn't unload between questions and pay
+# the ~45s cold-load again mid-stream. -1 = never unload; or "30m".
+KEEP_ALIVE = os.environ.get("AVATAR_BRAIN_KEEPALIVE", "30m")
 
 # The avatar's character. Override with AVATAR_BRAIN_PERSONA.
 DEFAULT_PERSONA = os.environ.get("AVATAR_BRAIN_PERSONA", (
@@ -110,6 +113,7 @@ class LLMBrain:
             "model": self.model,
             "messages": messages,
             "stream": False,
+            "keep_alive": KEEP_ALIVE,
             "options": {"temperature": TEMPERATURE, "num_predict": MAX_TOKENS},
         }
         try:
