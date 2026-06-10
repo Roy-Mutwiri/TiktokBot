@@ -634,6 +634,11 @@ class AvatarStudio:
 
         # ---- SPEAK ---------------------------------------------------------
         c = self._card(right, "SPEAK")
+        # AI brain: when ON, the avatar ANSWERS your prompt in character (Ollama)
+        # instead of reading it verbatim.
+        self.brain_var = tk.BooleanVar(value=False)
+        self._check(c, "AI brain (Ollama) — answer in character",
+                    self.brain_var, self._on_brain_toggle).pack(anchor="w", pady=(0, 6))
         self.entry = tk.Text(c, height=3, bg=SURFACE2, fg=FG, insertbackground=ACCENT,
                              font=("Segoe UI", 11), relief="flat", wrap="word",
                              padx=9, pady=7, highlightthickness=1,
