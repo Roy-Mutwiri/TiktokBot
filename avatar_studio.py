@@ -54,6 +54,17 @@ TARGET_FRAME_TIME = 1.0 / FPS
 NO_FACE_SECONDS = 1.5          # no face for this long -> switch to charts
 CHART_FADE_STEP = 0.12         # crossfade speed per frame (~0.5s transition)
 
+MOTION_THRESH = 7.0            # mean 64x64 gray-diff above which LP runs every frame
+
+# Quality presets -> (lp_interval, enhance level, body motion). Smooth maximises
+# fps (LP amortised + light enhance + no body warp); Sharp maximises detail.
+QUALITY_PRESETS = {
+    "Smooth (max fps)":      dict(lp=3, enhance="light", body=False),
+    "Balanced":              dict(lp=2, enhance="light", body=True),
+    "Sharp (max detail)":    dict(lp=1, enhance="full",  body=True),
+}
+QUALITY_LABELS = list(QUALITY_PRESETS.keys())
+
 QUICK_PHRASES = [
     "Hey everyone, welcome back to the stream.",
     "Gold is pushing into a key resistance level right now.",
@@ -100,6 +111,7 @@ class AvatarStudio:
         self._frame_lock = threading.Lock()
         self._log_q = queue.Queue()
         self._fps = 0.0
+        self._diag = ""                      # per-stage ms readout
         self._speaking = False
         self._worker = None
 
@@ -173,6 +185,37 @@ class AvatarStudio:
         self.interval_var = tk.IntVar(value=2)
         ttk.Spinbox(irow, from_=1, to=4, width=4, textvariable=self.interval_var,
                     command=self._on_interval).pack(side="right")
+
+        # quality preset (sets fps/detail tradeoff: LP interval + enhance + body)
+        qrow = tk.Frame(right, bg=BG); qrow.pack(fill="x", pady=2)
+        tk.Label(qrow, text="Quality", bg=BG, fg=FG, font=("Segoe UI", 8)).pack(side="left")
+        self.quality_var = tk.StringVar(value="Balanced")
+        ttk.Combobox(qrow, textvariable=self.quality_var, values=QUALITY_LABELS,
+                     state="readonly", width=18).pack(side="right")
+        self.quality_var.trace_add("write", self._on_quality)
+
+        # stabilization (smooths head pose/expression — reduces melt/jitter)
+        srow2 = tk.Frame(right, bg=BG); srow2.pack(fill="x", pady=2)
+        tk.Label(srow2, text="Stabilization", bg=BG, fg=FG,
+                 font=("Segoe UI", 8)).pack(side="left")
+        self.stab_var = tk.IntVar(value=40)
+        ttk.Scale(srow2, from_=0, to=100, variable=self.stab_var, length=140,
+                  command=lambda e: self._on_stab()).pack(side="right")
+
+        # gaze lock (keep eyes toward camera even when you glance away)
+        grow = tk.Frame(right, bg=BG); grow.pack(fill="x", pady=2)
+        self.gaze_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(grow, text="Lock gaze", variable=self.gaze_var, bg=BG, fg=FG,
+                       selectcolor=BG2, activebackground=BG, activeforeground=FG,
+                       command=self._on_gaze, font=("Segoe UI", 8)).pack(side="left")
+        self.gaze_var2 = tk.IntVar(value=80)
+        ttk.Scale(grow, from_=0, to=100, variable=self.gaze_var2, length=120,
+                  command=lambda e: self._on_gaze()).pack(side="right")
+
+        # live per-stage timing readout
+        self.diag_lbl = tk.Label(right, text="", bg=BG, fg="#7fa6c0",
+                                 font=("Consolas", 8))
+        self.diag_lbl.pack(anchor="w", pady=(2, 0))
 
         # min face size gate (below this -> too far -> hold/charts, never a bad face)
         mrow = tk.Frame(right, bg=BG); mrow.pack(fill="x", pady=2)
@@ -320,6 +363,8 @@ class AvatarStudio:
             if frame is not None:
                 self._draw(frame)
             self.fps_lbl.configure(text=f"{self._fps:4.1f} fps")
+            if self._diag:
+                self.diag_lbl.configure(text=self._diag)
             # While a heavy voice generates a NEW line the GPU is busy and the
             # preview briefly stalls — show why so it doesn't look frozen.
             if self.tts is not None and getattr(self.tts, "synthesizing", False):
@@ -453,6 +498,9 @@ class AvatarStudio:
         in_chart = False                 # for edge-triggered logging
         fps_t = time.perf_counter()
         next_tick = time.monotonic()
+        # per-stage timing accumulators (for the [DIAG] readout)
+        t_read = t_lp = t_body = t_enh = 0.0
+        prev_small = None                # for motion-adaptive LP scheduling
 
         while self.running:
             # No real camera? Show a clear message instead of running the
@@ -471,12 +519,21 @@ class AvatarStudio:
                 time.sleep(0.1)
                 continue
 
+            _t = time.perf_counter()
             driving = last_frame
             if self.cap is not None:
                 ok, fr = self.cap.read()
                 if ok and fr is not None:
                     driving = cv2.resize(fr, (FRAME_SIZE, FRAME_SIZE))
                     last_frame = driving
+            t_read += time.perf_counter() - _t
+
+            # motion-adaptive LP: measure how much the frame changed (cheap 64x64
+            # gray diff). Big movement -> run LP THIS frame (no smear); still ->
+            # let the interval amortize it.
+            small = cv2.cvtColor(cv2.resize(driving, (64, 64)), cv2.COLOR_BGR2GRAY).astype(np.int16)
+            motion = float(np.mean(np.abs(small - prev_small))) if prev_small is not None else 99.0
+            prev_small = small
 
             # While a HEAVY expressive voice (Maya1/Chatterbox) is GENERATING a
             # new line, give it the whole GPU: skip LivePortrait + MuseTalk this
@@ -511,10 +568,13 @@ class AvatarStudio:
                 cached_face = None
 
             lp_fresh = False
+            lp_due = (cached_face is None or (frame_count % self.lp_interval) == 0
+                      or motion > MOTION_THRESH)        # run every frame on big motion
+            _t = time.perf_counter()
             try:
                 if getattr(lp, "fallback_mode", False):
                     ai = lp.process_frame(driving); lp_fresh = True
-                elif cached_face is None or (frame_count % self.lp_interval) == 0:
+                elif lp_due:
                     ai = lp.process_frame(driving); cached_face = ai; lp_fresh = True
                 else:
                     ai = cached_face
@@ -523,15 +583,18 @@ class AvatarStudio:
                 errs += 1
                 if errs <= 3:
                     self._log_msg(f"[studio] LP frame error: {exc}")
+            t_lp += time.perf_counter() - _t
 
             # --- upper-body motion: warp the torso to follow YOUR shoulders ----
             # Runs every frame (full webcam rate) so the body stays alive even on
             # cached-LP frames. Only when a face is present (else chart/hold).
+            _t = time.perf_counter()
             if self.body_var.get() and getattr(lp, "_face_found", False):
                 try:
                     ai = self.engines["body"].process(driving, ai)
                 except Exception:
                     pass
+            t_body += time.perf_counter() - _t
 
             # --- face-loss -> trading chart scene -----------------------------
             # When the webcam can't see the face (operator looks away/down) the
@@ -574,10 +637,12 @@ class AvatarStudio:
                         errs += 1
                         if errs <= 3:
                             self._log_msg(f"[studio] mouth error: {exc}")
+                _t = time.perf_counter()
                 try:
                     final = enh.enhance_frame(ai, is_speaking=self._speaking)
                 except Exception:
                     final = ai
+                t_enh += time.perf_counter() - _t
                 if chart_fade > 0.0:      # crossfade avatar <-> chart
                     cf = chart.render(speaking=self._speaking)
                     final = cv2.addWeighted(final, 1.0 - chart_fade, cf, chart_fade, 0)
@@ -597,6 +662,11 @@ class AvatarStudio:
                 now = time.perf_counter()
                 self._fps = 15.0 / (now - fps_t)
                 fps_t = now
+                rd, lpm, bd, en = (x / 15 * 1000 for x in (t_read, t_lp, t_body, t_enh))
+                self._diag = (f"{self._fps:.1f}fps | read {rd:.0f} | LP {lpm:.0f} | "
+                              f"body {bd:.0f} | enh {en:.0f} ms")
+                print("[DIAG] " + self._diag)
+                t_read = t_lp = t_body = t_enh = 0.0
 
             next_tick += TARGET_FRAME_TIME
             sleep_for = next_tick - time.monotonic()

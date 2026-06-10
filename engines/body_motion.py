@@ -48,6 +48,7 @@ MAX_ROLL = 6.0              # clamp degrees
 MAX_SHIFT = 24.0            # clamp px
 MAX_SCALE = 0.07            # clamp +/- scale
 FACE_REDETECT = 12          # re-find the avatar face every N frames (it barely moves)
+POSE_INTERVAL = 2           # run MediaPipe Pose every N frames (reuse params between)
 
 EURO = dict(min_cutoff=1.0, beta=0.02)   # smooth the body signal
 
@@ -61,6 +62,7 @@ class BodyMotionEngine:
         self._facedet = None
         self._facedet_tried = False
         self._ref = None                 # neutral (cx, cy, width, roll)
+        self._params = None              # last (angle, tx, ty, scale) — reused between pose runs
         self._keep_y = int(FRAME * 0.72)  # below-chin line (updated by detection)
         self._pivot_y = self._keep_y
         self._mask = None                # (re)built when _keep_y changes
@@ -80,6 +82,7 @@ class BodyMotionEngine:
     def recenter(self):
         """Reset the neutral body pose (call when sitting upright/centered)."""
         self._ref = None
+        self._params = None
         for f in (self._f_roll, self._f_dx, self._f_dy, self._f_sc):
             f.reset()
 
