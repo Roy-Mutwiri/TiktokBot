@@ -23,7 +23,8 @@ OUT_DIR = "character_views"
 FRAME_SIZE = 512
 SAMPLE_EVERY = 2                 # dense sampling (smooth profile transitions)
 MAX_SAMPLES_PER_VIDEO = 800      # spread this many samples evenly across each video
-CROP_PAD = 2.0                   # square crop = this * face box (portrait framing)
+CROP_PAD = 1.7                   # tighter, HEAD-focused crop -> less torso in each
+#                                  view -> body jumps far less when switching views
 MIN_FACE_FRAC = 0.07             # ignore tiny faces (want sharp, large faces)
 # fine yaw buckets (deg) across the FULL profile range — a dedicated turn clip
 # has real data all the way to ±90, so capture it.
