@@ -405,6 +405,9 @@ class FaceSwapEngine:
                            + frame.astype(np.float32) * em).astype(np.uint8)
                 except Exception:
                     pass
+            # recolour gray hair/beard -> dark (match the character's photos)
+            if HAIR_MATCH:
+                out = self._match_hair(out, bbox)
             return out
         except Exception:
             return frame
