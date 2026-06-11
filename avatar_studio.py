@@ -902,6 +902,13 @@ class AvatarStudio:
                     self._log_msg(f"[studio] OBS cam unavailable ({exc}) — preview only.")
                     obs = None
 
+            # CAMERA cue: input/virtual camera is now detected / ready.
+            try:
+                from startup_sound import play_camera_sound
+                play_camera_sound()
+            except Exception:
+                pass
+
             from body_motion import BodyMotionEngine
             from restore_engine import RestoreEngine
             self._log_msg("[studio] GFPGAN restoration...")
@@ -946,6 +953,12 @@ class AvatarStudio:
 
             self.running = True
             self.booting = False
+            # SCENE cue: the avatar scene is going live now.
+            try:
+                from startup_sound import play_scene_sound
+                play_scene_sound()
+            except Exception:
+                pass
             self._worker = threading.Thread(target=self._loop, daemon=True)
             self._worker.start()
 

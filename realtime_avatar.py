@@ -269,6 +269,13 @@ def startup(cam=None, backend=None, hints=True):
         cam = pyvirtualcam.Camera(**_kw)
     print(f"      -> virtual camera: {cam.device}")
 
+    # CAMERA cue: the virtual camera is now detected / ready.
+    try:
+        from startup_sound import play_camera_sound
+        play_camera_sound()
+    except Exception:
+        pass
+
     if hints:
         print("\n  AVATAR LIVE — open OBS, add Video Capture Device -> select the "
               "virtual cam.")
@@ -407,6 +414,13 @@ def run(eng=None):
     stats_timer = time.perf_counter()
     session_start = time.perf_counter()
     next_tick = time.monotonic()
+
+    # SCENE cue: the avatar scene is now live and about to stream.
+    try:
+        from startup_sound import play_scene_sound
+        play_scene_sound()
+    except Exception:
+        pass
 
     try:
         while state["running"]:
