@@ -517,6 +517,18 @@ class AvatarStudio:
                                    activeforeground=CYAN, highlightthickness=1,
                                    highlightbackground=self._mix(CYAN, BG, 0.5))
         self.music_btn.pack(side="right", padx=(0, 10))
+        # TOP bot-speech mute — silences the VOICE (lips still move).
+        self.speech_btn = tk.Button(ph, text="🎤 SPEECH", command=self._toggle_speech,
+                                    bg=SURFACE2, fg=MAG, font=("Consolas", 10, "bold"),
+                                    relief="flat", bd=0, padx=10, cursor="hand2",
+                                    activebackground=self._mix(SURFACE2, MAG, 0.2),
+                                    activeforeground=MAG, highlightthickness=1,
+                                    highlightbackground=self._mix(MAG, BG, 0.5))
+        self.speech_btn.pack(side="right", padx=(0, 10))
+        # auto-config readout: chosen LLM brain + GPU benchmark
+        self.info_lbl = tk.Label(ph, text=self._autocfg_text(), bg=SURFACE, fg=MUTED,
+                                 font=("Consolas", 9))
+        self.info_lbl.pack(side="left", padx=10)
 
         # the composited frame (black stage with a neon hairline frame)
         stageb = tk.Frame(pv, bg=self._mix(BG, CYAN, 0.22))
