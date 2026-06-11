@@ -188,7 +188,13 @@ class MuseTalkEngine:
                 return mouth
             if self._w2l is not None:
                 synced_full = self._w2l.process_frame(lp_face_frame)
-                return synced_full[y1:y2, x1:x2].copy()
+                mouth = synced_full[y1:y2, x1:x2].copy()
+                # match the now-CodeFormer-sharp face: crisp the synced mouth crop
+                if MOUTH_SHARP > 0 and mouth.shape[0] > 6 and mouth.shape[1] > 6:
+                    blur = cv2.GaussianBlur(mouth, (0, 0), 1.2)
+                    mouth = np.clip(mouth.astype(np.float32) * (1 + MOUTH_SHARP)
+                                    - blur.astype(np.float32) * MOUTH_SHARP, 0, 255).astype(np.uint8)
+                return mouth
             return base_crop
         except Exception as exc:
             if not self._err_printed:
