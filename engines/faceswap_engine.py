@@ -94,8 +94,10 @@ HAIR_COLORS = {
     "black":  dict(hue=0,  sat=25,  valf=0.32),
     "blonde": dict(hue=23, sat=120, valf=1.18),
     "gray":   dict(hue=0,  sat=8,   valf=0.92),
+    "darkbeard": dict(hue=13, sat=75, valf=0.45),   # consistent dark beard (white-Haddan)
 }
 HAIR_COLOR = os.environ.get("AVATAR_SWAP_HAIRCOLOR", "brown")
+BEARD_COLOR = os.environ.get("AVATAR_SWAP_BEARDCOLOR", "darkbeard")
 # EYE COLOUR — recolour the iris (MediaPipe iris landmarks) to a target hue while
 # KEEPING luminance (pupil stays dark, highlights bright, iris shading natural).
 EYE_COLORS = {       # (HSV hue 0-180, saturation)
@@ -165,7 +167,8 @@ class FaceSwapEngine:
         self._kps_vel = None           # smoothed keypoint velocity
         self._lock_emb = None          # locked operator face embedding (identity lock)
         self._frame_box = None         # smoothed auto-frame crop box [cx,cy,side]
-        self._hair_color = HAIR_COLOR  # hair/beard recolour target (live-settable)
+        self._hair_color = HAIR_COLOR  # hair recolour target (live-settable)
+        self._beard_color = BEARD_COLOR  # beard recolour target (consistent dark)
         self._eye_color = EYE_COLOR     # iris recolour target (live-settable)
         self._eyemesh = None
         self._eyemesh_tried = False
