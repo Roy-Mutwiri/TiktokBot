@@ -168,6 +168,12 @@ class AvatarStudio:
         self._worker = None
         if not hasattr(self, "_thinking"):
             self._thinking = False
+        # ONE coherent speech pipeline: every speech source (ASK, SPEAK, quick
+        # phrases, Auto-host) shares ONE brain lock so only one generation runs at
+        # a time (no GPU clash / no jumbled conversation history), and Auto-host
+        # YIELDS for a cooldown after you interact so it never talks over you.
+        self._brain_lock = threading.Lock()
+        self._user_active_until = 0.0        # auto-host pauses until this time
         try:
             from bg_music import BackgroundMusic
             self.music = BackgroundMusic()       # trading-mood bed, ducks under voice
