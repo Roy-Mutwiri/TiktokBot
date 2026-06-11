@@ -1474,6 +1474,26 @@ class AvatarStudio:
                 self._log_msg(f"[autotalk] {exc}")
                 _t.sleep(2.0)
 
+    def _trader_scene(self, avatar, chart, speaking):
+        """Merged trading stream: the live CHART fills the frame and the avatar host
+        sits in a picture-in-picture corner narrating the market (folds the ai_trader
+        concept into one app)."""
+        try:
+            base = chart.render(speaking=speaking)
+            if base.shape[:2] != (FRAME_SIZE, FRAME_SIZE):
+                base = cv2.resize(base, (FRAME_SIZE, FRAME_SIZE))
+            pw = int(FRAME_SIZE * 0.40)                 # square PiP, bottom-right
+            pip = cv2.resize(avatar, (pw, pw))
+            m = 14
+            x2 = FRAME_SIZE - m; x1 = x2 - pw
+            y2 = FRAME_SIZE - m; y1 = y2 - pw
+            cv2.rectangle(base, (x1 - 3, y1 - 3), (x2 + 3, y2 + 3), (18, 18, 18), -1)
+            cv2.rectangle(base, (x1 - 3, y1 - 3), (x2 + 3, y2 + 3), (0, 215, 255), 2)
+            base[y1:y2, x1:x2] = pip
+            return base
+        except Exception:
+            return avatar
+
     def _load_character(self):
         """Pick ANY face image as the avatar character (no training needed).
 
