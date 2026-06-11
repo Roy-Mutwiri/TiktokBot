@@ -34,7 +34,7 @@ except Exception:
 VOICE_VRAM = [("chatterbox", 3.5), ("kokoro", 0.4), ("edge", 0.0)]   # preference order
 BRAIN_VRAM = [("qwen2.5:14b", 9.0), ("qwen2.5:7b", 4.7),
               ("llama3.1:8b", 5.0), ("llama3.2:3b", 2.0)]            # best -> smallest
-VIDEO_RESERVE = 6.0     # GB held back for LivePortrait + mouth-sync + restore + overhead
+VIDEO_RESERVE = 7.0     # GB held back for LivePortrait + mouth-sync + restore + overhead
 
 
 def _ollama_models():
