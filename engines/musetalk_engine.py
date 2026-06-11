@@ -212,11 +212,11 @@ class MuseTalkEngine:
         mcx = (x1 + x2) // 2
         lip_y = (y1 + y2) // 2                            # lip line (bbox centre)
         mw = max(8, x2 - x1)
-        side = int(max(mw, y2 - y1) * 2.0)                # square ~ lower face
-        # CENTRE the square ABOVE the lips so the WHOLE lip line lands in the lower
-        # (inpainted) half — MuseTalk keeps the upper half, so anything above centre
-        # stays the operator's. Lips at ~65% down = firmly bot-driven, no leak.
-        scy = lip_y - int(side * 0.15)
+        # TIGHTER square (mouth fills more of the 256 crop = sharper, less blur) while
+        # still centring ABOVE the lips so the lip line sits ~62% down — in MuseTalk's
+        # inpainted (bot) lower half, not the kept upper half.
+        side = int(max(mw, y2 - y1) * 1.45)
+        scy = lip_y - int(side * 0.12)
         sy1 = max(0, scy - side // 2); sy2 = min(H, sy1 + side); sy1 = max(0, sy2 - side)
         sx1 = max(0, mcx - side // 2); sx2 = min(W, sx1 + side); sx1 = max(0, sx2 - side)
         sq = lp_face_frame[sy1:sy2, sx1:sx2]
