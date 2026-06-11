@@ -126,6 +126,7 @@ class FaceSwapEngine:
         self._seg = None
         self._seg_tried = False
         self._last_center = None       # last frame's face center (lock-on tracking)
+        self._skin_prev = None         # previous skin mask (temporal smoothing)
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
