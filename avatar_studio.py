@@ -94,6 +94,7 @@ QUICK_PHRASES = [
 VOICE_MODES = [
     ("Fast — instant (Kokoro)",            "kokoro"),
     ("Real human voice ~3s (Chatterbox)",  "chatterbox"),
+    ("Arabic + English (Multilingual)",    "multilingual"),
     ("Laughs/emotion — SLOW ~10s (Maya1)", "maya1"),
     ("Cloud (edge)",                       "edge"),
 ]
@@ -1392,7 +1393,7 @@ class AvatarStudio:
             return
         key = VOICE_MODE_KEY.get(self.voicemode_var.get(), "kokoro")
         self.tts.set_backend(key)
-        heavy = key in ("maya1", "chatterbox")
+        heavy = key in ("maya1", "chatterbox", "multilingual")
         self._log_msg(f"[studio] voice mode -> {self.voicemode_var.get()}"
                       + (" (loading model, ~15-30s, please wait...)" if heavy else ""))
         if key == "maya1":

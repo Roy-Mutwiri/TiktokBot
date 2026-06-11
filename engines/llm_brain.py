@@ -26,8 +26,24 @@ try:
 except Exception:
     pass
 
+# Brain provider: "ollama" (local) or "claude" (Anthropic API — e.g. Fable 5,
+# high reasoning). Claude needs ANTHROPIC_API_KEY. Default auto-picks claude when
+# a key is present, else ollama.
+ANTHROPIC_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
+# "hybrid" = local Ollama first, Fable 5 (Claude API) FALLBACK when Ollama is slow
+# or down. "ollama"/"claude" force one. Hybrid only needs the API key for the
+# fallback leg — without a key it runs Ollama-only.
+PROVIDER = os.environ.get("AVATAR_BRAIN_PROVIDER", "hybrid").lower()
+CLAUDE_MODEL = os.environ.get("AVATAR_CLAUDE_MODEL", "claude-fable-5")
+CLAUDE_URL = "https://api.anthropic.com/v1/messages"
+# If Ollama doesn't answer within this many seconds (e.g. cold model load, GPU
+# busy), the hybrid brain gives up and uses Fable 5 instead.
+OLLAMA_TIMEOUT = float(os.environ.get("AVATAR_BRAIN_OLLAMA_TIMEOUT", "8"))
+
 OLLAMA_HOST = os.environ.get("AVATAR_OLLAMA_HOST", "http://localhost:11434")
-MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "llama3.2:3b")
+# qwen2.5:7b = much stronger reasoning than llama3.2:3b, still fits 16GB alongside
+# the video + Chatterbox voice. _check() falls back to any pulled model if absent.
+MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "qwen2.5:7b")
 HISTORY_TURNS = int(os.environ.get("AVATAR_BRAIN_HISTORY", "6"))   # user+assistant pairs kept
 MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "120"))  # short = fast + speakable
 TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.8"))
@@ -49,7 +65,8 @@ class LLMBrain:
     """Ollama-backed conversational brain. respond(text) -> spoken reply string."""
 
     def __init__(self, model=None, persona=None):
-        self.model = model or MODEL
+        self.provider = PROVIDER
+        self.model = model or (CLAUDE_MODEL if self.provider == "claude" else MODEL)
         self.persona = persona or DEFAULT_PERSONA
         self.host = OLLAMA_HOST.rstrip("/")
         self.history = []            # [{"role":"user"/"assistant","content":...}]
@@ -59,9 +76,15 @@ class LLMBrain:
 
     # -------------------------------------------------------------------------
     def startup_check(self):
-        """Returns (ok, message). ok=False if Ollama/model isn't ready."""
+        """Returns (ok, message). ok=False if the brain isn't ready."""
         if self.available:
-            return True, f"Ollama brain ready (model: {self.model})."
+            if self.provider == "hybrid":
+                fb = f"Fable 5 fallback ON ({CLAUDE_MODEL})" if ANTHROPIC_KEY \
+                    else "no API key -> NO Fable 5 fallback (set ANTHROPIC_API_KEY)"
+                return True, f"hybrid brain ready (Ollama {self.model}; {fb})."
+            return True, f"{self.provider} brain ready (model: {self.model})."
+        if self.provider == "claude":
+            return False, f"Claude brain OFFLINE ({self.last_error})."
         return False, f"Ollama brain OFFLINE ({self.last_error})."
 
     @property
@@ -102,29 +125,44 @@ class LLMBrain:
         return False
 
     def _check(self):
-        """Ping the server (starting it if needed) and verify the model is pulled."""
+        """Verify the chosen provider is usable."""
+        if self.provider == "claude":
+            self.available = bool(ANTHROPIC_KEY)
+            self.last_error = None if ANTHROPIC_KEY else \
+                "ANTHROPIC_API_KEY not set (needed for Fable 5)"
+            return
+        # --- ollama / hybrid: probe Ollama ---
+        ollama_ok = False
         self._ensure_server()
         try:
             tags = self._get("/api/tags", timeout=4)
             names = [m.get("name", "") for m in (tags.get("models") or [])]
             self._models = names
-            if not names:
-                self.available = False
-                self.last_error = "no models pulled (run: ollama pull " + self.model + ")"
-                return
-            # accept exact or prefix match (e.g. 'llama3.2:3b' vs 'llama3.2:latest')
-            base = self.model.split(":")[0]
-            if self.model in names or any(n.split(":")[0] == base for n in names):
-                self.available = True
-                self.last_error = None
+            if names:
+                base = self.model.split(":")[0]
+                if self.model in names or any(n.split(":")[0] == base for n in names):
+                    ollama_ok = True
+                else:
+                    self.model = names[0]      # use whatever is pulled
+                    ollama_ok = True
             else:
-                # fall back to the first available model so it still works
-                self.model = names[0]
-                self.available = True
-                self.last_error = None
+                self.last_error = "no models pulled (run: ollama pull " + self.model + ")"
         except Exception as exc:
-            self.available = False
-            self.last_error = f"server not reachable at {self.host} ({type(exc).__name__})"
+            self.last_error = f"ollama not reachable ({type(exc).__name__})"
+
+        if self.provider == "hybrid":
+            # usable if EITHER leg works; the Fable 5 fallback covers Ollama gaps
+            self.available = ollama_ok or bool(ANTHROPIC_KEY)
+            if ollama_ok and ANTHROPIC_KEY:
+                self.last_error = None          # both legs ready
+            elif ollama_ok:
+                self.last_error = "Ollama only (no API key -> no Fable 5 fallback)"
+            elif ANTHROPIC_KEY:
+                self.last_error = "Ollama down -> using Fable 5"
+        else:                                    # pure ollama
+            self.available = ollama_ok
+            if ollama_ok:
+                self.last_error = None
 
     # -------------------------------------------------------------------------
     def respond(self, user_text, persona=None):
@@ -139,21 +177,15 @@ class LLMBrain:
             if not self.available:
                 return None
 
-        messages = [{"role": "system", "content": persona or self.persona}]
-        messages.extend(self.history[-(HISTORY_TURNS * 2):])
-        messages.append({"role": "user", "content": user_text})
-
-        payload = {
-            "model": self.model,
-            "messages": messages,
-            "stream": False,
-            "keep_alive": KEEP_ALIVE,
-            "options": {"temperature": TEMPERATURE, "num_predict": MAX_TOKENS},
-        }
         try:
-            data = self._post("/api/chat", payload, timeout=120)
-            reply = (data.get("message", {}) or {}).get("content", "").strip()
-            reply = self._clean(reply)
+            p = persona or self.persona
+            if self.provider == "claude":
+                reply = self._respond_claude(user_text, p)
+            elif self.provider == "hybrid":
+                reply = self._respond_hybrid(user_text, p)
+            else:
+                reply = self._respond_ollama(user_text, p)
+            reply = self._clean(reply or "")
             if not reply:
                 return None
             # remember the turn for coherence
@@ -166,6 +198,54 @@ class LLMBrain:
             print(f"[BRAIN] respond error: {self.last_error}")
             return None
 
+    def _respond_hybrid(self, user_text, persona):
+        """Local Ollama first; if it's slow (OLLAMA_TIMEOUT) or errors, fall back
+        to Fable 5 — but only if an API key is present."""
+        try:
+            return self._respond_ollama(user_text, persona, timeout=OLLAMA_TIMEOUT)
+        except Exception as exc:
+            if ANTHROPIC_KEY:
+                print(f"[BRAIN] Ollama delayed/failed ({type(exc).__name__}) "
+                      f"-> Fable 5 fallback ({CLAUDE_MODEL})")
+                return self._respond_claude(user_text, persona)
+            print(f"[BRAIN] Ollama delayed/failed ({type(exc).__name__}); "
+                  "no API key for Fable 5 fallback.")
+            raise
+
+    def _respond_ollama(self, user_text, persona, timeout=120):
+        messages = [{"role": "system", "content": persona}]
+        messages.extend(self.history[-(HISTORY_TURNS * 2):])
+        messages.append({"role": "user", "content": user_text})
+        payload = {"model": self.model, "messages": messages, "stream": False,
+                   "keep_alive": KEEP_ALIVE,
+                   "options": {"temperature": TEMPERATURE, "num_predict": MAX_TOKENS}}
+        data = self._post("/api/chat", payload, timeout=timeout)
+        return (data.get("message", {}) or {}).get("content", "")
+
+    def _respond_claude(self, user_text, persona):
+        """Anthropic Messages API (Fable 5 = high reasoning). System prompt is a
+        top-level field; history is the messages list (user/assistant only)."""
+        import json
+        import urllib.request
+        msgs = list(self.history[-(HISTORY_TURNS * 2):])
+        msgs.append({"role": "user", "content": user_text})
+        body = json.dumps({
+            "model": CLAUDE_MODEL,            # always the Claude model (Fable 5)
+            "max_tokens": MAX_TOKENS,
+            "temperature": TEMPERATURE,
+            "system": persona,
+            "messages": msgs,
+        }).encode("utf-8")
+        req = urllib.request.Request(CLAUDE_URL, data=body, headers={
+            "content-type": "application/json",
+            "x-api-key": ANTHROPIC_KEY,
+            "anthropic-version": "2023-06-01",
+        })
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = json.loads(r.read().decode("utf-8"))
+        parts = data.get("content") or []
+        return "".join(p.get("text", "") for p in parts if p.get("type") == "text")
+
     def warmup(self):
         """Load the model into VRAM now (it stays resident via keep_alive) so the
         first real question doesn't pay the ~45s cold-load. Safe to call in a
@@ -174,6 +254,8 @@ class LLMBrain:
             self._check()
         if not self.available:
             return False
+        if self.provider == "claude":
+            return True               # cloud API — nothing to load into VRAM
         try:
             self._post("/api/generate", {
                 "model": self.model, "prompt": "hi", "stream": False,
@@ -182,7 +264,8 @@ class LLMBrain:
             return True
         except Exception as exc:
             self.last_error = f"warmup: {type(exc).__name__}: {exc}"
-            return False
+            # in hybrid, a down/slow Ollama is fine — Fable 5 will cover it
+            return self.provider == "hybrid" and bool(ANTHROPIC_KEY)
 
     def reset(self):
         """Forget the conversation (fresh context)."""

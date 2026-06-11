@@ -25,7 +25,13 @@ except Exception:
 import numpy as np
 
 # Reference voice clip to clone (None -> Chatterbox's built-in default voice).
-CLONE_REF = os.environ.get("AVATAR_CLONE_REF", "").strip() or None
+_PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Default clone reference = the Arabic-accented English sample, so the avatar
+# speaks English with an Arabic accent out of the box. Override with
+# AVATAR_CLONE_REF=<path> to clone a different voice.
+_ACCENT_REF = os.path.join(_PROJECT, "voice_refs", "arabic_accent.wav")
+CLONE_REF = (os.environ.get("AVATAR_CLONE_REF", "").strip()
+             or (_ACCENT_REF if os.path.exists(_ACCENT_REF) else None))
 EXAGGERATION = float(os.environ.get("AVATAR_CLONE_EXAGGERATION", "0.6"))
 CFG_WEIGHT = float(os.environ.get("AVATAR_CLONE_CFG", "0.5"))
 

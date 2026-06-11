@@ -56,9 +56,14 @@ class _M:
 
 
 eng = TTS.TTSStreamEngine(_M())
-eng.set_backend("kokoro")
+# Pre-render in the studio's DEFAULT voice (Chatterbox = English/Arabic accent)
+# so those common lines play instantly. Override with AVATAR_TTS=kokoro etc.
+_backend = os.environ.get("AVATAR_TTS", "chatterbox")
+if _backend in ("auto", "edge"):
+    _backend = "chatterbox"
+eng.set_backend(_backend)
 t = time.time()
-print("   loading/ warming Kokoro (downloads on first run)...")
+print(f"   loading/ warming voice '{_backend}' (downloads on first run)...")
 print("   ->", eng.warm_backend(), f"({time.time()-t:.1f}s)")
 
 

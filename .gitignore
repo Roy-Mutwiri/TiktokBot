@@ -31,6 +31,7 @@ harvester/raw_audio/
 motion_clips/
 character_views/
 tts_cache/
+tts_samples/
 data_prep/data/
 pretrained_weights/
 
@@ -89,3 +90,7 @@ data_prep/*_report.json
 _*.md
 _*.txt
 autosync_pid.txt
+
+# partial downloads & full videos (huge — never commit)
+*.part
+data_prep/full_videos/

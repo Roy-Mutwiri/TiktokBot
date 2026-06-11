@@ -64,7 +64,14 @@ SWAPPER_PATHS = ([os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx")] if 
     os.path.join(PROJECT_DIR, "ai-face", "models", "inswapper_128.onnx"),
     os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx"),
 ]
-DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "384"))   # bigger = more reliable detect
+DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "320"))   # bigger = more reliable detect (320 = faster)
+# Poisson seamlessClone gives the best forehead tone-match but costs ~25-65ms/frame
+# (single-threaded CPU). Default OFF = fast feathered alpha blend (COLOR_MATCH keeps
+# the tone close). Set AVATAR_SWAP_SEAMLESS=1 for the slow high-quality clone.
+SEAMLESS = os.environ.get("AVATAR_SWAP_SEAMLESS", "0") == "1"
+# The 256 swap is soft (looks like a flat 'mask'). A targeted unsharp on the swapped
+# face restores feature/skin crispness for ~2ms (vs ~100ms for CodeFormer).
+SWAP_SHARPEN = float(os.environ.get("AVATAR_SWAP_SHARPEN", "0.6"))
 DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N frames
 # ignore faces smaller than this fraction of the frame (background people/objects)
 MIN_FACE_FRAC = float(os.environ.get("AVATAR_SWAP_MINFACE", "0.05"))
@@ -174,6 +181,7 @@ class FaceSwapEngine:
         self._eyemesh = None
         self._eyemesh_tried = False
         self._stab = 0.4                # stabilization level (0..1), live-settable
+        self.last_head = None           # (cx, cy, eye_w) of the swapped head (output coords)
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
@@ -220,7 +228,9 @@ class FaceSwapEngine:
                 sess = onnxruntime.InferenceSession(path, providers=sw_providers)
                 self.swapper = INSwapper(model_file=path, session=sess)
                 self._swap_provider = sess.get_providers()[0]
-            except Exception:
+            except Exception as e:
+                print(f"[SWAP] TRT/CUDA session build failed ({e}) — "
+                      f"falling back to model_zoo.get_model (may be slower)")
                 self.swapper = insightface.model_zoo.get_model(path, providers=providers)
                 self._swap_provider = "?"
             self._provider = self.app.models["detection"].session.get_providers()[0]
@@ -546,20 +556,56 @@ class FaceSwapEngine:
         # sides stay inside the face (no ears/bg). Replaces the all-sides erosion
         # that was cutting the forehead.
         white = np.zeros((S, S), np.uint8)
-        cv2.ellipse(white, (S // 2, int(S * 0.50)),
-                    (int(S * 0.40), int(S * 0.54)), 0, 0, 360, 255, -1)  # tall = forehead
+        cv2.ellipse(white, (S // 2, int(S * 0.49)),
+                    (int(S * 0.40), int(S * 0.49)), 0, 0, 360, 255, -1)  # forehead, inside crop
         mask = cv2.warpAffine(white, IM, (W, H))
+        # VALID swap region: warpAffine leaves BLACK outside the crop quad. Clip the
+        # mask (and its feather) to the eroded valid region so that black border can
+        # NEVER blend onto the face (it was bleeding in as black lines, esp. on turns).
+        valid = cv2.warpAffine(np.full((S, S), 255, np.uint8), IM, (W, H))
+        valid = cv2.erode(valid, np.ones((9, 9), np.uint8))
+        mask = cv2.bitwise_and(mask, valid)
         ys, xs = np.where(mask > 10)
         if len(xs) == 0:
             return None
-        cx, cy = int((xs.min() + xs.max()) / 2), int((ys.min() + ys.max()) / 2)
-        mask[:3, :] = 0; mask[-3:, :] = 0; mask[:, :3] = 0; mask[:, -3:] = 0
-        try:
-            return cv2.seamlessClone(fake_full, frame, mask, (cx, cy), cv2.NORMAL_CLONE)
-        except Exception:
-            m = (cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 7) / 255.0)[:, :, None]
-            return (frame.astype(np.float32) * (1 - m)
-                    + fake_full.astype(np.float32) * m).astype(np.uint8)
+        if SEAMLESS:                                       # slow, best tone match (opt-in)
+            cx, cy = int((xs.min() + xs.max()) / 2), int((ys.min() + ys.max()) / 2)
+            mask[:3, :] = 0; mask[-3:, :] = 0; mask[:, :3] = 0; mask[:, -3:] = 0
+            try:
+                return cv2.seamlessClone(fake_full, frame, mask, (cx, cy), cv2.NORMAL_CLONE)
+            except Exception:
+                pass
+        # FAST default: feathered alpha blend, cropped to the face bbox so the blur +
+        # composite only touch the masked region (~1-2ms vs ~25-65ms for Poisson).
+        pad = max(16, (xs.max() - xs.min()) // 8)
+        x0, x1 = max(0, xs.min() - pad), min(W, xs.max() + pad)
+        y0, y1 = max(0, ys.min() - pad), min(H, ys.max() + pad)
+        sub = mask[y0:y1, x0:x1].astype(np.float32)
+        # erode then heavily blur -> the alpha transition spreads over many pixels so
+        # the boundary (esp. the forehead) feathers away with no visible mask line.
+        sub = cv2.erode(sub, np.ones((max(3, sub.shape[0] // 22),) * 2, np.uint8))
+        m = cv2.GaussianBlur(sub, (0, 0), max(8, sub.shape[0] // 9)) / 255.0
+        # clip the FEATHERED alpha to valid swap pixels too (the blur spreads outward
+        # past the crop edge -> would re-introduce the black border). Belt and braces.
+        m = (m * (valid[y0:y1, x0:x1] / 255.0))[:, :, None]
+        fake_roi = fake_full[y0:y1, x0:x1].astype(np.float32)
+        frame_roi = frame[y0:y1, x0:x1].astype(np.float32)
+        # CLARITY: unsharp-mask the soft 256 swap so the face has crisp features/skin
+        # texture instead of the flat 'mask' look (cheap stand-in for CodeFormer).
+        if SWAP_SHARPEN > 0:
+            blur = cv2.GaussianBlur(fake_roi, (0, 0), 1.4)
+            fake_roi = np.clip(fake_roi * (1 + SWAP_SHARPEN) - blur * SWAP_SHARPEN, 0, 255)
+        # CHEAP TONE MATCH (kills the forehead skin-tone seam without Poisson): shift
+        # the swap's mean toward the surrounding real skin's mean, clipped so the
+        # character stays light. ~1ms vs ~65ms for seamlessClone.
+        if COLOR_MATCH:
+            core = sub > 200
+            if int(core.sum()) > 80:
+                off = np.clip(frame_roi[core].mean(0) - fake_roi[core].mean(0), -24, 24)
+                fake_roi = np.clip(fake_roi + off, 0, 255)
+        out = frame.copy()
+        out[y0:y1, x0:x1] = (frame_roi * (1 - m) + fake_roi * m).astype(np.uint8)
+        return out
 
     def swap(self, frame):
         """Swap the character face onto the largest face in `frame` (your real
@@ -677,6 +723,11 @@ class FaceSwapEngine:
                 kps = kps + np.array([dx, dy], np.float32)
                 bbox = bbox + np.array([dx, dy, dx, dy], np.float32)
             self.last_found = True
+            # publish the head location (output coords) so the background composite
+            # can PROTECT it — the bg cut never intrudes on the face.
+            ec = kps.mean(axis=0)
+            ew = float(np.linalg.norm(kps[0] - kps[1])) + 1e-6
+            self.last_head = (float(ec[0]), float(ec[1]), ew)
             target = self._Face(bbox=bbox, kps=kps, det_score=bboxes[i, 4])
             # SEAMLESS paste (Poisson) — boundary matches skin tone, no forehead line.
             out = self._paste_seamless(frame, target)

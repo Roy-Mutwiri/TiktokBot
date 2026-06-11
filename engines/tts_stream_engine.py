@@ -153,6 +153,8 @@ class TTSStreamEngine:
         self._maya1_tried = False
         self._chatter = None
         self._chatter_tried = False
+        self._mltts = None               # Chatterbox Multilingual (Arabic+English+)
+        self._mltts_tried = False
         self.backend = "edge-tts"
         # Active backend (switchable at runtime via set_backend) — starts from
         # the AVATAR_TTS env default.
@@ -173,14 +175,16 @@ class TTSStreamEngine:
         """Validate TTS can run; resolve the voice backend. Returns (ok, message)."""
         # Decide/load the backend now so the banner is honest and the (heavy)
         # model load happens here, not on the first SPEAK.
-        if self.tts_backend == "maya1" and self._get_maya1() is not None:
+        if self.tts_backend == "multilingual" and self._get_mltts() is not None:
+            self.backend = self._mltts.startup_check()[1]
+        elif self.tts_backend == "maya1" and self._get_maya1() is not None:
             self.backend = "Maya1 (expressive — laughs/emotion tags)"
         elif self.tts_backend == "chatterbox" and self._get_chatterbox() is not None:
             self.backend = self._chatter.startup_check()[1]
-        elif self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox") and \
+        elif self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox", "multilingual") and \
                 self._get_kokoro() is not None:
             extra = " — heavy backend unavailable, using Kokoro" \
-                if self.tts_backend in ("maya1", "chatterbox") else ""
+                if self.tts_backend in ("maya1", "chatterbox", "multilingual") else ""
             self.backend = f"Kokoro/{KOKORO_VOICE}{extra}"
         else:
             self.backend = f"edge-tts/{self.voice}"
@@ -246,6 +250,22 @@ class TTSStreamEngine:
             self._chatter_tried = True
             return self._chatter
 
+    def _get_mltts(self):
+        """Lazily load the Chatterbox Multilingual backend (Arabic+English+21).
+        Returns it or None. Lock + tried-after-load so a SPEAK mid-warm waits."""
+        with self._load_lock:
+            if self._mltts_tried:
+                return self._mltts
+            try:
+                from multilingual_tts import MultilingualTTSBackend
+                eng = MultilingualTTSBackend()
+                self._mltts = eng if eng.ok else None
+            except Exception as exc:
+                self._mltts = None
+                print(f"[TTS] Multilingual TTS unavailable ({exc}).")
+            self._mltts_tried = True
+            return self._mltts
+
     # -------------------------------------------------------------------------
     def _run_loop(self):
         """Background thread that owns the asyncio event loop."""
@@ -287,7 +307,7 @@ class TTSStreamEngine:
         edge / auto). Returns (ok, message). The heavy model loads lazily on the
         next synth; call warm_backend() first to pay that cost up front."""
         name = (name or "").strip().lower()
-        valid = ("maya1", "chatterbox", "kokoro", "edge", "auto")
+        valid = ("maya1", "chatterbox", "multilingual", "kokoro", "edge", "auto")
         if name not in valid:
             return False, f"unknown backend {name!r}"
         self.tts_backend = name
@@ -309,6 +329,9 @@ class TTSStreamEngine:
             ident += "|" + os.environ.get("AVATAR_MAYA_DESC", "default")
         elif self.tts_backend == "chatterbox":
             ident += "|" + os.environ.get("AVATAR_CLONE_REF", "default")
+        elif self.tts_backend == "multilingual":
+            ident += "|" + os.environ.get("AVATAR_CLONE_REF", "default") \
+                + "|" + os.environ.get("AVATAR_TTS_LANG", "auto")
         elif self.tts_backend in ("auto", "kokoro"):
             ident += "|" + KOKORO_VOICE
         else:
@@ -393,6 +416,16 @@ class TTSStreamEngine:
     async def _synthesize_uncached(self, text):
         """Synthesize a line to 16 kHz mono float PCM, dispatching on the chosen
         backend with a graceful fallback chain. Returns an ndarray."""
+        # Multilingual backend (Chatterbox ML) — Arabic + English + 21 more, with
+        # automatic per-segment language routing for code-switched text.
+        if self.tts_backend == "multilingual" and self._get_mltts() is not None:
+            try:
+                pcm = self._synth_mltts(text)
+                if pcm is not None and len(pcm) > 0:
+                    return pcm
+            except Exception as exc:
+                print(f"[TTS] Multilingual synth failed ({exc}) — falling back.")
+
         # Expressive backend (Maya1) — emotion tags like <laugh>, <sigh>.
         if self.tts_backend == "maya1" and self._get_maya1() is not None:
             try:
@@ -413,7 +446,7 @@ class TTSStreamEngine:
 
         # Kokoro (fast natural) — default for auto/kokoro, and the fallback for
         # the heavy backends above so a line still gets spoken.
-        if self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox") and \
+        if self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox", "multilingual") and \
                 self._get_kokoro() is not None:
             try:
                 pcm = self._synth_kokoro(text)
@@ -436,6 +469,15 @@ class TTSStreamEngine:
     def _synth_chatterbox(self, text):
         """Chatterbox cloned-voice synth -> 16 kHz mono float32 PCM."""
         wav, sr = self._chatter.synthesize(text)
+        if wav is None or len(wav) == 0:
+            return None
+        if sr != SAMPLE_RATE:
+            wav = self._resample(wav, sr, SAMPLE_RATE)
+        return np.asarray(wav, dtype=np.float32)
+
+    def _synth_mltts(self, text):
+        """Chatterbox Multilingual synth (auto Arabic/English/...) -> 16 kHz PCM."""
+        wav, sr = self._mltts.synthesize(text)
         if wav is None or len(wav) == 0:
             return None
         if sr != SAMPLE_RATE:

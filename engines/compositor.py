@@ -42,6 +42,10 @@ PAD_Y_TOP = 0.26      # room above the upper lip
 PAD_Y_BOTTOM = 0.50   # generous room below for jaw / chin drop on a wide-open mouth
 FEATHER_KERNEL = 21   # GaussianBlur kernel for the alpha edge feather (odd)
 COLOR_MATCH_STRENGTH = 0.6   # 0..1 how strongly to match crop colour to skin
+# Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). A little helps real
+# speech, but too much amplifies Wav2Lip's colour artifacts, so default OFF and
+# leave it as an opt-in tunable. AVATAR_MOUTH_SHARPEN.
+MOUTH_SHARPEN = float(os.environ.get("AVATAR_MOUTH_SHARPEN", "0.0"))
 MIN_BBOX = 12         # reject degenerate detections smaller than this (px)
 
 
@@ -158,6 +162,13 @@ class Compositor:
             crop = synced_mouth_crop
             if crop.shape[:2] != (bh, bw):
                 crop = cv2.resize(crop, (bw, bh))
+            # SHARPEN the soft 96px Wav2Lip mouth (it's the blurriest, most-watched
+            # region, and the CodeFormer restore ran BEFORE the mouth so it never
+            # touched it). An unsharp mask adds crisp lip/teeth detail so it reads
+            # as real camera footage. Tunable via AVATAR_MOUTH_SHARPEN.
+            if MOUTH_SHARPEN > 0.0:
+                blur = cv2.GaussianBlur(crop, (0, 0), 1.5)
+                crop = cv2.addWeighted(crop, 1.0 + MOUTH_SHARPEN, blur, -MOUTH_SHARPEN, 0)
             crop = crop.astype(np.float32)
             region_f = region.astype(np.float32)
 

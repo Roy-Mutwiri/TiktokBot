@@ -1,0 +1,54 @@
+{
+  "target_minutes": 25.0,
+  "chosen_cluster": 0,
+  "n_clusters": 2,
+  "cluster_sizes": {
+    "0": 11,
+    "1": 1
+  },
+  "selected_minutes": 31.98,
+  "videos_used": [
+    "0_s8uwVZstQ",
+    "yKtY7Ao0W7I"
+  ],
+  "videos_scanned": 6,
+  "total_channel_videos": 1809,
+  "segments": [
+    {
+      "video_id": "0_s8uwVZstQ",
+      "start": 788.0,
+      "end": 1572.0,
+      "duration": 784.0,
+      "quality": 0.7724,
+      "score": 605.547,
+      "rep_frame": "C:\\Users\\user\\Documents\\TiktokBot\\data_prep\\seg_reps\\0_s8uwVZstQ_788_1572.jpg",
+      "mean_area": 0.0366,
+      "mean_yaw": -3.96,
+      "mean_sharp": 1086.8,
+      "mean_bright": 96.6,
+      "title": "تأثير مباشر لبيانات NFP سوق العمل | تحليل الذهب | الأربعاء 11/02/2026",
+      "url": "https://www.youtube.com/watch?v=0_s8uwVZstQ",
+      "seg_id": 3,
+      "out_file": "C:\\Users\\user\\Documents\\TiktokBot\\data_prep\\face_segments\\seg_001.mp4",
+      "cluster": 0
+    },
+    {
+      "video_id": "yKtY7Ao0W7I",
+      "start": 746.0,
+      "end": 1881.0,
+      "duration": 1135.0,
+      "quality": 0.7789,
+      "score": 884.0363,
+      "rep_frame": "C:\\Users\\user\\Documents\\TiktokBot\\data_prep\\seg_reps\\yKtY7Ao0W7I_746_1881.jpg",
+      "mean_area": 0.036,
+      "mean_yaw": -2.03,
+      "mean_sharp": 1161.2,
+      "mean_bright": 100.2,
+      "title": "التوترات .. تأثيرات مباشرة | تحليل الذهب | الإثنين 02/03/2026",
+      "url": "https://www.youtube.com/watch?v=yKtY7Ao0W7I",
+      "seg_id": 1,
+      "out_file": "C:\\Users\\user\\Documents\\TiktokBot\\data_prep\\face_segments\\seg_002.mp4",
+      "cluster": 0
+    }
+  ]
+}

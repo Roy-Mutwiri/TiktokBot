@@ -155,6 +155,15 @@ def _get_segmenter():
 # -----------------------------------------------------------------------------
 # PIPELINE STEPS
 # -----------------------------------------------------------------------------
+_protect_head = None        # (cx, cy, eye_w) — head region the bg must NEVER cut into
+
+
+def set_protect_head(head):
+    """Tell the bg composite where the swapped head is so it never cuts into it."""
+    global _protect_head
+    _protect_head = head
+
+
 def background_composite(frame):
     """Cut the person out and composite onto the studio background.
 
@@ -175,8 +184,11 @@ def background_composite(frame):
                 # DILATE slightly (margin) so a fast-moving head stays INSIDE the
                 # person cut — better to keep a sliver of real edge than to slice
                 # the head with the background.
-                m = (res.segmentation_mask > 0.5).astype(np.float32)
-                m = cv2.dilate(m, np.ones((5, 5), np.uint8), iterations=1)
+                # higher threshold = tighter cut to the person (less light-wall halo);
+                # the face is guaranteed by the protect-ellipse below, so we can be
+                # tight here without risking the face.
+                m = (res.segmentation_mask > 0.62).astype(np.float32)
+                m = cv2.dilate(m, np.ones((3, 3), np.uint8), iterations=1)
                 m = cv2.GaussianBlur(m, (0, 0), EDGE_FEATHER)
                 # light temporal blend only (responsive, not lagging the head)
                 if _seg_mask_cache is not None and _seg_mask_cache.shape[:2] == m.shape[:2]:
@@ -184,10 +196,23 @@ def background_composite(frame):
                 _seg_mask_cache = m[:, :, None]
         if _seg_mask_cache is None or _seg_mask_cache.shape[:2] != frame.shape[:2]:
             return frame
+        m = _seg_mask_cache
+        # PROTECT the head: force person=1 over an ellipse around the swapped head so
+        # the background cut can never intrude on the face (the main interference).
+        if _protect_head is not None:
+            cx, cy, ew = _protect_head
+            prot = np.zeros(frame.shape[:2], np.float32)
+            # tight ellipse over the FACE CORE only (eyes->chin, cheeks) — that region
+            # is all skin so forcing person=1 there fixes the bg cutting the face with
+            # NO background halo. Hair/silhouette stays handled by the seg mask.
+            cv2.ellipse(prot, (int(cx), int(cy - ew * 0.1)),
+                        (int(ew * 1.25), int(ew * 1.75)), 0, 0, 360, 1.0, -1)
+            prot = cv2.GaussianBlur(prot, (0, 0), ew * 0.3)[:, :, None]
+            m = np.maximum(m, prot)
         bg = _bg_image
         if bg.shape[:2] != frame.shape[:2]:
             bg = cv2.resize(bg, (frame.shape[1], frame.shape[0]))
-        return (frame * _seg_mask_cache + bg * (1.0 - _seg_mask_cache)).astype(np.uint8)
+        return (frame * m + bg * (1.0 - m)).astype(np.uint8)
     except Exception:
         return frame
 
