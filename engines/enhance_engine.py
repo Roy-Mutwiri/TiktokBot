@@ -253,15 +253,29 @@ def apply_soften(frame):
     return cv2.addWeighted(frame, 1.0 - SOFTEN, blur, SOFTEN, 0)
 
 
-def apply_clarity(frame, amount=0.30):
-    """TWO-SCALE clarity: a large-radius unsharp for local contrast (clarity / skin
-    micro-texture) PLUS a small-radius unsharp for fine edge crispness — together
-    they read as a sharp, detailed face through a lens, not a soft AI render."""
+_CLAHE = None
+
+
+def apply_clarity(frame, amount=0.34):
+    """THREE-SCALE clarity + CLAHE local contrast — makes the BEARD hairs and skin
+    micro-texture pop (genuine detail, fast, no heavy model):
+      • CLAHE on luminance  -> local contrast so individual beard hairs separate
+      • large-radius unsharp -> clarity / skin texture
+      • small-radius unsharp -> fine edge crispness (lashes, beard, lip detail)."""
+    global _CLAHE
+    # CLAHE on the L channel — local contrast that defines beard hairs/pores.
+    cl = float(os.environ.get("AVATAR_CLAHE", "0.55"))   # 0..1 blend of the CLAHE result
+    if cl > 0:
+        if _CLAHE is None:
+            _CLAHE = cv2.createCLAHE(clipLimit=2.2, tileGridSize=(8, 8))
+        lab = cv2.cvtColor(frame, cv2.COLOR_BGR2LAB)
+        lab[:, :, 0] = cv2.addWeighted(lab[:, :, 0], 1.0 - cl, _CLAHE.apply(lab[:, :, 0]), cl, 0)
+        frame = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
     # large radius — local contrast / clarity
     blur_l = cv2.GaussianBlur(frame, (0, 0), 3.0)
     out = cv2.addWeighted(frame, 1.0 + amount, blur_l, -amount, 0)
     # small radius — fine detail / edge crispness (features, lashes, beard, lips)
-    fine = float(os.environ.get("AVATAR_FINE_SHARP", "0.55"))
+    fine = float(os.environ.get("AVATAR_FINE_SHARP", "0.7"))
     if fine > 0:
         blur_s = cv2.GaussianBlur(out, (0, 0), 0.9)
         out = cv2.addWeighted(out, 1.0 + fine, blur_s, -fine, 0)
