@@ -22,28 +22,33 @@ try:
 except Exception:
     pass
 
-# --- make onnxruntime's CUDA EP find CUDA12 + cuDNN9 (bundled with torch) ------
+# --- make onnxruntime's CUDA + TensorRT EPs find their DLLs (CUDA12/cuDNN9 from
+# torch, nvinfer from tensorrt_libs). MUST run before onnxruntime is imported, and
+# the TensorRT provider DLL resolves nvinfer via PATH (not add_dll_directory), so
+# we set BOTH. ------------------------------------------------------------------
+import glob
+_dll_dirs = []
 try:
     import torch
-    _tlib = os.path.join(os.path.dirname(torch.__file__), "lib")
-    if os.path.isdir(_tlib):
-        os.add_dll_directory(_tlib)
+    _dll_dirs.append(os.path.join(os.path.dirname(torch.__file__), "lib"))
 except Exception:
     pass
-import glob
 try:
     import site
     for _base in site.getsitepackages():
         for _sub in ("nvidia/cudnn/bin", "nvidia/cuda_runtime/bin", "nvidia/cublas/bin",
-                     "tensorrt_libs"):     # TensorRT nvinfer DLLs (for the TRT EP)
-            _p = os.path.join(_base, _sub)
-            if os.path.isdir(_p):
-                try:
-                    os.add_dll_directory(_p)
-                except Exception:
-                    pass
+                     "tensorrt_libs"):
+            _dll_dirs.append(os.path.join(_base, _sub))
 except Exception:
     pass
+_dll_dirs = [d for d in _dll_dirs if os.path.isdir(d)]
+if _dll_dirs:
+    os.environ["PATH"] = os.pathsep.join(_dll_dirs) + os.pathsep + os.environ.get("PATH", "")
+    for _d in _dll_dirs:
+        try:
+            os.add_dll_directory(_d)
+        except Exception:
+            pass
 
 import numpy as np
 import cv2
