@@ -617,7 +617,7 @@ class AvatarStudio:
         self.char_var.trace_add("write", self._on_character)
         # Hair / beard COLOUR — recolours gray hair+beard to match the character.
         r = self._row(c, "Hair colour")
-        self.hair_var = tk.StringVar(value="gray")
+        self.hair_var = tk.StringVar(value="none")
         ttk.Combobox(r, textvariable=self.hair_var,
                      values=["brown", "black", "blonde", "gray", "none"],
                      state="readonly", width=14,
@@ -855,6 +855,7 @@ class AvatarStudio:
                 lp._multi = bool(self.multiref_var.get()) and len(getattr(lp, "_refs", [])) > 1
                 lp.set_stabilization(self.stab_var.get() / 100.0)
                 lp.set_gaze(self.gaze_var.get(), self.gaze_var2.get() / 100.0)
+                lp.set_lip_lock(self.liplock_var.get())
             except Exception:
                 pass
             self._log_msg("   -> " + lp.startup_check()[1])
@@ -1041,6 +1042,14 @@ class AvatarStudio:
                 time.sleep(0.05)
                 continue
 
+            # WHILE THE BOT IS TALKING: keep the frame budget low so the lip-sync
+            # stays smooth (no lag). The head and skin are basically static during
+            # speech and only the mouth moves (owned by the mouth-sync), so we run
+            # LivePortrait + the costly face restore HALF as often and reuse the
+            # held result between — freeing the GPU for per-frame mouth-sync.
+            speaking_now = bool(getattr(mt, "is_speaking", False))
+            _speed = 2 if speaking_now else 1
+
             # one automatic recenter ~2s in, once the operator has settled, so
             # the neutral baseline isn't the (often mid-motion) very first frame.
             if not recentered and frame_count == int(FPS * 2):
@@ -1081,7 +1090,9 @@ class AvatarStudio:
                     lp._face_found = self.swap_engine.last_found   # chart/loss logic
                     t_lp += time.perf_counter() - _t
 
-            lp_due = (cached_face is None or (frame_count % self.lp_interval) == 0
+            # head updates less often while the bot talks (it's near-static then)
+            eff_lp_interval = max(1, self.lp_interval * _speed)
+            lp_due = (cached_face is None or (frame_count % eff_lp_interval) == 0
                       or motion > MOTION_THRESH)        # run every frame on big motion
             if not did_swap:
                 _t = time.perf_counter()
@@ -1114,7 +1125,12 @@ class AvatarStudio:
             _t = time.perf_counter()
             if self.restore_var.get() and not did_swap and getattr(lp, "_face_found", False):
                 try:
-                    ai = self.engines["restore"].restore(ai)
+                    re = self.engines["restore"]
+                    # restore less often while talking (fewer 85ms spikes) — the
+                    # restored skin/eyes are reused; the mouth gets overwritten by
+                    # the mouth-sync anyway, so there's nothing lost during speech.
+                    re.every_n = max(1, getattr(self, "_restore_every_base", 3) * _speed)
+                    ai = re.restore(ai)
                 except Exception:
                     pass
             t_gfp += time.perf_counter() - _t
@@ -1406,9 +1422,10 @@ class AvatarStudio:
             ee.set_level(p["enhance"])
         except Exception:
             pass
+        self._restore_every_base = p.get("restore_every", 2)   # loop doubles it while talking
         if self.engines and "restore" in self.engines:
             try:
-                self.engines["restore"].every_n = p.get("restore_every", 2)
+                self.engines["restore"].every_n = self._restore_every_base
             except Exception:
                 pass
         self._log_msg(f"[studio] quality: {self.quality_var.get()} "
@@ -1434,6 +1451,16 @@ class AvatarStudio:
             try:
                 self.engines["lp"].set_gaze(self.gaze_var.get(),
                                             self.gaze_var2.get() / 100.0)
+            except Exception:
+                pass
+
+    def _on_liplock(self):
+        if self.engines:
+            try:
+                self.engines["lp"].set_lip_lock(self.liplock_var.get())
+                self._log_msg("[studio] lips: "
+                              + ("BOT VOICE only (your mouth ignored)"
+                                 if self.liplock_var.get() else "follow your webcam mouth"))
             except Exception:
                 pass
 
