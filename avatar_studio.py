@@ -1440,6 +1440,12 @@ class AvatarStudio:
             self.swap_engine._hair_color = self.hair_var.get()
             self._log_msg(f"[studio] hair colour -> {self.hair_var.get()}")
 
+    def _on_eye(self, *args):
+        """Set the iris recolour target live."""
+        if self.swap_engine is not None:
+            self.swap_engine._eye_color = self.eye_var.get()
+            self._log_msg(f"[studio] eye colour -> {self.eye_var.get()}")
+
     def _on_pose(self, *args):
         """Safe / Cinematic / Free — sets the turn + tilt caps together."""
         p = POSE_PRESETS.get(self.pose_var.get())
