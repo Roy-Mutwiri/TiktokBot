@@ -37,15 +37,11 @@ for p in (ENGINES_DIR, PROJECT_DIR):
         sys.path.insert(0, p)
 
 # AUTO-CONFIG: probe the machine (GPU/VRAM/CPU + benchmark) and pick the voice /
-# brain / restore / cadence that best fit — BEFORE any engine reads its env. Your
-# own AVATAR_* env vars still win (setdefault). Disable with AVATAR_AUTOCONFIG=0.
+# brain / restore / cadence that best fit. Run ASYNC (after the window shows) so
+# the user sees a "benchmarking..." loading bar; START is disabled until it's done
+# (the env it sets must be in place before the engines load). Your own AVATAR_*
+# env vars still win (setdefault). Disable with AVATAR_AUTOCONFIG=0.
 AUTO_PROFILE = None
-if os.environ.get("AVATAR_AUTOCONFIG", "1") == "1":
-    try:
-        from auto_config import autoconfigure
-        AUTO_PROFILE = autoconfigure(verbose=True)
-    except Exception as _exc:
-        print(f"[AUTO-CONFIG] skipped ({_exc}).")
 
 import numpy as np
 import cv2
@@ -201,6 +197,17 @@ class AvatarStudio:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_ui()                     # start the UI refresh loop
         self._animate()                     # start the HUD animation loop
+        # ASYNC auto-config: benchmark the GPU AFTER the window paints, with a
+        # loading bar; START stays disabled until the chosen model is known (its
+        # env must be set before the engines load).
+        if os.environ.get("AVATAR_AUTOCONFIG", "1") == "1":
+            try:
+                self.start_btn.configure(state="disabled")
+            except Exception:
+                pass
+            threading.Thread(target=self._run_autoconfig, daemon=True).start()
+        else:
+            self._autoconfig_done()         # no benchmark — just show env defaults
         # Open the real TradingView and let the AI operate it (env AVATAR_TV=0
         # to disable). Delayed so the Studio window paints first.
         self.root.after(1500, self._launch_tradingview)
@@ -525,10 +532,14 @@ class AvatarStudio:
                                     activeforeground=MAG, highlightthickness=1,
                                     highlightbackground=self._mix(MAG, BG, 0.5))
         self.speech_btn.pack(side="right", padx=(0, 10))
-        # auto-config readout: chosen LLM brain + GPU benchmark
-        self.info_lbl = tk.Label(ph, text=self._autocfg_text(), bg=SURFACE, fg=MUTED,
+        # auto-config readout: shows a "benchmarking..." loading bar first, then
+        # resolves to the chosen LLM brain + GPU benchmark once it completes.
+        self.info_lbl = tk.Label(ph, text="⏳ benchmarking GPU…", bg=SURFACE, fg=AMBER,
                                  font=("Consolas", 9))
-        self.info_lbl.pack(side="left", padx=10)
+        self.info_lbl.pack(side="left", padx=(10, 6))
+        self.bench_bar = ttk.Progressbar(ph, mode="indeterminate", length=120)
+        self.bench_bar.pack(side="left", pady=2)
+        self.bench_bar.start(14)
 
         # the composited frame (black stage with a neon hairline frame)
         stageb = tk.Frame(pv, bg=self._mix(BG, CYAN, 0.22))
@@ -1707,6 +1718,49 @@ class AvatarStudio:
                                   fg=RED if muted else MAG,
                                   highlightbackground=self._mix(RED if muted else MAG, BG, 0.5))
         self._log_msg("[studio] bot speech " + ("MUTED" if muted else "on"))
+
+    def _run_autoconfig(self):
+        """Background: probe + benchmark the machine, then apply the picked config
+        and reveal it in the top bar (the loading bar runs meanwhile)."""
+        global AUTO_PROFILE
+        try:
+            from auto_config import detect, choose, apply
+            res = detect()                 # imports torch + runs the GPU benchmark
+            cfg = choose(res)
+            env = apply(cfg)               # sets AVATAR_* env (setdefault)
+            AUTO_PROFILE = {"res": res, "cfg": cfg, "env": env}
+        except Exception as exc:
+            AUTO_PROFILE = None
+            print(f"[AUTO-CONFIG] failed ({exc}).")
+        try:
+            self.root.after(0, self._autoconfig_done)
+        except Exception:
+            pass
+
+    def _autoconfig_done(self):
+        """On the UI thread: stop the loading bar, show the chosen model, set the
+        voice dropdown to the auto pick, and ENABLE START."""
+        try:
+            self.bench_bar.stop()
+            self.bench_bar.pack_forget()
+        except Exception:
+            pass
+        self.info_lbl.configure(text=self._autocfg_text(), fg=MUTED)
+        if AUTO_PROFILE:
+            r, cfg = AUTO_PROFILE["res"], AUTO_PROFILE["cfg"]
+            lbl = next((l for l, k in VOICE_MODES if k == cfg["tts"]), None)
+            if lbl:
+                try:
+                    self.voicemode_var.set(lbl)
+                except Exception:
+                    pass
+            self._log_msg(f"[auto-config] {r['gpu']} · {r['vram_free']:.1f}GB free "
+                          f"· {r['tflops']:.0f} TFLOP/s")
+            self._log_msg("[auto-config] -> " + cfg["why"])
+        try:
+            self.start_btn.configure(state="normal")
+        except Exception:
+            pass
 
     def _autocfg_text(self):
         """Top readout: chosen LLM brain + GPU benchmark."""

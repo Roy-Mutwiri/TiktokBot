@@ -39,7 +39,7 @@ BRAIN_VRAM = [("qwen2.5:14b", 9.0), ("qwen2.5:7b", 4.7),
 # too low: at runtime the brain+voice+video exceeded 16GB and OOM'd (corrupting the
 # CUDA context → avatar froze, beard/swap failed, mouth blurred). 10.5 leaves real
 # headroom so a speaking bot never OOMs.
-VIDEO_RESERVE = float(os.environ.get("AVATAR_VIDEO_RESERVE", "10.5"))
+VIDEO_RESERVE = float(os.environ.get("AVATAR_VIDEO_RESERVE", "10.0"))
 
 
 def _ollama_models():
@@ -140,7 +140,11 @@ def choose(res):
         pick = ("edge", "llama3.2:3b")
     tts, brain = pick
 
-    restore = "codeformer" if free >= 9 else ("gfpgan" if free >= 6 else "off")
+    # restore is HEAVY (CodeFormer re-runs a GPU net every frame) and was a big part
+    # of the OOM/lag when the bot spoke. Only enable it on cards with lots of spare
+    # VRAM; otherwise leave the GPU free for the swap + voice (the fast sharpen/clarity
+    # carry the look). Conservative thresholds so a 16GB card stays smooth while speaking.
+    restore = "codeformer" if free >= 22 else ("gfpgan" if free >= 18 else "off")
     # cadence: more VRAM + faster GPU -> run LP/restore more often (more quality)
     lp_interval = 1 if free >= 18 else (2 if free >= 11 else 3)
     restore_interval = 2 if free >= 12 else (3 if free >= 8 else 4)
