@@ -296,6 +296,23 @@ class TTSStreamEngine:
             q = 0
         return q + (1 if (self.synthesizing or self.speaking) else 0)
 
+    def clear_pending(self):
+        """Drop queued (not-yet-started) lines so a higher-priority line (e.g. a
+        user's ASK answer) plays next instead of behind an auto-host backlog. The
+        currently-playing line is left to finish."""
+        if self._loop is None or self.speech_queue is None:
+            return
+        async def _drain():
+            try:
+                while not self.speech_queue.empty():
+                    self.speech_queue.get_nowait()
+            except Exception:
+                pass
+        try:
+            asyncio.run_coroutine_threadsafe(_drain(), self._loop)
+        except Exception:
+            pass
+
     def speak(self, text):
         """Queue text to be spoken; trigger any keyword reaction immediately."""
         text = (text or "").strip()
