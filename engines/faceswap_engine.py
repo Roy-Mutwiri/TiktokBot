@@ -84,7 +84,7 @@ COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
 ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "1") == "1"  # CodeFormer HD restore (user wants sharp)
 # How much CodeFormer to blend in (0 = raw swap/most real, 1 = full CodeFormer/
 # smoothest). Low keeps the eyes/mouth real while still adding crispness.
-ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.8"))
+ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.92"))
 # CLEAN BASELINE: the swap uses the inswapper model's OWN proven paste-back. All
 # the experimental layers below are OFF by default — opt in one at a time.
 COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.0"))

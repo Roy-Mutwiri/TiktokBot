@@ -45,7 +45,7 @@ GFPGAN_PATH = os.path.join(PROJECT_DIR, "ai-face", "models", "GFPGANv1.4.pth")
 # Restoration fidelity (CodeFormer's `w`): 0 = max quality/most invented detail,
 # 1 = max fidelity to the (blurry) input. ~0.7 keeps identity while still
 # cleaning up the Wav2Lip mouth. Tunable via env AVATAR_RESTORE_FIDELITY.
-FIDELITY = float(os.environ.get("AVATAR_RESTORE_FIDELITY", "0.7"))
+FIDELITY = float(os.environ.get("AVATAR_RESTORE_FIDELITY", "0.5"))
 
 # Run the (costly) restore every Nth frame, reuse the cached result between.
 # 1 = every frame (sharpest, slowest). Tunable via env AVATAR_RESTORE_INTERVAL.
