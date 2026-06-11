@@ -1442,6 +1442,11 @@ class AvatarStudio:
                         or self.brain is None or not self.brain.ok or tts is None):
                     _t.sleep(0.4)
                     continue
+                # YIELD to the user: if you just ASKed/SPEAKed, stay quiet so the
+                # avatar answers YOU and doesn't talk over it.
+                if _t.monotonic() < self._user_active_until:
+                    _t.sleep(0.3)
+                    continue
                 # pace to the look-ahead — NOT blocked by the voice; the brain just
                 # doesn't run more than LEAD lines ahead of playback.
                 if tts.pending > LEAD:
@@ -1451,15 +1456,13 @@ class AvatarStudio:
                 chart = self.engines.get("chart") if self.engines else None
                 price = getattr(chart, "price", None)
                 ctx = f" Gold (XAUUSD) is trading around {price:,.1f} right now." if price else ""
-                self._thinking = True
                 line = None
                 try:
-                    line = self.brain.respond(beat + ctx)   # runs WHILE prev line plays
+                    line = self._generate(beat + ctx)   # ONE-at-a-time brain access
                 except Exception as exc:
                     self._log_msg(f"[autotalk] brain: {exc}")
-                finally:
-                    self._thinking = False
-                if line and self.autotalk_var.get():
+                # if you interacted while it was generating, drop this line
+                if line and self.autotalk_var.get() and _t.monotonic() >= self._user_active_until:
                     self._log_msg("avatar> " + line)
                     self.tts.speak(line)
             except Exception as exc:

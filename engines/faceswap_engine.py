@@ -770,11 +770,22 @@ class FaceSwapEngine:
             # lighten ALL skin (face, neck, hands) toward a Caucasian tone
             if SKIN_LIGHTEN > 0.0:
                 out = self._lighten_skin(out)
-            # NOTE: CodeFormer HD restoration is NO LONGER done here — it runs in the
-            # loop AFTER the bot mouth is composited (via restore_face), so the MOUTH
-            # gets the same HD restoration as the eyes/face (they were asymmetric: the
-            # mouth, added after the swap, used to stay soft). EYE_PRESERVE stays here
-            # (it needs the raw webcam eyes) and is restored together downstream.
+            # CodeFormer HD enhancement IN-SWAP (cached every 2 frames = ~9fps, no
+            # whole-face stutter since the composite is fresh each frame). The mouth
+            # (added later) gets a fast per-frame sharpen instead of CodeFormer — the
+            # every-frame after-mouth restore was sharp but only ~6fps (too laggy).
+            if ENHANCE_SWAP:
+                if self.enhancer is None and not self._enh_tried:
+                    self._enh_tried = True
+                    try:
+                        from face_restore_engine import FaceRestoreEngine
+                        self.enhancer = FaceRestoreEngine()
+                        print("[SWAP] CodeFormer face enhancement ON (in-swap)")
+                    except Exception as exc:
+                        print(f"[SWAP] enhancer unavailable ({exc})")
+                if self.enhancer is not None and getattr(self.enhancer, "ready", False):
+                    enh = self.enhancer.process_frame(out)
+                    out = cv2.addWeighted(out, 1.0 - ENHANCE_BLEND, enh, ENHANCE_BLEND, 0)
             # EYE PRESERVATION: paste YOUR real eyes (real catchlights, gaze, blinks)
             # back over Haddan's face. AI source photos give dead eyes; your live
             # eyes are what make them look human. kps[0]/kps[1] = right/left eye.
