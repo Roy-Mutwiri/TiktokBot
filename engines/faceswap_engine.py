@@ -49,7 +49,8 @@ import cv2
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 SWAPPER_PATHS = [
-    os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx"),       # 256px = highest fidelity
+    os.path.join(PROJECT_DIR, "models", "reswapper_256_fp16.onnx"),  # 256px fp16 = fidelity + speed
+    os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx"),       # 256px fp32
     os.path.join(PROJECT_DIR, "models", "inswapper_128_fp16.onnx"),
     os.path.join(PROJECT_DIR, "models", "inswapper_128.onnx"),
     os.path.join(PROJECT_DIR, "ai-face", "models", "inswapper_128.onnx"),
