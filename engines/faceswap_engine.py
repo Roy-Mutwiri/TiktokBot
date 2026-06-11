@@ -346,12 +346,16 @@ class FaceSwapEngine:
             # far more saturated), reasonably bright (not the dark beard/shadows).
             skin = ((cr > 133) & (cr < 173) & (cb > 77) & (cb < 127) &
                     (sat > 25) & (sat < 150) & (val > 60)).astype(np.float32)
-            skin = cv2.GaussianBlur(skin, (0, 0), 2.5)[:, :, None] * SKIN_LIGHTEN
-            lighter = f.copy()
-            lighter += (255 - lighter) * 0.22           # lift toward white
-            lighter[:, :, 0] = np.clip(lighter[:, :, 0] * 1.06, 0, 255)   # +blue (cooler)
-            lighter[:, :, 2] = np.clip(lighter[:, :, 2] * 0.97, 0, 255)   # -red (less warm)
-            return np.clip(f * (1 - skin) + lighter * skin, 0, 255).astype(np.uint8)
+            skin = cv2.GaussianBlur(skin, (0, 0), 3.0)[:, :, None] * SKIN_LIGHTEN
+            # LAB tone shift toward a natural LIGHT-Caucasian skin (peachy, NOT the
+            # gray/blue cast the old de-warm gave): lift L, pull a/b toward a light
+            # warm-pink target. Keeps texture; consistent across face/neck/hands.
+            lab = cv2.cvtColor(out, cv2.COLOR_BGR2LAB).astype(np.float32)
+            lab[:, :, 0] = lab[:, :, 0] + (235.0 - lab[:, :, 0]) * 0.30   # lighten
+            lab[:, :, 1] = lab[:, :, 1] * 0.6 + 143.0 * 0.4               # a -> light red
+            lab[:, :, 2] = lab[:, :, 2] * 0.6 + 150.0 * 0.4               # b -> light yellow
+            toned = cv2.cvtColor(np.clip(lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
+            return np.clip(f * (1 - skin) + toned.astype(np.float32) * skin, 0, 255).astype(np.uint8)
         except Exception:
             return out
 
