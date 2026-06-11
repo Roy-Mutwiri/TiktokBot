@@ -350,10 +350,15 @@ class FaceSwapEngine:
         if seg is None:
             return out
         try:
-            res = seg.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
-            if res.segmentation_mask is None:
-                return out
-            person = res.segmentation_mask > 0.6
+            # the selfie-seg forward is the cost — run it every 3rd frame, reuse the
+            # person mask between (hair/head moves slowly). Big speed win.
+            self._hair_fn = getattr(self, "_hair_fn", 0) + 1
+            if getattr(self, "_person_cache", None) is None or self._hair_fn % 3 == 0:
+                res = seg.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
+                if res.segmentation_mask is None:
+                    return out
+                self._person_cache = res.segmentation_mask > 0.6
+            person = self._person_cache
             hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
             sat, val = hsv[:, :, 1], hsv[:, :, 2]
             # gray/white hair: very low saturation, fairly bright, on the person
