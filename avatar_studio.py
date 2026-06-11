@@ -886,7 +886,7 @@ class AvatarStudio:
                     from faceswap_engine import FaceSwapEngine
                     self._log_msg("[studio] loading face-swap (ReSwapper-256 + insightface)...")
                     self.swap_engine = FaceSwapEngine(self._char_path or _character_path())
-                    tdir = os.path.join(PROJECT_DIR, "Haddan")
+                    tdir = next((os.path.join(PROJECT_DIR, d) for d in ("character_src", "Haddan") if os.path.isdir(os.path.join(PROJECT_DIR, d))), os.path.join(PROJECT_DIR, "Haddan"))
                     if self.swap_engine.ready and os.path.isdir(tdir):
                         n = self.swap_engine.set_source_from_folder(tdir)
                         if n:
@@ -1020,7 +1020,7 @@ class AvatarStudio:
                         self.swap_engine = FaceSwapEngine(self._char_path or _character_path())
                         # CHARACTER identity from the training folder (all angles),
                         # averaged + incremental so daily-added photos fold in.
-                        tdir = os.path.join(PROJECT_DIR, "Haddan")
+                        tdir = next((os.path.join(PROJECT_DIR, d) for d in ("character_src", "Haddan") if os.path.isdir(os.path.join(PROJECT_DIR, d))), os.path.join(PROJECT_DIR, "Haddan"))
                         if self.swap_engine.ready and os.path.isdir(tdir):
                             n = self.swap_engine.set_source_from_folder(tdir)
                             if n:
