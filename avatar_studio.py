@@ -589,6 +589,10 @@ class AvatarStudio:
         self.liplock_var = tk.BooleanVar(value=True)
         self._check(c, "Lips from bot voice only  ·  ignore my real mouth",
                     self.liplock_var, self._on_liplock).pack(fill="x", pady=3)
+        # AUTO-TALK: the brain writes + speaks gold commentary on its own (no typing).
+        self.autotalk_var = tk.BooleanVar(value=True)
+        self._check(c, "Auto-talk  ·  bot hosts the stream by itself (AI commentary)",
+                    self.autotalk_var, self._on_autotalk).pack(fill="x", pady=3)
 
         self.restore_var = tk.BooleanVar(value=True)
         self._check(c, "Face restoration  ·  GFPGAN (fixes plastic look)",
