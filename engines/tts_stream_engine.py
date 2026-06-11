@@ -583,20 +583,25 @@ class TTSStreamEngine:
     async def _play_and_feed(self, pcm):
         """Play audio and feed the mouth engine 40 ms at a time, paced to playback."""
         self._set_speaking(True)
+        wav_holder = {}
 
-        # a) start audio playback (async) unless muted
-        wav_path = None
-        if HAVE_WINSOUND and not self.muted:
-            wav_path = self._write_temp_wav(pcm)
-            if wav_path:
-                try:
-                    winsound.PlaySound(wav_path,
-                                       winsound.SND_FILENAME | winsound.SND_ASYNC)
-                except Exception:
-                    pass
+        # a) start audio playback AFTER MOUTH_SYNC_DELAY so the audible voice lines up
+        #    with the on-screen mouth (delayed by the render pipeline).
+        async def _delayed_play():
+            if MOUTH_SYNC_DELAY > 0:
+                await asyncio.sleep(MOUTH_SYNC_DELAY)
+            if HAVE_WINSOUND and not self.muted and self._running:
+                wav = self._write_temp_wav(pcm)
+                if wav:
+                    try:
+                        winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
+                    except Exception:
+                        pass
+                    wav_holder["p"] = wav
+        play_task = asyncio.ensure_future(_delayed_play())
 
-        # b) feed the mouth engine in lockstep with wall-clock so the lips track
-        #    exactly what is audible right now
+        # b) feed the mouth engine immediately, paced to wall-clock (the playback delay
+        #    above closes the gap so the lips track what WILL be audible).
         start = time.monotonic()
         n = len(pcm)
         pos = 0
@@ -611,11 +616,12 @@ class TTSStreamEngine:
             target = start + idx * (FEED_CHUNK_SAMPLES / SAMPLE_RATE)
             await asyncio.sleep(max(0.0, target - time.monotonic()))
 
+        await play_task
         await asyncio.sleep(TAIL_SILENCE)
         self._set_speaking(False)
-        if wav_path:
+        if wav_holder.get("p"):
             try:
-                os.remove(wav_path)
+                os.remove(wav_holder["p"])
             except OSError:
                 pass
 
