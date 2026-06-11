@@ -541,9 +541,13 @@ class FaceSwapEngine:
         S = bgr_fake.shape[0]
         IM = cv2.invertAffineTransform(M)
         fake_full = cv2.warpAffine(bgr_fake, IM, (W, H))
-        white = np.full((S, S), 255, np.uint8)
-        er = max(4, S // 11)
-        white = cv2.erode(white, np.ones((er, er), np.uint8))      # pull in from edges
+        # TALL face-oval mask that reaches UP to the hairline so MORE of the
+        # character's forehead is pasted (boundary hidden near the hair), while the
+        # sides stay inside the face (no ears/bg). Replaces the all-sides erosion
+        # that was cutting the forehead.
+        white = np.zeros((S, S), np.uint8)
+        cv2.ellipse(white, (S // 2, int(S * 0.50)),
+                    (int(S * 0.40), int(S * 0.54)), 0, 0, 360, 255, -1)  # tall = forehead
         mask = cv2.warpAffine(white, IM, (W, H))
         ys, xs = np.where(mask > 10)
         if len(xs) == 0:
