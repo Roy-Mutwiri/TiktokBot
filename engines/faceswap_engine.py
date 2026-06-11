@@ -96,6 +96,19 @@ HAIR_COLORS = {
     "gray":   dict(hue=0,  sat=8,   valf=0.92),
 }
 HAIR_COLOR = os.environ.get("AVATAR_SWAP_HAIRCOLOR", "brown")
+# EYE COLOUR — recolour the iris (MediaPipe iris landmarks) to a target hue while
+# KEEPING luminance (pupil stays dark, highlights bright, iris shading natural).
+EYE_COLORS = {       # (HSV hue 0-180, saturation)
+    "off":   None,
+    "blue":  (113, 165),
+    "green": (62, 150),
+    "hazel": (22, 120),
+    "brown": (12, 155),
+    "amber": (16, 195),
+    "gray":  (0, 12),
+}
+EYE_COLOR = os.environ.get("AVATAR_SWAP_EYECOLOR", "off")
+EYE_STRENGTH = float(os.environ.get("AVATAR_SWAP_EYESTR", "0.7"))
 CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
 # Lighten the face skin toward a Caucasian tone (0 = off, ~0.6 = clearly lighter).
 SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0"))  # OFF: white-man SOURCE handles skin, no color hacks
