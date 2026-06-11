@@ -1,0 +1,9 @@
+# build workspace (cloned MS sample + intermediates) and compiled artifacts
+build/
+*.dll
+*.exe
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp

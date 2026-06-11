@@ -13,6 +13,9 @@
 #   python avatar_camera.py                 # go live on the best backend
 #   python avatar_camera.py --list          # show camera devices on this PC
 #   python avatar_camera.py --backend obs   # force a specific backend
+#   python avatar_camera.py --native        # feed the native "Avatar Studio
+#                                           # Camera" that appears only while
+#                                           # running (see native_camera\README)
 #
 # Type what the avatar says with:  python control_gui.py   (another terminal)
 # Stop with [Q] here (or Ctrl+C).
@@ -113,6 +116,75 @@ def _print_online_box(device_name, backend):
     print(line + "\n")
 
 
+class _SharedMemCam:
+    """A drop-in stand-in for pyvirtualcam.Camera that publishes frames to the
+    native virtual camera via the shared-memory file (see avatar_sharedframe).
+    realtime_avatar.run() only calls .send()/.device/.close(), so this is enough.
+    """
+
+    def __init__(self, width, height):
+        import avatar_sharedframe as sf
+        self._w = sf.SharedFrameWriter(width, height)
+        self.device = "Avatar Studio Camera (native)"
+        self.path = self._w.path
+
+    def send(self, frame):
+        self._w.write(frame)
+
+    def sleep_until_next_frame(self):
+        pass
+
+    def close(self):
+        self._w.close()
+
+
+def _run_native(prefer_name):
+    """--native: feed the native MFCreateVirtualCamera device via shared memory.
+
+    The camera DEVICE appears only while the native host (vcam_host.exe) holds
+    it, so we launch the host (if built) and feed frames into the shared file it
+    reads. If the host isn't built yet, we still write frames (and tell the user
+    how to build it) so the pipeline can be verified.
+    """
+    import os
+    import subprocess
+    import realtime_avatar as ra
+
+    cam = _SharedMemCam(ra.FRAME_SIZE, ra.FRAME_SIZE)
+    print(f"[NATIVE] writing avatar frames to shared file: {cam.path}")
+
+    host = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "native_camera", "vcam_host.exe")
+    proc = None
+    if os.path.exists(host):
+        try:
+            proc = subprocess.Popen([host, prefer_name or "Avatar Studio Camera"])
+            print(f"[NATIVE] launched host -> '{prefer_name or 'Avatar Studio Camera'}' "
+                  "should now appear in apps' camera lists.")
+        except Exception as exc:
+            print(f"[NATIVE] could not launch host ({exc}); frames still written.")
+    else:
+        print("[NATIVE] native host not built yet — frames are being written, but the")
+        print("[NATIVE] camera device won't appear until you build it:")
+        print("[NATIVE]   1) install VS Build Tools (see native_camera\\README.md)")
+        print("[NATIVE]   2) native_camera\\setup.ps1  ->  build.ps1  ->  install.ps1")
+
+    try:
+        eng = ra.startup(cam=cam, hints=False)
+    except Exception as exc:
+        print(f"[NATIVE] engine startup failed: {exc}")
+        cam.close()
+        if proc:
+            proc.terminate()
+        return 1
+    try:
+        ra.run(eng)
+    finally:
+        if proc:
+            proc.terminate()
+    return 0
+
+
 def main(argv):
     prefer = None
     args = [a for a in argv[1:]]
@@ -126,6 +198,14 @@ def main(argv):
     if "--list" in args:
         _list_devices()
         return 0
+
+    if "--native" in args:
+        name = None
+        if "--name" in args:
+            j = args.index("--name")
+            if j + 1 < len(args):
+                name = args[j + 1]
+        return _run_native(name)
 
     if "--backend" in args:
         i = args.index("--backend")

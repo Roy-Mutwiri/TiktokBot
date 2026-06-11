@@ -35,7 +35,7 @@ LIVE_DOT_COLOR = (0, 0, 220)
 VIGNETTE_STRENGTH = 0.18       # softer vignette (less edge darkening)
 CAMERA_SHAKE_AMOUNT = 1.5
 GRAIN_STRENGTH = 6.0            # luminance sensor grain (real cameras aren't clean)
-SOFTEN = 0.22                   # tiny blur blended in to kill the "too-sharp AI" look
+SOFTEN = 0.06                  # minimal — heavy soften made the swap look too smooth
 EDGE_FEATHER = 4                # selfie-seg edge softness (px) — tight, no halo
 FRAME_SIZE = 512
 

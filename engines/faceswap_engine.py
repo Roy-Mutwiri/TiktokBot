@@ -54,9 +54,10 @@ import numpy as np
 import cv2
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# AVATAR_SWAP_HQ=1 -> ReSwapper-256 (highest fidelity, ~5fps). Default -> the
-# 128px model (19fps) which CodeFormer enhances to HD — the best USABLE realism.
-_HQ = os.environ.get("AVATAR_SWAP_HQ", "0") == "1"
+# HQ = ReSwapper-256 (highest fidelity). Now the DEFAULT because TensorRT fp16
+# makes the 256 forward ~20ms (real-time). Falls back to 128 if the 256 model is
+# absent. Set AVATAR_SWAP_HQ=0 to force the lighter 128 model.
+_HQ = os.environ.get("AVATAR_SWAP_HQ", "1") == "1"
 SWAPPER_PATHS = ([os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx")] if _HQ else []) + [
     os.path.join(PROJECT_DIR, "models", "inswapper_128_fp16.onnx"),
     os.path.join(PROJECT_DIR, "models", "inswapper_128.onnx"),
@@ -70,6 +71,9 @@ DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N fr
 COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
 # CodeFormer HD enhancement of the swapped face (inswapper is only 128px).
 ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "1") == "1"
+# How much CodeFormer to blend in (0 = raw swap/most real, 1 = full CodeFormer/
+# smoothest). Low keeps the eyes/mouth real while still adding crispness.
+ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.8"))
 COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.45"))  # gentle = keep Haddan skin
 AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "1") == "1"          # auto-framing
 CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))       # target face y (0..1)
@@ -110,9 +114,11 @@ class FaceSwapEngine:
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
-            self._kps_euro = [[OneEuroFilter(min_cutoff=1.2, beta=0.02) for _ in range(2)]
+            # light smoothing only — enough to de-jitter, NOT enough to lag the
+            # eyes/turns (over-smoothing made tracking feel dead).
+            self._kps_euro = [[OneEuroFilter(min_cutoff=4.0, beta=0.10) for _ in range(2)]
                               for _ in range(5)]
-            self._shift_euro = [OneEuroFilter(min_cutoff=0.6, beta=0.01) for _ in range(2)]
+            self._shift_euro = [OneEuroFilter(min_cutoff=0.8, beta=0.02) for _ in range(2)]
         except Exception:
             self._kps_euro = None
             self._shift_euro = None
@@ -133,18 +139,32 @@ class FaceSwapEngine:
                 print("[SWAP] inswapper model not found — face swap disabled.")
                 return
             # Force the INSwapper class with a GPU session (the model_zoo router
-            # mis-detects some ReSwapper exports as a recognition model).
+            # mis-detects some ReSwapper exports as a recognition model). For the
+            # heavy 256 model, run it on TensorRT (fp16) — ~4x faster than CUDA and,
+            # unlike naive fp16 conversion, mathematically correct (no garbage).
             try:
                 import onnxruntime
                 from insightface.model_zoo.inswapper import INSwapper
-                sess = onnxruntime.InferenceSession(path, providers=providers)
+                sw_providers = providers
+                if "256" in os.path.basename(path) and \
+                        "TensorrtExecutionProvider" in onnxruntime.get_available_providers():
+                    _trt_cache = os.path.join(PROJECT_DIR, "models", "trt_cache")
+                    os.makedirs(_trt_cache, exist_ok=True)
+                    sw_providers = [("TensorrtExecutionProvider",
+                                     {"trt_fp16_enable": True,
+                                      "trt_engine_cache_enable": True,
+                                      "trt_engine_cache_path": _trt_cache})] + providers
+                sess = onnxruntime.InferenceSession(path, providers=sw_providers)
                 self.swapper = INSwapper(model_file=path, session=sess)
+                self._swap_provider = sess.get_providers()[0]
             except Exception:
                 self.swapper = insightface.model_zoo.get_model(path, providers=providers)
+                self._swap_provider = "?"
             self._provider = self.app.models["detection"].session.get_providers()[0]
             self.ready = True
             sz = getattr(self.swapper, "input_size", ("?",))[0]
-            print(f"[SWAP] FaceSwapEngine ready | provider={self._provider} | "
+            print(f"[SWAP] FaceSwapEngine ready | detect={self._provider} | "
+                  f"swap={getattr(self, '_swap_provider', '?')} | "
                   f"model={os.path.basename(path)} ({sz}px)")
             if source_image_path:
                 self.set_source(source_image_path)
@@ -243,9 +263,11 @@ class FaceSwapEngine:
         if getattr(self, "_amask", None) is not None and self._amask.shape[0] == S:
             return self._amask
         m = np.zeros((S, S), np.float32)
-        cv2.ellipse(m, (S // 2, int(S * 0.55)),
-                    (int(S * 0.44), int(S * 0.54)), 0, 0, 360, 1.0, -1)  # tall = forehead
-        m = cv2.GaussianBlur(m, (0, 0), S * 0.05)          # soft edge / hairline feather
+        # natural face oval — only a little forehead extension (over-extending
+        # clipped the swap onto hair/background at turns = the hairline+turn errors).
+        cv2.ellipse(m, (S // 2, int(S * 0.52)),
+                    (int(S * 0.40), int(S * 0.48)), 0, 0, 360, 1.0, -1)
+        m = cv2.GaussianBlur(m, (0, 0), S * 0.06)          # soft edge / hairline feather
         self._amask = m
         return m
 
@@ -309,7 +331,11 @@ class FaceSwapEngine:
                     except Exception as exc:
                         print(f"[SWAP] enhancer unavailable ({exc})")
                 if self.enhancer is not None and getattr(self.enhancer, "ready", False):
-                    out = self.enhancer.process_frame(out)
+                    enh = self.enhancer.process_frame(out)
+                    # BLEND back, don't replace — full CodeFormer over-smooths the
+                    # eyes/mouth (dead/fake look). Keep the swap's real expression
+                    # detail and just add sharpness.
+                    out = cv2.addWeighted(out, 1.0 - ENHANCE_BLEND, enh, ENHANCE_BLEND, 0)
             return out
         except Exception:
             return frame
