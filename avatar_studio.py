@@ -155,6 +155,7 @@ class AvatarStudio:
         self._thinking = False               # True while the brain is generating
         self.cap = None
         self.obs_cam = None
+        self._tv_proc = None                # the AI-driven TradingView browser
         self.lp_interval = 2
         self._char_path = None               # chosen character image (any face)
 
@@ -183,6 +184,27 @@ class AvatarStudio:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_ui()                     # start the UI refresh loop
         self._animate()                     # start the HUD animation loop
+        # Open the real TradingView and let the AI operate it (env AVATAR_TV=0
+        # to disable). Delayed so the Studio window paints first.
+        self.root.after(1500, self._launch_tradingview)
+
+    def _launch_tradingview(self):
+        """Open TradingView.com in a browser the AI drives (scroll/zoom/draw)."""
+        import subprocess
+        if os.environ.get("AVATAR_TV", "1") == "0":
+            return
+        proj = os.path.dirname(os.path.abspath(__file__))
+        sym = os.environ.get("AVATAR_TV_SYMBOL", "OANDA:XAUUSD")
+        lang = os.environ.get("AVATAR_TTS_LANG", "en")
+        args = [sys.executable, os.path.join(proj, "tradingview_pilot.py"),
+                "--symbol", sym, "--lang", lang if lang in ("en", "ar") else "en"]
+        if os.environ.get("AVATAR_TV_SPEAK", "0") != "1":
+            args.append("--no-speak")        # avoid double TTS load by default
+        try:
+            self._tv_proc = subprocess.Popen(args, cwd=proj)
+            self._log_msg(f"[studio] opening TradingView ({sym}) - AI taking control...")
+        except Exception as exc:
+            self._log_msg(f"[studio] TradingView launch failed: {exc}")
 
     # -------------------------------------------------------------------------
     # STYLING + SMALL UI BUILDERS
@@ -1687,6 +1709,7 @@ class AvatarStudio:
             self._worker.join(timeout=2.0)
         for fn in (lambda: self.cap.release() if self.cap else None,
                    lambda: self.obs_cam.close() if self.obs_cam else None,
+                   lambda: self._tv_proc.terminate() if self._tv_proc else None,
                    lambda: self.tts.shutdown() if self.tts else None,
                    lambda: self.music.stop() if self.music else None):
             try:
