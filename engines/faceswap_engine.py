@@ -347,7 +347,13 @@ class FaceSwapEngine:
             # WIDE gate so even darker / dim-webcam skin is caught (val down to 35).
             skin = ((cr > 130) & (cr < 182) & (cb > 75) & (cb < 135) &
                     (sat > 18) & (sat < 165) & (val > 35)).astype(np.float32)
-            skin = cv2.GaussianBlur(skin, (0, 0), 3.0)[:, :, None] * SKIN_LIGHTEN
+            skin = cv2.GaussianBlur(skin, (0, 0), 3.0)
+            # TEMPORAL smoothing — stops gate-boundary pixels flickering in/out
+            # frame-to-frame (the "not consistent" tone wobble).
+            if getattr(self, "_skin_prev", None) is not None and self._skin_prev.shape == skin.shape:
+                skin = 0.5 * skin + 0.5 * self._skin_prev
+            self._skin_prev = skin
+            skin = skin[:, :, None] * SKIN_LIGHTEN
             # LAB tone shift toward a natural LIGHT-Caucasian skin (peachy, NOT the
             # gray/blue cast the old de-warm gave): strong lift of L, pull a/b toward
             # a light warm-pink target. Keeps texture; consistent face/neck/hands.
