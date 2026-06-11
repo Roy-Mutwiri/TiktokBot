@@ -849,6 +849,7 @@ class AvatarStudio:
                 lp._multi = bool(self.multiref_var.get()) and len(getattr(lp, "_refs", [])) > 1
                 lp.set_stabilization(self.stab_var.get() / 100.0)
                 lp.set_gaze(self.gaze_var.get(), self.gaze_var2.get() / 100.0)
+                lp.set_lip_lock(self.liplock_var.get())
             except Exception:
                 pass
             self._log_msg("   -> " + lp.startup_check()[1])
