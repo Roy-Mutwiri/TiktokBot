@@ -127,6 +127,8 @@ class FaceSwapEngine:
         self._seg_tried = False
         self._last_center = None       # last frame's face center (lock-on tracking)
         self._skin_prev = None         # previous skin mask (temporal smoothing)
+        self._prev_kps = None          # previous keypoints (velocity prediction)
+        self._kps_vel = None           # smoothed keypoint velocity
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
@@ -435,11 +437,28 @@ class FaceSwapEngine:
             bbox = bboxes[i, :4].astype(np.float32)
             self._last_center = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
             # TEMPORAL SMOOTHING of the 5 keypoints — no jitter/slide on movement.
+            t = self._n / 30.0
             if self._kps_euro is not None:
-                t = self._n / 30.0
                 for j in range(5):
                     kps[j, 0] = self._kps_euro[j][0](float(kps[j, 0]), t)
                     kps[j, 1] = self._kps_euro[j][1](float(kps[j, 1]), t)
+            # PREDICTIVE TRACKING: the swap appears ~1 frame behind your head because
+            # of detect+swap+render latency (the "lag on turn"). Extrapolate the
+            # keypoints FORWARD by the latency using velocity, so the swapped face
+            # lands where your head IS, not where it WAS. Clamped (no overshoot).
+            if PREDICT_LEAD > 0.0:
+                if self._prev_kps is not None and self._prev_kps.shape == kps.shape:
+                    vel = kps - self._prev_kps
+                    self._kps_vel = (vel if self._kps_vel is None
+                                     else 0.6 * self._kps_vel + 0.4 * vel)
+                    eye_d = float(np.linalg.norm(kps[0] - kps[1])) + 1e-6
+                    lead = self._kps_vel * PREDICT_LEAD
+                    n = np.linalg.norm(lead, axis=1, keepdims=True)
+                    lead = lead * np.minimum(1.0, (eye_d * 0.5) / (n + 1e-6))  # cap
+                    self._prev_kps = kps.copy()
+                    kps = kps + lead
+                else:
+                    self._prev_kps = kps.copy()
             # AUTO-CENTER (auto-framing): shift the head to frame centre.
             if AUTO_CENTER:
                 cx = (bbox[0] + bbox[2]) / 2.0; cy = (bbox[1] + bbox[3]) / 2.0
