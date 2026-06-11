@@ -140,6 +140,8 @@ class FaceSwapEngine:
         self._skin_prev = None         # previous skin mask (temporal smoothing)
         self._prev_kps = None          # previous keypoints (velocity prediction)
         self._kps_vel = None           # smoothed keypoint velocity
+        self._lock_emb = None          # locked operator face embedding (identity lock)
+        self._frame_box = None         # smoothed auto-frame crop box [cx,cy,side]
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
