@@ -41,9 +41,11 @@ CLAUDE_URL = "https://api.anthropic.com/v1/messages"
 OLLAMA_TIMEOUT = float(os.environ.get("AVATAR_BRAIN_OLLAMA_TIMEOUT", "8"))
 
 OLLAMA_HOST = os.environ.get("AVATAR_OLLAMA_HOST", "http://localhost:11434")
-# qwen2.5:7b = much stronger reasoning than llama3.2:3b, still fits 16GB alongside
-# the video + Chatterbox voice. _check() falls back to any pulled model if absent.
-MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "qwen2.5:7b")
+# 3B = 2.0 GB VRAM (vs qwen2.5:7b's 4.7 GB) — leaves GPU HEADROOM so the voice + swap
+# don't OOM when the bot speaks (OOM corrupted the CUDA context and crashed the whole
+# avatar). _check() falls back to any pulled model if absent. Set AVATAR_BRAIN_MODEL=
+# qwen2.5:7b for the stronger brain ONLY if you have spare VRAM.
+MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "llama3.2:3b")
 HISTORY_TURNS = int(os.environ.get("AVATAR_BRAIN_HISTORY", "6"))   # user+assistant pairs kept
 MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "120"))  # short = fast + speakable
 TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.8"))
