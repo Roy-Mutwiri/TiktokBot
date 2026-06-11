@@ -8,8 +8,8 @@ import os
 import sys
 import time
 
-sys.path.insert(0, "engines")
 sys.path.insert(0, ".")
+sys.path.insert(0, "engines")          # engines/ wins over any root duplicate
 
 import numpy as np
 

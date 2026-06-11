@@ -32,9 +32,14 @@ except Exception:
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENGINES_DIR = os.path.join(PROJECT_DIR, "engines")
-for p in (ENGINES_DIR, PROJECT_DIR):
-    if p not in sys.path:
-        sys.path.insert(0, p)
+# Insert PROJECT first then ENGINES so ENGINES ends up FIRST in sys.path — the
+# engine modules in engines/ must win over any stale duplicate in the project root
+# (a root copy of bg_music.py was shadowing engines/bg_music.py, so the studio ran
+# the OLD single-loop music and ignored the 50-track playlist edits).
+for p in (PROJECT_DIR, ENGINES_DIR):
+    if p in sys.path:
+        sys.path.remove(p)
+    sys.path.insert(0, p)
 
 # AUTO-CONFIG: probe the machine (GPU/VRAM/CPU + benchmark) and pick the voice /
 # brain / restore / cadence that best fit. Run ASYNC (after the window shows) so
