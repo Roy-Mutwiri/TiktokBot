@@ -1402,6 +1402,22 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _on_character(self, *args):
+        """Switch the face-swap character identity live (white man / Haddan)."""
+        folder = {"White man": "character_src", "Haddan": "Haddan"}.get(self.char_var.get())
+        if not folder or self.swap_engine is None:
+            return
+        d = os.path.join(PROJECT_DIR, folder)
+        if not os.path.isdir(d):
+            self._log_msg(f"[studio] character folder missing: {folder}")
+            return
+        try:
+            n = self.swap_engine.set_source_from_folder(d)
+            self.swap_engine._lock_emb = None      # re-lock onto the new look
+            self._log_msg(f"[studio] character -> {self.char_var.get()} ({n} photos)")
+        except Exception as exc:
+            self._log_msg(f"[studio] character switch failed: {exc}")
+
     def _on_pose(self, *args):
         """Safe / Cinematic / Free — sets the turn + tilt caps together."""
         p = POSE_PRESETS.get(self.pose_var.get())
