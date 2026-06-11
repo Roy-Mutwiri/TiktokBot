@@ -1539,6 +1539,12 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _on_autotalk(self):
+        on = bool(self.autotalk_var.get())
+        if on and (self.brain is None or not getattr(self.brain, "ok", False)):
+            self._log_msg("[studio] auto-talk needs the AI brain — it'll start once ready.")
+        self._log_msg("[studio] auto-talk " + ("ON — bot hosts by itself" if on else "off"))
+
     def _on_minface(self):
         if self.engines:
             try:
