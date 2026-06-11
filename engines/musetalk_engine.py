@@ -56,11 +56,11 @@ MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was ga
 MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.3"))    # eased: high CLAHE deepened mouth/nose shadows
 # HI-RES crisp: sharpen the talking mouth at 2x then resample back. OFF — on top of
 # the existing sharpen + the final enhance it over-crunches the 96px mouth.
-MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.35"))
+MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.5"))
 # CLEAN-then-crisp: bilateral denoise the mouth BEFORE sharpening so the crisp defines
 # real lip/teeth edges instead of amplifying 96px sensor noise (the "crunch"). 0 = off.
 # EASED to 0.4 — at 1.0 it over-smoothed the moving/open mouth = "more blur".
-MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "0.4"))
+MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "0.0"))
 # INTERIOR: lift the very-dark open-mouth interior toward a natural dark-red so the
 # open mouth doesn't render as black holes/"spots" (Wav2Lip's dark interior). 0 = off.
 MOUTH_INTERIOR = float(os.environ.get("AVATAR_MOUTH_INTERIOR", "1.0"))
