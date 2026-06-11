@@ -369,14 +369,18 @@ class FaceSwapEngine:
             c = HAIR_COLORS.get(getattr(self, "_hair_color", HAIR_COLOR))
             if c is None:
                 return out
-            gray = (sat < 60) & (val > 70) & person      # gray/white hair+beard
+            # CONTINUOUS gray/beard weight (0..1) — NO hard threshold, so it doesn't
+            # flip pixels in/out frame-to-frame (that binary flicker = "not consistent").
+            gw = np.clip((68.0 - sat) / 48.0, 0, 1)            # low saturation = gray hair/beard
+            gw *= np.clip((val - 38.0) / 55.0, 0, 1)           # not the deepest shadow
+            gw *= person.astype(np.float32)
             # HEAD band: hair above + beard well below the face box (catch the jaw).
             x1, y1, x2, y2 = [int(v) for v in bbox]
             fh = max(1, y2 - y1); fw = max(1, x2 - x1)
-            band = np.zeros(out.shape[:2], bool)
+            band = np.zeros(out.shape[:2], np.float32)
             band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.7)),
-                 max(0, x1 - int(fw * 0.45)):min(out.shape[1], x2 + int(fw * 0.45))] = True
-            m = cv2.GaussianBlur((gray & band).astype(np.float32), (0, 0), 3.0)
+                 max(0, x1 - int(fw * 0.45)):min(out.shape[1], x2 + int(fw * 0.45))] = 1.0
+            m = cv2.GaussianBlur(gw * band, (0, 0), 3.0)
             # TEMPORAL smoothing of the recolour mask — stops the recoloured region
             # flickering/shifting as you move, so the beard tint STICKS to the beard.
             if getattr(self, "_hairm_prev", None) is not None and self._hairm_prev.shape == m.shape:
