@@ -59,7 +59,11 @@ MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.3"))    # eased: hig
 MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.35"))
 # CLEAN-then-crisp: bilateral denoise the mouth BEFORE sharpening so the crisp defines
 # real lip/teeth edges instead of amplifying 96px sensor noise (the "crunch"). 0 = off.
-MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "1.0"))
+# EASED to 0.4 — at 1.0 it over-smoothed the moving/open mouth = "more blur".
+MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "0.4"))
+# INTERIOR: lift the very-dark open-mouth interior toward a natural dark-red so the
+# open mouth doesn't render as black holes/"spots" (Wav2Lip's dark interior). 0 = off.
+MOUTH_INTERIOR = float(os.environ.get("AVATAR_MOUTH_INTERIOR", "1.0"))
 # DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
 # adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
 DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0"))  # OFF: GPU op contends with voice synth during speech = lag. CPU crisp in _pop_mouth instead
