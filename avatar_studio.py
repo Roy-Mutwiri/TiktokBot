@@ -1334,6 +1334,56 @@ class AvatarStudio:
                 self.tts.speak(txt)
         threading.Thread(target=_think, daemon=True).start()
 
+    # ----- AUTO-TALK: continuous self-generated gold commentary -----------------
+    _AUTOTALK_BEATS = [
+        "Give a short, hyped live update on where gold is trading and what you're watching right now.",
+        "React in the moment to gold's latest move like it just printed on your chart.",
+        "Drop one quick trading tip about risk, stops, or entries on gold.",
+        "Call out a key support or resistance level on gold and what you'd do around it.",
+        "Hype the chat — tell viewers to smash like and post their gold targets.",
+        "Give your honest short take on the gold trend today, bullish or bearish, and why.",
+        "Tease what could happen next on gold into the session and keep them watching.",
+    ]
+
+    def _autotalk_loop(self):
+        """Background host: the brain writes gold commentary and the Arabic-accent TTS
+        speaks it (mouth lip-syncs). PIPELINED — the brain generates the NEXT line
+        WHILE the current one is synthesizing/playing, so voice generation never
+        pauses the LLM. A 1-line look-ahead keeps it bounded so commentary stays fresh."""
+        import time as _t
+        LEAD = 1
+        i = 0
+        while getattr(self, "running", False):
+            try:
+                tts = self.tts
+                if (not getattr(self, "autotalk_var", None) or not self.autotalk_var.get()
+                        or self.brain is None or not self.brain.ok or tts is None):
+                    _t.sleep(0.4)
+                    continue
+                # pace to the look-ahead — NOT blocked by the voice; the brain just
+                # doesn't run more than LEAD lines ahead of playback.
+                if tts.pending > LEAD:
+                    _t.sleep(0.2)
+                    continue
+                beat = self._AUTOTALK_BEATS[i % len(self._AUTOTALK_BEATS)]; i += 1
+                chart = self.engines.get("chart") if self.engines else None
+                price = getattr(chart, "price", None)
+                ctx = f" Gold (XAUUSD) is trading around {price:,.1f} right now." if price else ""
+                self._thinking = True
+                line = None
+                try:
+                    line = self.brain.respond(beat + ctx)   # runs WHILE prev line plays
+                except Exception as exc:
+                    self._log_msg(f"[autotalk] brain: {exc}")
+                finally:
+                    self._thinking = False
+                if line and self.autotalk_var.get():
+                    self._log_msg("avatar> " + line)
+                    self.tts.speak(line)
+            except Exception as exc:
+                self._log_msg(f"[autotalk] {exc}")
+                _t.sleep(2.0)
+
     def _load_character(self):
         """Pick ANY face image as the avatar character (no training needed).
 
