@@ -51,9 +51,9 @@ MUSETALK_CANDIDATES = [
 FACE_REGION_SIZE = 256          # MuseTalk native mouth crop resolution
 BLEND_FACTOR = float(os.environ.get("AVATAR_MOUTH_BLEND", "1.0"))  # 1.0 = full bot mouth (no operator leak)
 MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.55"))  # unsharp
-MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.10"))      # mild local contrast (was 0.18 = banding)
+MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.0"))       # off: the contrast darkened the mouth/nose into shadows
 MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was garish)
-MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.5"))    # CPU local-contrast crisp (no GPU lag)
+MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.3"))    # eased: high CLAHE deepened mouth/nose shadows
 # HI-RES crisp: sharpen the talking mouth at 2x then resample back. OFF — on top of
 # the existing sharpen + the final enhance it over-crunches the 96px mouth.
 MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.35"))

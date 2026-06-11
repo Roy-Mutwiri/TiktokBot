@@ -38,7 +38,7 @@ MOUTH_LANDMARKS = [
     91, 321, 146, 375,                                  # lower outer
 ]
 PAD_X = float(os.environ.get("AVATAR_MOUTH_PADX", "0.36"))   # cover lip corners
-PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.30"))
+PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.18"))   # stop at upper lip (not the philtrum) = no under-nose shadow
 # more room below = the jaw/chin drop on an open mouth is captured -> the mouth
 # OPENING reads clearly instead of being clipped.
 PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.56"))
