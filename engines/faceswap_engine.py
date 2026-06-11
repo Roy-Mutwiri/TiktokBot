@@ -430,26 +430,9 @@ class FaceSwapEngine:
         return 1
 
     def restore_face(self, frame):
-        """CodeFormer HD restoration of the FINAL composited face (swap + bot mouth +
-        real eyes) — run by the loop AFTER the mouth is added so the mouth, eyes and
-        skin are all restored together and consistently. Blended (not replaced) so the
-        live expression detail survives. Returns `frame` unchanged if unavailable."""
-        if not ENHANCE_SWAP or frame is None:
-            return frame
-        if self.enhancer is None and not self._enh_tried:
-            self._enh_tried = True
-            try:
-                from face_restore_engine import FaceRestoreEngine
-                self.enhancer = FaceRestoreEngine()
-                print("[SWAP] CodeFormer restoration ON (after-mouth pass)")
-            except Exception as exc:
-                print(f"[SWAP] enhancer unavailable ({exc})")
-        if self.enhancer is not None and getattr(self.enhancer, "ready", False):
-            try:
-                enh = self.enhancer.process_frame(frame)
-                return cv2.addWeighted(frame, 1.0 - ENHANCE_BLEND, enh, ENHANCE_BLEND, 0)
-            except Exception:
-                return frame
+        """No-op now: CodeFormer runs IN-SWAP again (cached, ~9fps) instead of an
+        every-frame after-mouth pass (~6fps, too laggy). Kept so the loop call is
+        harmless. Set AVATAR_SWAP_ENHANCE=0 + this back on for the after-mouth path."""
         return frame
 
     def set_stabilization(self, level):
