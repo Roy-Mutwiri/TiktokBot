@@ -51,9 +51,11 @@ def _ollama_models():
 def _bench_gpu(torch):
     """Rough fp16 matmul TFLOP/s — a quick proxy for GPU compute speed."""
     try:
-        dev = "cuda"; n = 2048; iters = 25
+        dev = "cuda"; n = 4096; iters = 50
         a = torch.randn(n, n, device=dev, dtype=torch.float16)
         b = torch.randn(n, n, device=dev, dtype=torch.float16)
+        for _ in range(10):                    # WARM UP cuBLAS (first call inits it)
+            c = a @ b
         torch.cuda.synchronize()
         t = time.time()
         for _ in range(iters):
