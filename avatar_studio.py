@@ -618,6 +618,14 @@ class AvatarStudio:
                      state="readonly", width=14,
                      style="Studio.TCombobox").pack(side="right")
         self.hair_var.trace_add("write", self._on_hair)
+        # Eye COLOUR — recolour the iris (off keeps the swapped source's eyes).
+        r = self._row(c, "Eye colour")
+        self.eye_var = tk.StringVar(value="off")
+        ttk.Combobox(r, textvariable=self.eye_var,
+                     values=["off", "blue", "green", "hazel", "brown", "amber", "gray"],
+                     state="readonly", width=14,
+                     style="Studio.TCombobox").pack(side="right")
+        self.eye_var.trace_add("write", self._on_eye)
 
         # ---- SCENE & OUTPUT ------------------------------------------------
         c = self._card(right, "SCENE & OUTPUT")

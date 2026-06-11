@@ -166,6 +166,9 @@ class FaceSwapEngine:
         self._lock_emb = None          # locked operator face embedding (identity lock)
         self._frame_box = None         # smoothed auto-frame crop box [cx,cy,side]
         self._hair_color = HAIR_COLOR  # hair/beard recolour target (live-settable)
+        self._eye_color = EYE_COLOR     # iris recolour target (live-settable)
+        self._eyemesh = None
+        self._eyemesh_tried = False
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
@@ -368,6 +371,53 @@ class FaceSwapEngine:
             hsv[:, :, 0] = hsv[:, :, 0] * (1 - mm) + c["hue"] * mm                 # target hue
             hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 - mm * 0.5) + c["sat"] * mm * 0.5, 0, 255)
             hsv[:, :, 2] = np.clip(hsv[:, :, 2] * (1 - mm * (1 - c["valf"])), 0, 255)  # darken/lighten
+            return cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
+        except Exception:
+            return out
+
+    def _get_eyemesh(self):
+        if self._eyemesh_tried:
+            return self._eyemesh
+        self._eyemesh_tried = True
+        try:
+            import mediapipe as mp
+            self._eyemesh = mp.solutions.face_mesh.FaceMesh(
+                static_image_mode=False, max_num_faces=1,
+                refine_landmarks=True, min_detection_confidence=0.5)
+        except Exception:
+            self._eyemesh = None
+        return self._eyemesh
+
+    def _recolor_eyes(self, out):
+        """Recolour the IRIS to the chosen eye colour. MediaPipe iris landmarks give
+        the iris circle; we change hue/sat but KEEP value, so the pupil stays dark,
+        catch-light stays bright and the iris shading looks natural."""
+        c = EYE_COLORS.get(getattr(self, "_eye_color", "off"))
+        if c is None:
+            return out
+        mesh = self._get_eyemesh()
+        if mesh is None:
+            return out
+        try:
+            res = mesh.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
+            if not res.multi_face_landmarks:
+                return out
+            H, W = out.shape[:2]
+            lm = res.multi_face_landmarks[0].landmark
+            mask = np.zeros((H, W), np.float32)
+            for ring in ([469, 470, 471, 472], [474, 475, 476, 477]):  # the two irises
+                pts = np.array([[lm[i].x * W, lm[i].y * H] for i in ring], np.float32)
+                (cx, cy), r = cv2.minEnclosingCircle(pts)
+                if r > 1:
+                    cv2.circle(mask, (int(cx), int(cy)), int(r * 1.05), 1.0, -1)
+            if mask.max() < 0.5:
+                return out
+            mask = cv2.GaussianBlur(mask, (0, 0), 1.5) * EYE_STRENGTH
+            hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
+            th, ts = c
+            hsv[:, :, 0] = hsv[:, :, 0] * (1 - mask) + th * mask          # target hue
+            hsv[:, :, 1] = hsv[:, :, 1] * (1 - mask) + ts * mask          # target saturation
+            # value untouched -> pupil dark, highlights bright, natural shading
             return cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
         except Exception:
             return out
@@ -610,6 +660,9 @@ class FaceSwapEngine:
             # recolour gray hair/beard -> match the character
             if HAIR_MATCH:
                 out = self._match_hair(out, bbox)
+            # recolour the iris to the chosen eye colour
+            if getattr(self, "_eye_color", "off") != "off":
+                out = self._recolor_eyes(out)
             return out
         except Exception:
             return frame
