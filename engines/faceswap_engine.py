@@ -71,7 +71,7 @@ DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "320"))   # bigger = more relia
 SEAMLESS = os.environ.get("AVATAR_SWAP_SEAMLESS", "0") == "1"
 # The 256 swap is soft (looks like a flat 'mask'). A targeted unsharp on the swapped
 # face restores feature/skin crispness for ~2ms (vs ~100ms for CodeFormer).
-SWAP_SHARPEN = float(os.environ.get("AVATAR_SWAP_SHARPEN", "0.6"))
+SWAP_SHARPEN = float(os.environ.get("AVATAR_SWAP_SHARPEN", "0.85"))
 DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N frames
 # ignore faces smaller than this fraction of the frame (background people/objects)
 MIN_FACE_FRAC = float(os.environ.get("AVATAR_SWAP_MINFACE", "0.05"))
@@ -81,7 +81,7 @@ FACE_LIGHT = float(os.environ.get("AVATAR_SWAP_FACELIGHT", "0"))  # OFF: adaptiv
 # into the operator's real lighting instead of carrying the source clip's tone.
 COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
 # CodeFormer HD enhancement of the swapped face (inswapper is only 128px).
-ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "1") == "1"  # CodeFormer HD restore (user wants sharp)
+ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "0") == "1"  # OFF for speed (no lags); AVATAR_SWAP_ENHANCE=1 for CodeFormer (~9fps)
 # How much CodeFormer to blend in (0 = raw swap/most real, 1 = full CodeFormer/
 # smoothest). Low keeps the eyes/mouth real while still adding crispness.
 ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.92"))
