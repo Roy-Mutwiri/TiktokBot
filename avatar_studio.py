@@ -1247,7 +1247,9 @@ class AvatarStudio:
                 if self._speaking or lips_from_bot:
                     try:
                         if lp_fresh or cached_bbox is None:
-                            cached_bbox = comp.detect_mouth_bbox(ai)
+                            _mh = (getattr(self.swap_engine, "last_mouth", None)
+                                   if did_swap and self.swap_engine is not None else None)
+                            cached_bbox = comp.detect_mouth_bbox(ai, _mh)
                         mouth = mt.process_mouth(ai, cached_bbox)
                         ai = comp.blend_mouth(ai, mouth, cached_bbox)
                     except Exception as exc:
