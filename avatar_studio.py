@@ -1695,6 +1695,41 @@ class AvatarStudio:
         self.music_var.set(not self.music_var.get())
         self._on_music()
 
+    def _toggle_speech(self):
+        """Top mute button: silence the bot's VOICE (lips keep moving)."""
+        if self.tts is None:
+            self._log_msg("[studio] press START first.")
+            return
+        self.tts.set_muted(not self.tts.muted)
+        muted = self.tts.muted
+        self.speech_btn.configure(text="🔇 SPEECH" if muted else "🎤 SPEECH",
+                                  fg=RED if muted else MAG,
+                                  highlightbackground=self._mix(RED if muted else MAG, BG, 0.5))
+        self._log_msg("[studio] bot speech " + ("MUTED" if muted else "on"))
+
+    def _autocfg_text(self):
+        """Top readout: chosen LLM brain + GPU benchmark."""
+        try:
+            if AUTO_PROFILE:
+                b = AUTO_PROFILE["cfg"]["brain"]
+                tf = AUTO_PROFILE["res"]["tflops"]
+                return f"🧠 {b}   ⚡ {tf:.0f} TFLOP/s"
+        except Exception:
+            pass
+        return "🧠 " + os.environ.get("AVATAR_BRAIN_MODEL", "?")
+
+    def _update_info(self):
+        """Refresh the readout with the ACTUAL loaded brain (it may differ from the
+        auto-pick if that model wasn't pulled and the brain fell back)."""
+        txt = self._autocfg_text()
+        try:
+            if self.brain is not None and getattr(self.brain, "model", None):
+                tf = AUTO_PROFILE["res"]["tflops"] if AUTO_PROFILE else 0
+                txt = f"🧠 {self.brain.model}" + (f"   ⚡ {tf:.0f} TFLOP/s" if tf else "")
+            self.info_lbl.configure(text=txt)
+        except Exception:
+            pass
+
     def _sync_music_btn(self):
         """Make the top button reflect the current music state."""
         if getattr(self, "music_btn", None) is None:
