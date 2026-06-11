@@ -678,11 +678,11 @@ class AvatarStudio:
 
         # ---- SCENE & OUTPUT ------------------------------------------------
         c = self._card(right, "SCENE & OUTPUT")
-        self.chart_var = tk.BooleanVar(value=True)
+        self.chart_var = tk.BooleanVar(value=False)
         self._check(c, "Show live charts when face is lost",
                     self.chart_var).pack(fill="x", pady=3)
         # TRADER SCENE: live chart full-frame + avatar host in a PiP corner (one app).
-        self.trader_var = tk.BooleanVar(value=True)
+        self.trader_var = tk.BooleanVar(value=False)
         self._check(c, "Trader scene  ·  chart + avatar PiP (AI trading host)",
                     self.trader_var).pack(fill="x", pady=3)
         self.obs_var = tk.BooleanVar(value=False)
