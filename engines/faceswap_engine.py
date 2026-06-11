@@ -575,8 +575,9 @@ class FaceSwapEngine:
                 fcy = (bbox[1] + bbox[3]) / 2.0 + fh * 0.15      # bias down for shoulders
                 side = min(max(fw, fh) * FRAME_ZOOM, float(min(W, H)))
                 box = np.array([fcx, fcy, side], np.float32)
+                a = 0.18 * (1.0 - 0.7 * self._stab)          # more stab = steadier framing
                 self._frame_box = (box if self._frame_box is None
-                                   else 0.82 * self._frame_box + 0.18 * box)
+                                   else (1.0 - a) * self._frame_box + a * box)
                 fcx, fcy, side = self._frame_box
                 x1c = float(np.clip(fcx - side / 2, 0, W - side))
                 y1c = float(np.clip(fcy - side / 2, 0, H - side))
@@ -602,7 +603,8 @@ class FaceSwapEngine:
                     self._kps_vel = (vel if self._kps_vel is None
                                      else 0.6 * self._kps_vel + 0.4 * vel)
                     eye_d = float(np.linalg.norm(kps[0] - kps[1])) + 1e-6
-                    lead = self._kps_vel * PREDICT_LEAD
+                    # ease off prediction at high stabilization (steadier face)
+                    lead = self._kps_vel * PREDICT_LEAD * (1.0 - 0.6 * self._stab)
                     n = np.linalg.norm(lead, axis=1, keepdims=True)
                     lead = lead * np.minimum(1.0, (eye_d * 0.5) / (n + 1e-6))  # cap
                     self._prev_kps = kps.copy()

@@ -1404,9 +1404,15 @@ class AvatarStudio:
                       f"restore every {p.get('restore_every', 2)})")
 
     def _on_stab(self):
+        lvl = self.stab_var.get() / 100.0
         if self.engines:
             try:
-                self.engines["lp"].set_stabilization(self.stab_var.get() / 100.0)
+                self.engines["lp"].set_stabilization(lvl)
+            except Exception:
+                pass
+        if self.swap_engine is not None:          # also stabilize the face-swap
+            try:
+                self.swap_engine.set_stabilization(lvl)
             except Exception:
                 pass
 
