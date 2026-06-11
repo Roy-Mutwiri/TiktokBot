@@ -920,6 +920,11 @@ class AvatarStudio:
 
     def _boot(self):
         try:
+            if AUTO_PROFILE:
+                r = AUTO_PROFILE["res"]
+                self._log_msg(f"[auto-config] {r['gpu']} · {r['vram_free']:.1f}GB free "
+                              f"· {r['tflops']:.0f} TFLOP/s")
+                self._log_msg("[auto-config] -> " + AUTO_PROFILE["cfg"]["why"])
             from liveportrait_engine import LivePortraitEngine
             from musetalk_engine import MuseTalkEngine
             from compositor import Compositor
