@@ -210,12 +210,15 @@ class MuseTalkEngine:
         # original mouth bbox back out of the result.
         H, W = lp_face_frame.shape[:2]
         mcx = (x1 + x2) // 2
+        lip_y = (y1 + y2) // 2                            # lip line (bbox centre)
         mw = max(8, x2 - x1)
-        side = int(mw * 1.7)                              # square ~ lower face
-        sy2 = min(H, y2 + int(mw * 0.10))                 # bottom just under the mouth
-        sy1 = max(0, sy2 - side)
-        sx1 = max(0, mcx - side // 2); sx2 = min(W, sx1 + side)
-        sx1 = max(0, sx2 - side)
+        side = int(max(mw, y2 - y1) * 2.0)                # square ~ lower face
+        # CENTRE the square ABOVE the lips so the WHOLE lip line lands in the lower
+        # (inpainted) half — MuseTalk keeps the upper half, so anything above centre
+        # stays the operator's. Lips at ~65% down = firmly bot-driven, no leak.
+        scy = lip_y - int(side * 0.15)
+        sy1 = max(0, scy - side // 2); sy2 = min(H, sy1 + side); sy1 = max(0, sy2 - side)
+        sx1 = max(0, mcx - side // 2); sx2 = min(W, sx1 + side); sx1 = max(0, sx2 - side)
         sq = lp_face_frame[sy1:sy2, sx1:sx2]
         if sq.shape[0] < 8 or sq.shape[1] < 8:
             return base_crop
