@@ -59,9 +59,13 @@ SCAN_MULTIPLIER = 2.0          # gather ~2x so stage 3 can drop inconsistent loo
 SCAN_TARGET_MINUTES = TARGET_MINUTES * SCAN_MULTIPLIER
 
 SAMPLE_FPS = 1.0               # frames sampled per second of video
-MIN_FACE_AREA = 0.12           # bbox must be > 12% of the frame
+MIN_FACE_AREA = 0.03           # bbox must be > 3% of the frame. This channel is
+                               # chart screen-share with a SMALL webcam inset in
+                               # the corner -- real faces sit around 3-4% (12%
+                               # only fits full-screen close-ups, which are rare).
 MAX_YAW_DEG = 30.0             # accept frontal-ish heads within +/-30 deg
-MIN_SHARPNESS = 40.0           # Laplacian variance on the face crop
+MIN_SHARPNESS = 20.0           # Laplacian variance on the face crop (small insets
+                               # upscale soft; 40 was tuned for full-screen faces)
 BRIGHTNESS_RANGE = (40, 225)   # mean gray on the face crop
 DETECT_CONFIDENCE = 0.5
 
@@ -172,7 +176,8 @@ def score_frame(frame, detector):
         return 0.0, None, None
 
     conf = float(best.score[0]) if best.score else 0.5
-    area_term = min(area / 0.30, 1.0)              # 30% bbox -> full marks
+    area_term = min(area / 0.08, 1.0)              # 8% bbox -> full marks (insets
+                                                   # are small; don't zero them out)
     yaw_term = max(0.0, 1.0 - abs(yaw) / MAX_YAW_DEG)
     sharp_term = min(sharp / 200.0, 1.0)
     quality = 0.30 * conf + 0.25 * area_term + 0.25 * yaw_term + 0.20 * sharp_term
