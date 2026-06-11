@@ -88,7 +88,7 @@ HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "0") == "1"        # hair r
 HAIR_DARKEN = float(os.environ.get("AVATAR_SWAP_HAIRDARKEN", "0.55"))
 CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
 # Lighten the face skin toward a Caucasian tone (0 = off, ~0.6 = clearly lighter).
-SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0.85"))
+SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0"))  # OFF: white-man SOURCE handles skin, no color hacks
 
 
 def _color_transfer(source, target):
