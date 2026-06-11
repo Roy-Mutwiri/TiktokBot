@@ -121,6 +121,33 @@ class UpscaleEngine:
     def upscale(self, frame):
         return self.process_frame(frame)
 
+    def enhance_crop(self, crop, strength=0.7):
+        """Real-ESRGAN detail on a SMALL crop at its NATIVE size (no forced 512), so
+        it's fast (~15ms on a mouth crop) — used to de-blur the SPEAKING mouth every
+        frame. Returns the detail-blended crop, same size. Never raises."""
+        if not self.ready or crop is None:
+            return crop
+        try:
+            torch = self._torch
+            h, w = crop.shape[:2]
+            if h < 8 or w < 8:
+                return crop
+            rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
+            t = torch.from_numpy(np.transpose(rgb, (2, 0, 1))[np.newaxis]).to(self.device)
+            with torch.no_grad():
+                if USE_BF16 and self.device == "cuda":
+                    with torch.autocast("cuda", dtype=torch.bfloat16):
+                        out = self._net(t)
+                    out = out.float()
+                else:
+                    out = self._net(t)
+            out = out[0].clamp(0, 1).detach().cpu().numpy().transpose(1, 2, 0)
+            big = cv2.cvtColor((out * 255.0).astype(np.uint8), cv2.COLOR_RGB2BGR)   # 2x
+            sr = cv2.resize(big, (w, h), interpolation=cv2.INTER_AREA)
+            return cv2.addWeighted(sr, strength, crop, 1.0 - strength, 0)
+        except Exception:
+            return crop
+
     def _run(self, frame_bgr):
         """RRDBNet x2 forward on a 512 BGR frame; resample back to 512."""
         torch = self._torch
