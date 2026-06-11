@@ -1432,8 +1432,9 @@ class AvatarStudio:
                 pass
 
     def _on_character(self, *args):
-        """Switch the face-swap character identity live (white man / Haddan)."""
-        folder = {"White man": "character_src", "Haddan": "Haddan"}.get(self.char_var.get())
+        """Switch the face-swap character identity live."""
+        folder = {"White Haddan": "haddan_white", "Haddan": "Haddan",
+                  "White man": "character_src"}.get(self.char_var.get())
         if not folder or self.swap_engine is None:
             return
         d = os.path.join(PROJECT_DIR, folder)
