@@ -381,6 +381,21 @@ class FaceSwapEngine:
         except Exception:
             return out
 
+    def set_source_blend(self, folder_a, folder_b, w):
+        """Set the source identity to a BLEND of two folders' averaged embeddings
+        (w*A + (1-w)*B), in arcface identity space — e.g. Haddan blended toward the
+        white-man identity makes a 'white Haddan' (model-driven, no colour hacks)."""
+        if not self.set_source_from_folder(folder_a):
+            return 0
+        ea = self.source_face.embedding.astype(np.float32).copy()
+        if not self.set_source_from_folder(folder_b):   # source_face now = B's template
+            return 0
+        eb = self.source_face.embedding.astype(np.float32).copy()
+        self.source_face.embedding = (w * ea + (1.0 - w) * eb).astype(np.float32)
+        print(f"[SWAP] blended identity {os.path.basename(folder_a)}*{w:.2f} + "
+              f"{os.path.basename(folder_b)}*{1-w:.2f}")
+        return 1
+
     def set_stabilization(self, level):
         """0 = responsive, 1 = max stability. Heavily smooths the face keypoints +
         framing and eases off prediction so the swapped face is rock-steady."""
