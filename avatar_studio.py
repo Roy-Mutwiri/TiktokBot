@@ -712,7 +712,11 @@ class AvatarStudio:
         c = self._card(right, "VOICE")
         tk.Label(c, text="Mode", bg=SURFACE, fg=MUTED,
                  font=("Segoe UI", 9)).pack(anchor="w")
-        self.voicemode_var = tk.StringVar(value=VOICE_MODE_LABELS[0])
+        # default the dropdown to the AUTO-CONFIG-picked voice (AVATAR_TTS)
+        _auto_tts = os.environ.get("AVATAR_TTS", "")
+        _def_label = next((lbl for lbl, key in VOICE_MODES if key == _auto_tts),
+                          VOICE_MODE_LABELS[0])
+        self.voicemode_var = tk.StringVar(value=_def_label)
         ttk.Combobox(c, textvariable=self.voicemode_var, values=VOICE_MODE_LABELS,
                      state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(3, 9))
         self.voicemode_var.trace_add("write", self._on_voice_mode)
