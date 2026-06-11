@@ -910,13 +910,20 @@ class AvatarStudio:
                     self._log_msg("[studio] loading face-swap (ReSwapper-256 + insightface)...")
                     self.swap_engine = FaceSwapEngine(self._char_path or _character_path())
                     if self.swap_engine.ready:
-                        for _cand in ("character_src", "Haddan"):  # white-man first, else Haddan
+                        # load the DEFAULT character (from the Character dropdown),
+                        # falling back to whichever folder exists.
+                        order = (["Haddan", "character_src"] if self.char_var.get() == "Haddan"
+                                 else ["character_src", "Haddan"])
+                        for _cand in order:
                             _d = os.path.join(PROJECT_DIR, _cand)
-                            if os.path.isdir(_d):
-                                n = self.swap_engine.set_source_from_folder(_d)
-                                if n:
-                                    self._log_msg(f"[studio] character: {n} photos ({_cand})")
-                                    break
+                            if os.path.isdir(_d) and self.swap_engine.set_source_from_folder(_d):
+                                self._log_msg(f"[studio] character: {_cand}")
+                                break
+                        # apply default hair/eye colour + stabilization to the engine
+                        self.swap_engine._hair_color = self.hair_var.get()
+                        self.swap_engine._eye_color = self.eye_var.get()
+                        if hasattr(self.swap_engine, "set_stabilization"):
+                            self.swap_engine.set_stabilization(self.stab_var.get() / 100.0)
                 except Exception as exc:
                     self._log_msg(f"[studio] face-swap load failed: {exc}")
             self.tts = tts
