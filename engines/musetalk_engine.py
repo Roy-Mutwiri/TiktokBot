@@ -54,6 +54,9 @@ MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.55"))  # unsharp
 MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.10"))      # mild local contrast (was 0.18 = banding)
 MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was garish)
 MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.5"))    # CPU local-contrast crisp (no GPU lag)
+# HI-RES crisp: sharpen the talking mouth at 2x then resample back — defines lips/teeth
+# closer to the GPU de-blur but PURE CPU (no speech lag). 0 = off.
+MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.95"))
 # DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
 # adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
 DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0"))  # OFF: GPU op contends with voice synth during speech = lag. CPU crisp in _pop_mouth instead
