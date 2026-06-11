@@ -77,6 +77,9 @@ ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.8"))
 COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.45"))  # gentle = keep Haddan skin
 AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "1") == "1"          # auto-framing
 CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))       # target face y (0..1)
+# Blend YOUR real eyes back over the swap (0 = Haddan's AI eyes, 1 = fully your
+# real eyes). AI source faces have dead eyes; your live eyes look human.
+EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.6"))
 
 
 def _color_transfer(source, target):
@@ -336,6 +339,21 @@ class FaceSwapEngine:
                     # eyes/mouth (dead/fake look). Keep the swap's real expression
                     # detail and just add sharpness.
                     out = cv2.addWeighted(out, 1.0 - ENHANCE_BLEND, enh, ENHANCE_BLEND, 0)
+            # EYE PRESERVATION: paste YOUR real eyes (real catchlights, gaze, blinks)
+            # back over Haddan's face. AI source photos give dead eyes; your live
+            # eyes are what make them look human. kps[0]/kps[1] = right/left eye.
+            if EYE_PRESERVE > 0.0:
+                try:
+                    eye_d = float(np.linalg.norm(kps[0] - kps[1])) + 1e-6
+                    rad = max(6, int(eye_d * 0.40))
+                    em = np.zeros((H, W), np.float32)
+                    for ex, ey in (kps[0], kps[1]):
+                        cv2.circle(em, (int(ex), int(ey)), rad, 1.0, -1)
+                    em = cv2.GaussianBlur(em, (0, 0), rad * 0.5)[:, :, None] * EYE_PRESERVE
+                    out = (out.astype(np.float32) * (1 - em)
+                           + frame.astype(np.float32) * em).astype(np.uint8)
+                except Exception:
+                    pass
             return out
         except Exception:
             return frame
