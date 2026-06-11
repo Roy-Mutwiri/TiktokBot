@@ -359,6 +359,45 @@ class FaceSwapEngine:
         except Exception:
             return out
 
+    def _load_hair(self, style):
+        """Lazy-load a hairstyle asset (RGBA hair cut-out + its face 5-kps)."""
+        if not hasattr(self, "_hair_assets"):
+            self._hair_assets = {}
+        if style in self._hair_assets:
+            return self._hair_assets[style]
+        hp = os.path.join(PROJECT_DIR, "hairstyles", f"{style}.png")
+        kp = os.path.join(PROJECT_DIR, "hairstyles", f"{style}.npy")
+        asset = None
+        if os.path.exists(hp) and os.path.exists(kp):
+            rgba = cv2.imread(hp, cv2.IMREAD_UNCHANGED)
+            if rgba is not None and rgba.shape[2] == 4:
+                asset = (rgba, np.load(kp).astype(np.float32))
+        self._hair_assets[style] = asset
+        return asset
+
+    def _apply_hairstyle(self, out, kps):
+        """Composite the selected hairstyle onto the head, aligned to the face via
+        a similarity transform from the asset's kps to yours (forward-facing)."""
+        style = getattr(self, "_hairstyle", "none")
+        if style == "none":
+            return out
+        asset = self._load_hair(style)
+        if asset is None:
+            return out
+        rgba, akps = asset
+        try:
+            M, _ = cv2.estimateAffinePartial2D(akps, kps.astype(np.float32), method=cv2.LMEDS)
+            if M is None:
+                return out
+            H, W = out.shape[:2]
+            warped = cv2.warpAffine(rgba, M, (W, H), flags=cv2.INTER_LINEAR,
+                                    borderValue=(0, 0, 0, 0))
+            a = (warped[:, :, 3:4].astype(np.float32) / 255.0)
+            return (out.astype(np.float32) * (1 - a)
+                    + warped[:, :, :3].astype(np.float32) * a).astype(np.uint8)
+        except Exception:
+            return out
+
     def _embed(self, frame, kps):
         """Arcface embedding for a face (by its 5 kps) — used to identity-lock onto
         the operator and ignore any other face that enters the frame."""
