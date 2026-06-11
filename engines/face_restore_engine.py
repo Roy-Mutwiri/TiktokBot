@@ -49,7 +49,7 @@ FIDELITY = float(os.environ.get("AVATAR_RESTORE_FIDELITY", "0.7"))
 
 # Run the (costly) restore every Nth frame, reuse the cached result between.
 # 1 = every frame (sharpest, slowest). Tunable via env AVATAR_RESTORE_INTERVAL.
-RESTORE_INTERVAL = int(os.environ.get("AVATAR_RESTORE_INTERVAL", "3"))
+RESTORE_INTERVAL = int(os.environ.get("AVATAR_RESTORE_INTERVAL", "2"))
 
 # Re-run face DETECTION (retinaface, ~29ms) only every Nth restore — the AI head
 # is near-static, so the alignment transform barely moves. Between detects we

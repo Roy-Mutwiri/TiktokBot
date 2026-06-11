@@ -50,6 +50,7 @@ MUSETALK_CANDIDATES = [
 ]
 FACE_REGION_SIZE = 256          # MuseTalk native mouth crop resolution
 BLEND_FACTOR = float(os.environ.get("AVATAR_MOUTH_BLEND", "1.0"))  # 1.0 = full bot mouth (no operator leak)
+MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.7"))   # unsharp the soft VAE mouth
 
 SAMPLE_RATE = 16000
 AUDIO_WINDOW_MS = 200
@@ -73,8 +74,14 @@ class MuseTalkEngine:
         self._err_printed = False
         self._w2l = None          # Wav2Lip fallback engine (if used)
 
-        # --- try the real MuseTalk pipeline first ---
-        mt_path = self._find_musetalk()
+        # --- mouth engine selection ---------------------------------------------
+        # MuseTalk's 256 VAE decode is SOFT; Wav2Lip generates a crisp full mouth
+        # (and replaces it entirely, so no "operator upper-lip" leak). Default to
+        # Wav2Lip for a sharp, leak-free, bot-driven mouth. AVATAR_MOUTH_ENGINE=
+        # musetalk forces the (softer) MuseTalk path.
+        _engine = os.environ.get("AVATAR_MOUTH_ENGINE", "wav2lip").lower()
+        # --- try the real MuseTalk pipeline first (only if requested) ---
+        mt_path = self._find_musetalk() if _engine == "musetalk" else None
         if mt_path is not None:
             try:
                 self._load_musetalk(mt_path)
@@ -237,6 +244,11 @@ class MuseTalkEngine:
         out = recon[oy1:oy2, ox1:ox2]
         if out.shape[:2] != base_crop.shape[:2]:
             out = cv2.resize(out, (x2 - x1, y2 - y1))
+        # the 256 VAE decode is soft -> unsharp the mouth back to crisp structure
+        if MOUTH_SHARP > 0 and out.shape[0] > 6 and out.shape[1] > 6:
+            blur = cv2.GaussianBlur(out, (0, 0), 1.2)
+            out = np.clip(out.astype(np.float32) * (1 + MOUTH_SHARP)
+                          - blur.astype(np.float32) * MOUTH_SHARP, 0, 255).astype(np.uint8)
         blended = (out.astype(np.float32) * BLEND_FACTOR +
                    base_crop.astype(np.float32) * (1.0 - BLEND_FACTOR))
         return np.clip(blended, 0, 255).astype(np.uint8)
