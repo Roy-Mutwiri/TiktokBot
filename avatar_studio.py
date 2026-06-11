@@ -610,6 +610,14 @@ class AvatarStudio:
                      state="readonly", width=14,
                      style="Studio.TCombobox").pack(side="right")
         self.char_var.trace_add("write", self._on_character)
+        # Hair / beard COLOUR — recolours gray hair+beard to match the character.
+        r = self._row(c, "Hair colour")
+        self.hair_var = tk.StringVar(value="brown")
+        ttk.Combobox(r, textvariable=self.hair_var,
+                     values=["brown", "black", "blonde", "gray", "none"],
+                     state="readonly", width=14,
+                     style="Studio.TCombobox").pack(side="right")
+        self.hair_var.trace_add("write", self._on_hair)
 
         # ---- SCENE & OUTPUT ------------------------------------------------
         c = self._card(right, "SCENE & OUTPUT")

@@ -152,6 +152,7 @@ class FaceSwapEngine:
         self._kps_vel = None           # smoothed keypoint velocity
         self._lock_emb = None          # locked operator face embedding (identity lock)
         self._frame_box = None         # smoothed auto-frame crop box [cx,cy,side]
+        self._hair_color = HAIR_COLOR  # hair/beard recolour target (live-settable)
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
