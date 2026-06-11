@@ -975,6 +975,7 @@ class AvatarStudio:
                 from llm_brain import LLMBrain
                 self.brain = LLMBrain()
                 self._log_msg("   -> brain: " + self.brain.startup_check()[1])
+                self.root.after(0, self._update_info)   # show the ACTUAL model up top
                 # Pre-load the model into VRAM in the background so the first
                 # question isn't a ~45s cold-load. Keeps it resident after.
                 if self.brain.ok:
