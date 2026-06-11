@@ -90,7 +90,7 @@ ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.92"))
 COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.0"))
 AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "0") == "1"          # auto-framing (off)
 CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))
-EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.5"))         # real-eye blend
+EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.62"))        # real-eye blend (livelier)
 HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "1") == "1"        # hair/beard recolour
 HAIR_DARKEN = float(os.environ.get("AVATAR_SWAP_HAIRDARKEN", "0.55"))
 # Hair/beard colour presets (recolours gray hair+beard so they match the
