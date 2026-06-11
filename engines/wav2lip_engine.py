@@ -203,7 +203,10 @@ class Wav2LipEngine:
             pred = self.model(mel_t, img_t)                  # (1,3,96,96)
         pred = (pred[0].detach().cpu().numpy().transpose(1, 2, 0) * 255.0)
         pred = np.clip(pred, 0, 255).astype(np.uint8)
-        return cv2.resize(pred, (crop.shape[1], crop.shape[0]))
+        # LANCZOS4 (not the default soft LINEAR) to upscale the 96px mouth back —
+        # crisper lips/teeth at the source = less of the "blur taking over".
+        return cv2.resize(pred, (crop.shape[1], crop.shape[0]),
+                          interpolation=cv2.INTER_LANCZOS4)
 
     def _blend_mouth(self, frame, synced_crop, box):
         """Blend only the lower (mouth) portion of the synced crop back in."""
