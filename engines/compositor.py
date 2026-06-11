@@ -37,9 +37,11 @@ MOUTH_LANDMARKS = [
     78, 308, 13, 14, 87, 317, 37, 267, 82, 312,        # inner lip
     91, 321, 146, 375,                                  # lower outer
 ]
-PAD_X = 0.30          # expand bbox horizontally each side (cover lip corners)
-PAD_Y_TOP = 0.26      # room above the upper lip
-PAD_Y_BOTTOM = 0.50   # generous room below for jaw / chin drop on a wide-open mouth
+PAD_X = float(os.environ.get("AVATAR_MOUTH_PADX", "0.36"))   # cover lip corners
+PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.30"))
+# more room below = the jaw/chin drop on an open mouth is captured -> the mouth
+# OPENING reads clearly instead of being clipped.
+PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.66"))
 FEATHER_KERNEL = 21   # GaussianBlur kernel for the alpha edge feather (odd)
 COLOR_MATCH_STRENGTH = 0.6   # 0..1 how strongly to match crop colour to skin
 # Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). A little helps real
