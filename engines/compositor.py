@@ -41,7 +41,7 @@ PAD_X = float(os.environ.get("AVATAR_MOUTH_PADX", "0.36"))   # cover lip corners
 PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.30"))
 # more room below = the jaw/chin drop on an open mouth is captured -> the mouth
 # OPENING reads clearly instead of being clipped.
-PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.66"))
+PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.56"))
 FEATHER_KERNEL = 21   # GaussianBlur kernel for the alpha edge feather (odd)
 COLOR_MATCH_STRENGTH = 0.6   # 0..1 how strongly to match crop colour to skin
 # Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). A little helps real

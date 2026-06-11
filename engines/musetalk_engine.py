@@ -51,8 +51,8 @@ MUSETALK_CANDIDATES = [
 FACE_REGION_SIZE = 256          # MuseTalk native mouth crop resolution
 BLEND_FACTOR = float(os.environ.get("AVATAR_MOUTH_BLEND", "1.0"))  # 1.0 = full bot mouth (no operator leak)
 MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.7"))   # unsharp the soft VAE mouth
-MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.35"))      # local contrast (opening/lips pop)
-MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.20"))      # redder/livelier lips
+MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.18"))      # mild local contrast
+MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was garish)
 
 SAMPLE_RATE = 16000
 AUDIO_WINDOW_MS = 200

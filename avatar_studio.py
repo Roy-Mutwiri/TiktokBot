@@ -613,12 +613,16 @@ class AvatarStudio:
         self.body_var = tk.BooleanVar(value=True)
         self._check(c, "Live body motion  ·  torso follows you",
                     self.body_var).pack(fill="x", pady=3)
+        self.music_var = tk.BooleanVar(value=True)
+        self._check(c, "Background music  ·  trading mood (ducks under voice)",
+                    self.music_var, self._on_music).pack(fill="x", pady=3)
         self.multiref_var = tk.BooleanVar(value=False)
         self._check(c, "Extended turning  ·  multi-view (wider, less stable)",
                     self.multiref_var, self._on_multiref).pack(fill="x", pady=3)
-        self.swap_var = tk.BooleanVar(value=True)        # our focus mode -> default ON
-        self._check(c, "FACE-SWAP mode  ·  real head, perfect 90° turns (GPU)",
-                    self.swap_var).pack(fill="x", pady=3)
+        # OFF by default: face-swap shows YOUR real mouth (breaks bot-only lips).
+        self.swap_var = tk.BooleanVar(value=False)
+        self._check(c, "FACE-SWAP mode  ·  YOUR real head (your real mouth)",
+                    self.swap_var, self._on_swap).pack(fill="x", pady=3)
         # CHARACTER picker — switch identity live (white man / Haddan / any folder).
         r = self._row(c, "Character")
         self.char_var = tk.StringVar(value="White Haddan")
@@ -809,6 +813,16 @@ class AvatarStudio:
                 self._set_status("speaking", GREEN)
             elif self.status_lbl.cget("text") in ("thinking...", "generating voice...", "speaking"):
                 self._set_status("LIVE", GREEN)
+        # Background music: on while LIVE + toggled, ducks under the voice and
+        # swells back up the instant the AI pauses.
+        if self.music is not None:
+            try:
+                want = bool(self.running and getattr(self, "music_var", None)
+                            and self.music_var.get())
+                self.music.set_active(want)
+                self.music.set_speaking(bool(getattr(self, "_speaking", False)))
+            except Exception:
+                pass
         self.root.after(33, self._poll_ui)   # ~30 Hz UI refresh
 
     def _append_log(self, msg):
@@ -1536,6 +1550,12 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _on_music(self):
+        if self.music is not None:
+            on = bool(self.music_var.get())
+            self.music.set_active(on and self.running)
+            self._log_msg("[studio] background music " + ("ON" if on else "off"))
+
     def _on_liplock(self):
         if self.engines:
             try:
@@ -1652,7 +1672,8 @@ class AvatarStudio:
             self._worker.join(timeout=2.0)
         for fn in (lambda: self.cap.release() if self.cap else None,
                    lambda: self.obs_cam.close() if self.obs_cam else None,
-                   lambda: self.tts.shutdown() if self.tts else None):
+                   lambda: self.tts.shutdown() if self.tts else None,
+                   lambda: self.music.stop() if self.music else None):
             try:
                 fn()
             except Exception:
