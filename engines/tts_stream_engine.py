@@ -93,6 +93,11 @@ VOICE = "en-US-ChristopherNeural"      # deep confident male (default)
 SAMPLE_RATE = 16000
 FEED_CHUNK_SAMPLES = 640               # 40 ms at 16 kHz — one video frame's worth
 TAIL_SILENCE = 0.30                    # keep "speaking" this long after audio ends
+# The on-screen mouth lags the audio by the render+display pipeline latency, so we
+# DELAY audio playback by this to line the voice up with the visible mouth. The
+# pipeline is heavier with after-mouth CodeFormer, so default ~150ms. Tune via
+# AVATAR_MOUTH_SYNC_DELAY: raise if the mouth still LAGS the voice, lower if it LEADS.
+MOUTH_SYNC_DELAY = float(os.environ.get("AVATAR_MOUTH_SYNC_DELAY", "0.15"))
 
 # Male edge-tts voices offered in the control GUI dropdown.
 MALE_VOICES = [

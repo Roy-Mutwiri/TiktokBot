@@ -226,7 +226,10 @@ class BackgroundMusic:
         if cur is None:
             outdata.fill(0); return
         target = self.base_vol * (DUCK if self._speaking else 1.0) if self.active else 0.0
-        g_end = self._gain + (target - self._gain) * 0.25
+        # Duck FAST (so the voice is never masked at the start of a line) but let
+        # the music swell back up GENTLY in pauses (no jarring jump).
+        ramp = 0.5 if target < self._gain else 0.12
+        g_end = self._gain + (target - self._gain) * ramp
         gains = np.linspace(self._gain, g_end, frames, dtype=np.float32)
         self._gain = g_end
         end = self._pos + frames
