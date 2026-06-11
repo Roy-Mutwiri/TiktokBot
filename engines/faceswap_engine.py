@@ -648,9 +648,10 @@ class FaceSwapEngine:
             # recolour gray hair/beard -> match the character
             if HAIR_MATCH:
                 out = self._match_hair(out, bbox)
-            # overlay a chosen hairstyle (aligned 2D hair), if selected
+            # overlay a chosen hairstyle (aligned 2D hair), if selected — aligned to
+            # the ACTUAL (non-predicted) face so it sticks to your head.
             if getattr(self, "_hairstyle", "none") != "none":
-                out = self._apply_hairstyle(out, kps)
+                out = self._apply_hairstyle(out, getattr(self, "_disp_kps", kps))
             return out
         except Exception:
             return frame

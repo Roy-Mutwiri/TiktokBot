@@ -22,11 +22,13 @@ app = insightface.app.FaceAnalysis(name="buffalo_l", allowed_modules=["detection
 app.prepare(ctx_id=0, det_size=(640, 640))
 
 STYLES = {
-    "short":   "very short neat crew cut brown hair, clean fade",
-    "medium":  "medium length tousled brown hair, modern textured",
-    "long":    "long flowing shoulder-length brown hair",
-    "slick":   "slicked-back glossy brown hair, pompadour",
-    "curly":   "short curly brown hair",
+    "buzz":      "very short buzz cut brown hair, clean masculine",
+    "fade":      "short brown hair with skin fade sides and textured top, modern barber cut",
+    "quiff":     "brown quiff hairstyle, voluminous swept-up front, short sides, men's",
+    "undercut":  "brown undercut hairstyle, slicked-back top, shaved sides, sharp masculine",
+    "crewcut":   "classic short brown crew cut, neat masculine",
+    "curly":     "short curly brown hair, men's tapered",
+    "long":      "long brown hair to the shoulders, masculine, slight wave",
 }
 NEG = "cartoon, anime, cgi, blurry, deformed, hat, multiple people, watermark, text"
 
