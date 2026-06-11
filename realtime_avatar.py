@@ -293,9 +293,28 @@ def startup(cam=None, backend=None, hints=True):
         except Exception:
             pass
 
+    # Chart scene: the AI-operated analytical chart (real data + drawings +
+    # spoken analysis) when AVATAR_AICHART is set, else the classic synthetic one.
+    ai_sym = os.environ.get("AVATAR_AICHART", "").strip()
+    if ai_sym:
+        try:
+            from chart_pilot import ChartPilot
+            sym = "PAXGUSDT" if ai_sym.lower() in ("1", "on", "true", "yes") else ai_sym.upper()
+            chart = ChartPilot(sym, os.environ.get("AVATAR_AICHART_TF", "15m"),
+                               size=(FRAME_SIZE, FRAME_SIZE),
+                               display_name=os.environ.get("AVATAR_AICHART_NAME", "XAU/USD (gold)"),
+                               narrate_lang=os.environ.get("AVATAR_TTS_LANG", "en")
+                               if os.environ.get("AVATAR_TTS_LANG", "en") in ("en", "ar") else "en")
+            print(f"      -> AI chart pilot: {chart.startup_check()[1]}")
+        except Exception as exc:
+            print(f"      -> AI chart unavailable ({exc}); using synthetic chart.")
+            chart = TradingView("XAUUSD")
+    else:
+        chart = TradingView("XAUUSD")
+
     return {"liveportrait": liveportrait, "musetalk": musetalk,
             "compositor": compositor, "tts": tts, "enhance": enhance_engine,
-            "cap": cap, "cam": cam, "chart": TradingView("XAUUSD")}
+            "cap": cap, "cam": cam, "chart": chart}
 
 
 # Virtual / non-physical cameras we must NEVER grab as input — feeding the OBS
@@ -477,6 +496,15 @@ def run(eng=None):
             # of the time we reuse the cached bbox (saves a FaceMesh pass/frame).
             t2 = time.perf_counter()
             speaking = bool(getattr(musetalk, "is_speaking", False))
+            # While the AI chart is on screen, let the avatar SPEAK its live
+            # market read (the ChartPilot paces one line per analysis move).
+            if in_chart and not speaking and hasattr(chart, "next_narration"):
+                _line = chart.next_narration()
+                if _line:
+                    try:
+                        tts.speak(_line)
+                    except Exception:
+                        pass
             if chart_fade >= 1.0:
                 # fully on charts — skip the now-hidden avatar mouth/enhance work
                 final = chart.render(speaking=speaking)
