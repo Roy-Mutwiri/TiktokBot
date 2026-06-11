@@ -157,6 +157,8 @@ class FaceSwapEngine:
         self._frame_box = None         # smoothed auto-frame crop box [cx,cy,side]
         self._hair_color = HAIR_COLOR  # hair/beard recolour target (live-settable)
         self._hairstyle = HAIRSTYLE    # hairstyle overlay (live-settable)
+        self._hair_no = None           # smoothed head-yaw proxy (hair view select)
+        self._hair_vi = -1             # current hair view index
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
