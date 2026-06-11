@@ -1432,6 +1432,16 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _on_liplock(self):
+        if self.engines:
+            try:
+                self.engines["lp"].set_lip_lock(self.liplock_var.get())
+                self._log_msg("[studio] lips: "
+                              + ("BOT VOICE only (your mouth ignored)"
+                                 if self.liplock_var.get() else "follow your webcam mouth"))
+            except Exception:
+                pass
+
     def _on_minface(self):
         if self.engines:
             try:
