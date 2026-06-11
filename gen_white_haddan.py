@@ -25,7 +25,7 @@ PROMPT = ("RAW photo, photorealistic headshot of a WHITE caucasian man, fair lig
           "neutral expression mouth slightly open, looking at camera, soft studio "
           "light, plain background, ultra detailed realistic skin, 85mm")
 NEG_EXTRA = ", mustache covering lips, hidden mouth, bushy moustache over the lips"
-NEG = ("thick bushy beard, mustache covering lips, hidden mouth, dark skin, tan, cartoon, anime, cgi, plastic, blurry, deformed, multiple "
+NEG = ("mustache covering lips, hidden mouth, dark skin, tan, cartoon, anime, cgi, plastic, blurry, deformed, multiple "
        "people, hat, watermark, text")
 
 # pick the clearest frontal Haddan photos (detectable, largest face)
