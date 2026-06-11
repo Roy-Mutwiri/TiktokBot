@@ -605,8 +605,9 @@ class AvatarStudio:
                     self.swap_var).pack(fill="x", pady=3)
         # CHARACTER picker — switch identity live (white man / Haddan / any folder).
         r = self._row(c, "Character")
-        self.char_var = tk.StringVar(value="Haddan")
-        ttk.Combobox(r, textvariable=self.char_var, values=["White man", "Haddan"],
+        self.char_var = tk.StringVar(value="White Haddan")
+        ttk.Combobox(r, textvariable=self.char_var,
+                     values=["White Haddan", "Haddan", "White man"],
                      state="readonly", width=14,
                      style="Studio.TCombobox").pack(side="right")
         self.char_var.trace_add("write", self._on_character)
@@ -912,8 +913,10 @@ class AvatarStudio:
                     if self.swap_engine.ready:
                         # load the DEFAULT character (from the Character dropdown),
                         # falling back to whichever folder exists.
-                        order = (["Haddan", "character_src"] if self.char_var.get() == "Haddan"
-                                 else ["character_src", "Haddan"])
+                        _pref = {"White Haddan": "haddan_white", "Haddan": "Haddan",
+                                 "White man": "character_src"}.get(self.char_var.get(), "haddan_white")
+                        order = [_pref] + [d for d in ("haddan_white", "Haddan", "character_src")
+                                           if d != _pref]
                         for _cand in order:
                             _d = os.path.join(PROJECT_DIR, _cand)
                             if os.path.isdir(_d) and self.swap_engine.set_source_from_folder(_d):
