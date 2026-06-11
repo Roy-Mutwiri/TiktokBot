@@ -34,7 +34,8 @@ import glob
 try:
     import site
     for _base in site.getsitepackages():
-        for _sub in ("nvidia/cudnn/bin", "nvidia/cuda_runtime/bin", "nvidia/cublas/bin"):
+        for _sub in ("nvidia/cudnn/bin", "nvidia/cuda_runtime/bin", "nvidia/cublas/bin",
+                     "tensorrt_libs"):     # TensorRT nvinfer DLLs (for the TRT EP)
             _p = os.path.join(_base, _sub)
             if os.path.isdir(_p):
                 try:
