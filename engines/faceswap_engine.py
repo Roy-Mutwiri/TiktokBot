@@ -169,6 +169,7 @@ class FaceSwapEngine:
         self._eye_color = EYE_COLOR     # iris recolour target (live-settable)
         self._eyemesh = None
         self._eyemesh_tried = False
+        self._stab = 0.4                # stabilization level (0..1), live-settable
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
