@@ -344,16 +344,17 @@ class FaceSwapEngine:
             sat, val = hsv[:, :, 1], hsv[:, :, 2]
             # skin: classic YCrCb range, moderate saturation (the bright RED SHIRT is
             # far more saturated), reasonably bright (not the dark beard/shadows).
-            skin = ((cr > 133) & (cr < 173) & (cb > 77) & (cb < 127) &
-                    (sat > 25) & (sat < 150) & (val > 60)).astype(np.float32)
+            # WIDE gate so even darker / dim-webcam skin is caught (val down to 35).
+            skin = ((cr > 130) & (cr < 182) & (cb > 75) & (cb < 135) &
+                    (sat > 18) & (sat < 165) & (val > 35)).astype(np.float32)
             skin = cv2.GaussianBlur(skin, (0, 0), 3.0)[:, :, None] * SKIN_LIGHTEN
             # LAB tone shift toward a natural LIGHT-Caucasian skin (peachy, NOT the
-            # gray/blue cast the old de-warm gave): lift L, pull a/b toward a light
-            # warm-pink target. Keeps texture; consistent across face/neck/hands.
+            # gray/blue cast the old de-warm gave): strong lift of L, pull a/b toward
+            # a light warm-pink target. Keeps texture; consistent face/neck/hands.
             lab = cv2.cvtColor(out, cv2.COLOR_BGR2LAB).astype(np.float32)
-            lab[:, :, 0] = lab[:, :, 0] + (235.0 - lab[:, :, 0]) * 0.30   # lighten
-            lab[:, :, 1] = lab[:, :, 1] * 0.6 + 143.0 * 0.4               # a -> light red
-            lab[:, :, 2] = lab[:, :, 2] * 0.6 + 150.0 * 0.4               # b -> light yellow
+            lab[:, :, 0] = lab[:, :, 0] + (238.0 - lab[:, :, 0]) * 0.45   # strong lighten
+            lab[:, :, 1] = lab[:, :, 1] * 0.55 + 143.0 * 0.45             # a -> light red
+            lab[:, :, 2] = lab[:, :, 2] * 0.55 + 150.0 * 0.45             # b -> light yellow
             toned = cv2.cvtColor(np.clip(lab, 0, 255).astype(np.uint8), cv2.COLOR_LAB2BGR)
             return np.clip(f * (1 - skin) + toned.astype(np.float32) * skin, 0, 255).astype(np.uint8)
         except Exception:
