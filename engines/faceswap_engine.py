@@ -804,11 +804,13 @@ class FaceSwapEngine:
             # recolour the iris to the chosen eye colour
             if getattr(self, "_eye_color", "off") != "off":
                 out = self._recolor_eyes(out)
+            self._last_good = out                # remember the last good character face
             return out
         except Exception as e:
             self._swap_errs = getattr(self, "_swap_errs", 0) + 1
             if self._swap_errs <= 3:
-                import traceback
-                print(f"[SWAP] per-frame swap error ({e}) — passing raw frame")
-                traceback.print_exc()
-            return frame
+                print(f"[SWAP] per-frame swap error ({e}) — holding last good face")
+            # On a transient error (e.g. GPU contention) show the LAST GOOD swapped
+            # face — the character/beard never vanishes to the raw operator frame.
+            lg = getattr(self, "_last_good", None)
+            return lg if lg is not None else frame
