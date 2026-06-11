@@ -1654,6 +1654,29 @@ class AvatarStudio:
             on = bool(self.music_var.get())
             self.music.set_active(on and self.running)
             self._log_msg("[studio] background music " + ("ON" if on else "off"))
+        self._sync_music_btn()
+
+    def _toggle_music(self):
+        """Top mute button: flip the background music on/off."""
+        if getattr(self, "music_var", None) is None:
+            return
+        self.music_var.set(not self.music_var.get())
+        self._on_music()
+
+    def _sync_music_btn(self):
+        """Make the top button reflect the current music state."""
+        if getattr(self, "music_btn", None) is None:
+            return
+        on = bool(getattr(self, "music_var", None) and self.music_var.get())
+        try:
+            if on:
+                self.music_btn.configure(text="♪ MUSIC", fg=CYAN,
+                                         highlightbackground=self._mix(CYAN, BG, 0.5))
+            else:
+                self.music_btn.configure(text="🔇 MUTED", fg=RED,
+                                         highlightbackground=self._mix(RED, BG, 0.5))
+        except Exception:
+            pass
 
     def _on_liplock(self):
         if self.engines:
