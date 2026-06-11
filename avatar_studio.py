@@ -1060,7 +1060,7 @@ class AvatarStudio:
             # speech and only the mouth moves (owned by the mouth-sync), so we run
             # LivePortrait + the costly face restore HALF as often and reuse the
             # held result between — freeing the GPU for per-frame mouth-sync.
-            speaking_now = bool(getattr(mt, "is_speaking", False))
+            speaking_now = bool(self.tts is not None and getattr(self.tts, "speaking", False))
             _speed = 2 if speaking_now else 1
 
             # one automatic recenter ~2s in, once the operator has settled, so
