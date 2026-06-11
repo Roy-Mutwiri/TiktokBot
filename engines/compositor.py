@@ -37,9 +37,9 @@ MOUTH_LANDMARKS = [
     78, 308, 13, 14, 87, 317, 37, 267, 82, 312,        # inner lip
     91, 321, 146, 375,                                  # lower outer
 ]
-PAD_X = 0.20          # expand bbox horizontally by 20% each side
-PAD_Y_TOP = 0.22      # a little room above the upper lip
-PAD_Y_BOTTOM = 0.38   # extra room below for jaw / chin movement
+PAD_X = 0.30          # expand bbox horizontally each side (cover lip corners)
+PAD_Y_TOP = 0.26      # room above the upper lip
+PAD_Y_BOTTOM = 0.50   # generous room below for jaw / chin drop on a wide-open mouth
 FEATHER_KERNEL = 21   # GaussianBlur kernel for the alpha edge feather (odd)
 COLOR_MATCH_STRENGTH = 0.6   # 0..1 how strongly to match crop colour to skin
 MIN_BBOX = 12         # reject degenerate detections smaller than this (px)
