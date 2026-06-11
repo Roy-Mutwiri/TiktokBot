@@ -207,8 +207,16 @@ class ControlServer:
 # -----------------------------------------------------------------------------
 # STARTUP
 # -----------------------------------------------------------------------------
-def startup():
-    """Build every engine in order, printing progress. Returns a dict."""
+def startup(cam=None, backend=None, hints=True):
+    """Build every engine in order, printing progress. Returns a dict.
+
+    cam     : a pre-built pyvirtualcam.Camera to publish into. avatar_camera.py
+              injects a branded one; left None, one is created here.
+    backend : pyvirtualcam backend ('obs' / 'unitycapture') used only when this
+              function creates the camera itself.
+    hints   : print the trailing OBS / control_gui usage hints (the camera
+              launcher prints its own, so it passes hints=False).
+    """
     print(BANNER)
 
     import pyvirtualcam
@@ -246,14 +254,19 @@ def startup():
 
     print("[5/5] Virtual camera...")
     print(f"      -> enhance: {enhance_engine.startup_check()[1]}")
-    cam = pyvirtualcam.Camera(width=FRAME_SIZE, height=FRAME_SIZE, fps=FPS,
-                              fmt=pyvirtualcam.PixelFormat.BGR)
+    if cam is None:
+        _kw = dict(width=FRAME_SIZE, height=FRAME_SIZE, fps=FPS,
+                   fmt=pyvirtualcam.PixelFormat.BGR)
+        if backend:
+            _kw["backend"] = backend
+        cam = pyvirtualcam.Camera(**_kw)
     print(f"      -> virtual camera: {cam.device}")
 
-    print("\n  AVATAR LIVE — open OBS, add Video Capture Device -> select the "
-          "virtual cam.")
-    print("  Run  python control_gui.py  in another terminal to type what the AI says.")
-    print("  Keys here:  [M] mute   [Q] quit\n")
+    if hints:
+        print("\n  AVATAR LIVE — open OBS, add Video Capture Device -> select the "
+              "virtual cam.")
+        print("  Run  python control_gui.py  in another terminal to type what the AI says.")
+        print("  Keys here:  [M] mute   [Q] quit\n")
 
     return {"liveportrait": liveportrait, "musetalk": musetalk,
             "compositor": compositor, "tts": tts, "enhance": enhance_engine,
@@ -338,13 +351,19 @@ def _open_webcam():
 # -----------------------------------------------------------------------------
 # MAIN LOOP
 # -----------------------------------------------------------------------------
-def run():
-    """Start everything and run the avatar until quit."""
-    try:
-        eng = startup()
-    except Exception as exc:
-        print(f"[MAIN] startup failed: {exc}")
-        return
+def run(eng=None):
+    """Start everything and run the avatar until quit.
+
+    eng : a pre-built engine dict from startup(); when None we build one. The
+          camera launcher (avatar_camera.py) builds it with a branded camera and
+          passes it in so the device name / instructions are printed first.
+    """
+    if eng is None:
+        try:
+            eng = startup()
+        except Exception as exc:
+            print(f"[MAIN] startup failed: {exc}")
+            return
 
     liveportrait = eng["liveportrait"]; musetalk = eng["musetalk"]
     compositor = eng["compositor"]; tts = eng["tts"]; enhance = eng["enhance"]
