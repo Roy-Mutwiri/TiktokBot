@@ -347,6 +347,17 @@ class FaceSwapEngine:
         except Exception:
             return out
 
+    def _embed(self, frame, kps):
+        """Arcface embedding for a face (by its 5 kps) — used to identity-lock onto
+        the operator and ignore any other face that enters the frame."""
+        try:
+            f = self._Face(bbox=None, kps=kps.astype(np.float32), det_score=1.0)
+            e = self.app.models["recognition"].get(frame, f)
+            n = np.linalg.norm(e)
+            return e / n if n > 1e-6 else None
+        except Exception:
+            return None
+
     def _lighten_skin(self, out):
         """Shift ALL visible skin (face, NECK, HANDS) toward a lighter / less-warm
         Caucasian tone — consistent body, no white-face/dark-neck mismatch. YCrCb
