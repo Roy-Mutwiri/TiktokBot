@@ -515,9 +515,6 @@ class FaceSwapEngine:
                 for j in range(5):
                     kps[j, 0] = self._kps_euro[j][0](float(kps[j, 0]), t)
                     kps[j, 1] = self._kps_euro[j][1](float(kps[j, 1]), t)
-            # hair overlay aligns to the ACTUAL (non-predicted) face so it sticks to
-            # your head instead of leading it.
-            self._disp_kps = kps.copy()
             # PREDICTIVE TRACKING: the swap appears ~1 frame behind your head because
             # of detect+swap+render latency (the "lag on turn"). Extrapolate the
             # keypoints FORWARD by the latency using velocity, so the swapped face

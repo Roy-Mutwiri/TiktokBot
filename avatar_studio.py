@@ -618,15 +618,6 @@ class AvatarStudio:
                      state="readonly", width=14,
                      style="Studio.TCombobox").pack(side="right")
         self.hair_var.trace_add("write", self._on_hair)
-        # Hairstyle overlay (forward-facing). 'none' keeps your real hair.
-        r = self._row(c, "Hair style")
-        self.hairstyle_var = tk.StringVar(value="none")
-        ttk.Combobox(r, textvariable=self.hairstyle_var,
-                     values=["none", "buzz", "fade", "quiff", "undercut",
-                             "crewcut", "curly", "long"],
-                     state="readonly", width=14,
-                     style="Studio.TCombobox").pack(side="right")
-        self.hairstyle_var.trace_add("write", self._on_hairstyle)
 
         # ---- SCENE & OUTPUT ------------------------------------------------
         c = self._card(right, "SCENE & OUTPUT")
