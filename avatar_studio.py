@@ -498,6 +498,14 @@ class AvatarStudio:
         self.fps_lbl = tk.Label(ph, text="", bg=SURFACE, fg=CYAN,
                                 font=("Consolas", 10))
         self.fps_lbl.pack(side="right")
+        # TOP music mute toggle — one click to silence / restore the bg music.
+        self.music_btn = tk.Button(ph, text="♪ MUSIC", command=self._toggle_music,
+                                   bg=SURFACE2, fg=CYAN, font=("Consolas", 10, "bold"),
+                                   relief="flat", bd=0, padx=10, cursor="hand2",
+                                   activebackground=self._mix(SURFACE2, CYAN, 0.2),
+                                   activeforeground=CYAN, highlightthickness=1,
+                                   highlightbackground=self._mix(CYAN, BG, 0.5))
+        self.music_btn.pack(side="right", padx=(0, 10))
 
         # the composited frame (black stage with a neon hairline frame)
         stageb = tk.Frame(pv, bg=self._mix(BG, CYAN, 0.22))
