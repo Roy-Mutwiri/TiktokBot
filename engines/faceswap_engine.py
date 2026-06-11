@@ -48,12 +48,14 @@ import numpy as np
 import cv2
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SWAPPER_PATHS = [
-    os.path.join(PROJECT_DIR, "models", "reswapper_256_fp16.onnx"),  # 256px fp16 = fidelity + speed
-    os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx"),       # 256px fp32
+# AVATAR_SWAP_HQ=1 -> ReSwapper-256 (highest fidelity, ~5fps). Default -> the
+# 128px model (19fps) which CodeFormer enhances to HD — the best USABLE realism.
+_HQ = os.environ.get("AVATAR_SWAP_HQ", "0") == "1"
+SWAPPER_PATHS = ([os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx")] if _HQ else []) + [
     os.path.join(PROJECT_DIR, "models", "inswapper_128_fp16.onnx"),
     os.path.join(PROJECT_DIR, "models", "inswapper_128.onnx"),
     os.path.join(PROJECT_DIR, "ai-face", "models", "inswapper_128.onnx"),
+    os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx"),
 ]
 DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "320"))   # smaller = faster detect
 DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N frames
