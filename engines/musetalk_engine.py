@@ -141,6 +141,20 @@ class MuseTalkEngine:
         except Exception as exc:
             print(f"[MUSETALK] feed_audio error: {exc}")
 
+    def _get_upscaler(self):
+        """Lazy Real-ESRGAN (used to de-blur the speaking mouth crop). None if absent."""
+        if getattr(self, "_up_tried", False):
+            return getattr(self, "_upscaler", None)
+        self._up_tried = True
+        self._upscaler = None
+        try:
+            from upscale_engine import UpscaleEngine
+            u = UpscaleEngine()
+            self._upscaler = u if getattr(u, "ready", False) else None
+        except Exception as exc:
+            print(f"[MUSETALK] mouth de-blur unavailable ({exc})")
+        return self._upscaler
+
     def _pop_mouth(self, mouth):
         """Make the mouth movement READ CLEARLY: unsharp + local contrast (the dark
         opening pops, lips define) + a touch of saturation (redder lips). Tunable via
@@ -216,7 +230,13 @@ class MuseTalkEngine:
             if self._w2l is not None:
                 synced_full = self._w2l.process_frame(lp_face_frame)
                 mouth = synced_full[y1:y2, x1:x2].copy()
-                return self._pop_mouth(mouth)
+                mouth = self._pop_mouth(mouth)
+                # DE-BLUR the SPEAKING mouth with Real-ESRGAN (the small crop is ~0ms)
+                if speaking and DEBLUR_MOUTH > 0:
+                    up = self._get_upscaler()
+                    if up is not None:
+                        mouth = up.enhance_crop(mouth, DEBLUR_MOUTH)
+                return mouth
             return base_crop
         except Exception as exc:
             if not self._err_printed:
