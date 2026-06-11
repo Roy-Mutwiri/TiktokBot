@@ -159,6 +159,14 @@ class LivePortraitEngine:
         # live-tunable quality knobs (set by the Studio)
         self.gaze_lock = True
         self.gaze_strength = 0.8     # 0..1 how strongly to re-center eyes to camera
+        # LIP LOCK: the avatar's LIPS follow the SPEAKING BOT (the TTS mouth-sync),
+        # NOT the operator's real webcam mouth. We zero the mouth-keypoint portion
+        # of the driving expression so the operator's lips never transfer; the
+        # mouth-sync engine (MuseTalk/Wav2Lip) then owns the mouth. Head, eyes,
+        # blinks and expression still come from the webcam.
+        self.lip_lock = os.environ.get("AVATAR_LIP_LOCK", "1") == "1"
+        self.lip_lock_strength = 1.0  # 1.0 = fully ignore the operator's mouth
+        self._lip_mask = None         # (1,21,1) tensor: 1.0 on mouth keypoints
         self._stab = 0.4
         self.set_stabilization(0.4)
         self.wrapper = None
