@@ -33,8 +33,10 @@ except Exception:
 import numpy as np
 
 SR = 44100
-BASE_VOL = float(os.environ.get("AVATAR_MUSIC_VOL", "0.16"))   # idle (pause) level
-DUCK = float(os.environ.get("AVATAR_MUSIC_DUCK", "0.35"))      # multiplier while talking
+BASE_VOL = float(os.environ.get("AVATAR_MUSIC_VOL", "0.17"))   # idle (pause) bed level
+# While the bot talks the music drops to this fraction so the VOICE clearly sits
+# on top (0.15 -> bed ~5-6x quieter than the voice). Lower = voice more dominant.
+DUCK = float(os.environ.get("AVATAR_MUSIC_DUCK", "0.15"))
 SONG_SECONDS = float(os.environ.get("AVATAR_MUSIC_SONG_SECONDS", "26"))  # per track
 NUM_SONGS = int(os.environ.get("AVATAR_MUSIC_SONGS", "50"))    # unique tracks before any repeat
 
