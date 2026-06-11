@@ -55,7 +55,7 @@ MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.10"))      # mild local 
 MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was garish)
 # DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
 # adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
-DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0.7"))
+DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0"))  # OFF: extra per-frame GPU op stalled the render during speech
 
 SAMPLE_RATE = 16000
 AUDIO_WINDOW_MS = 200

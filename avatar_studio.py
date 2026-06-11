@@ -36,6 +36,17 @@ for p in (ENGINES_DIR, PROJECT_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
 
+# AUTO-CONFIG: probe the machine (GPU/VRAM/CPU + benchmark) and pick the voice /
+# brain / restore / cadence that best fit — BEFORE any engine reads its env. Your
+# own AVATAR_* env vars still win (setdefault). Disable with AVATAR_AUTOCONFIG=0.
+AUTO_PROFILE = None
+if os.environ.get("AVATAR_AUTOCONFIG", "1") == "1":
+    try:
+        from auto_config import autoconfigure
+        AUTO_PROFILE = autoconfigure(verbose=True)
+    except Exception as _exc:
+        print(f"[AUTO-CONFIG] skipped ({_exc}).")
+
 import numpy as np
 import cv2
 import tkinter as tk
