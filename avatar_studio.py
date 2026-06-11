@@ -879,6 +879,20 @@ class AvatarStudio:
             self._on_quality()        # apply the selected quality preset at boot
             self._on_tilt()           # apply max-tilt (pitch) cap at boot
             self._on_turncap()        # apply max-turn (yaw) cap at boot
+            # FACE-SWAP is our focus mode: load it eagerly at boot so it's ready
+            # the instant the loop starts (no first-frame stall).
+            if self.swap_var.get():
+                try:
+                    from faceswap_engine import FaceSwapEngine
+                    self._log_msg("[studio] loading face-swap (ReSwapper-256 + insightface)...")
+                    self.swap_engine = FaceSwapEngine(self._char_path or _character_path())
+                    tdir = os.path.join(PROJECT_DIR, "Haddan")
+                    if self.swap_engine.ready and os.path.isdir(tdir):
+                        n = self.swap_engine.set_source_from_folder(tdir)
+                        if n:
+                            self._log_msg(f"[studio] character trained from {n} photos (Haddan)")
+                except Exception as exc:
+                    self._log_msg(f"[studio] face-swap load failed: {exc}")
             self.tts = tts
             self.cap = cap
             self.obs_cam = obs
