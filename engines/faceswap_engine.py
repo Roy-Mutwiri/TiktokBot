@@ -67,7 +67,7 @@ SWAPPER_PATHS = ([os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx")] if 
 DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "512"))   # bigger = more reliable detect
 DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N frames
 # ignore faces smaller than this fraction of the frame (background people/objects)
-MIN_FACE_FRAC = float(os.environ.get("AVATAR_SWAP_MINFACE", "0.12"))
+MIN_FACE_FRAC = float(os.environ.get("AVATAR_SWAP_MINFACE", "0.05"))
 # gentle lighting lift: pull the face up to ~this mean brightness if it's dark
 FACE_LIGHT = float(os.environ.get("AVATAR_SWAP_FACELIGHT", "0"))  # OFF: adaptive whole-frame gain flickered
 # match the swapped face's colour to the target head (LAB Reinhard) so it blends
@@ -98,7 +98,7 @@ FACE_LOCK = os.environ.get("AVATAR_SWAP_LOCK", "1") == "1"
 # AUTO-FRAME: crop/zoom to the locked face (head-and-shoulders) so the background
 # and any other people are cropped OUT — focused, low-noise shot that follows you.
 AUTO_FRAME = os.environ.get("AVATAR_SWAP_FRAME", "1") == "1"
-FRAME_ZOOM = float(os.environ.get("AVATAR_SWAP_FRAMEZOOM", "2.6"))   # crop = this * face
+FRAME_ZOOM = float(os.environ.get("AVATAR_SWAP_FRAMEZOOM", "2.2"))   # crop = this * face
 LOCK_SIM = float(os.environ.get("AVATAR_SWAP_LOCKSIM", "0.25"))      # min match to keep lock
 
 
