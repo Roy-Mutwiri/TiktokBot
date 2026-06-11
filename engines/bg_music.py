@@ -1,18 +1,19 @@
 # =============================================================================
 # engines/bg_music.py
 # -----------------------------------------------------------------------------
-# A GENERATIVE, never-repeating "trading mood" music playlist for the stream.
-# Instead of one loop, it procedurally synthesises a large library of DISTINCT
-# tracks (each with its own key, tempo, scale/mood, chord progression, drum
-# pattern, bassline, lead and timbre) and auto-advances to a new one every ~25s,
-# in a shuffled order with no repeats — so the soundtrack stays fresh for hours.
+# A GENERATIVE, never-repeating PHONK playlist for the trading stream — the dark,
+# hard, hypnotic "hustle/grind" sound (metallic cowbell melodies, distorted 808
+# sub-bass, punchy kicks, tight triplet hats). It synthesises a library of 50+
+# DISTINCT phonk tracks (each with its own key, tempo, dark scale, cowbell riff
+# and drum pattern) and auto-advances to a new one every ~26s in a shuffled,
+# no-repeat order — fresh for hours.
 #
-# Everything is synthesised with numpy (no audio files, no licensing). It plays
-# on its own sounddevice stream (Windows mixes it with the winsound voice) and
-# DUCKS under the AI's voice, swelling back up the moment it pauses.
+# All numpy (no audio files, no licensing). Plays on its own sounddevice stream
+# (Windows mixes it with the winsound voice) and DUCKS under the AI's voice,
+# swelling back up the moment it pauses.
 #
-# Note: these are INSTRUMENTALS. Actual SUNG lyrics need a music-generation model
-# (e.g. Suno) — but the avatar's Auto-host already speaks trading bars over them.
+# Instrumentals only — sung lyrics need a music-gen model (Suno); the avatar's
+# Auto-host already speaks trading bars over the beat.
 #
 #   m = BackgroundMusic(); m.start(); m.set_active(True)
 #   m.set_speaking(True/False)     # duck under voice / swell on pause
@@ -37,19 +38,17 @@ DUCK = float(os.environ.get("AVATAR_MUSIC_DUCK", "0.35"))      # multiplier whil
 SONG_SECONDS = float(os.environ.get("AVATAR_MUSIC_SONG_SECONDS", "26"))  # per track
 NUM_SONGS = int(os.environ.get("AVATAR_MUSIC_SONGS", "50"))    # unique tracks before any repeat
 
-# Scales (semitone steps from the root) — each gives a different mood.
-SCALES = {
+# Dark scales only — phonk lives in minor/phrygian/harmonic-minor.
+DARK_SCALES = {
     "minor":          [0, 2, 3, 5, 7, 8, 10],
-    "dorian":         [0, 2, 3, 5, 7, 9, 10],
-    "phrygian":       [0, 1, 3, 5, 7, 8, 10],     # dark / tense
+    "phrygian":       [0, 1, 3, 5, 7, 8, 10],     # darkest / tense
     "harmonic_minor": [0, 2, 3, 5, 7, 8, 11],     # exotic
-    "minor_pent":     [0, 3, 5, 7, 10],           # safe / hooky
+    "minor_pent":     [0, 3, 5, 7, 10],           # hooky
 }
 PROGRESSIONS = [          # chord roots as scale-degree indices (loop of 4)
-    [0, 5, 3, 4], [0, 3, 4, 0], [0, 6, 5, 4],
-    [0, 4, 5, 3], [0, 2, 5, 4], [0, 5, 6, 4],
+    [0, 0, 5, 3], [0, 3, 4, 0], [0, 6, 5, 0],
+    [0, 5, 6, 4], [0, 0, 3, 4], [0, 4, 0, 5],
 ]
-DRUM_STYLES = ["four", "trap", "halftime", "breaks"]
 
 
 def _semi(root, n):
@@ -67,136 +66,106 @@ def _env(n, a, d, s, r, sus=0.6):
     return e
 
 
-def _osc(f, t, kind):
-    if kind == "saw":
-        return 2.0 * (t * f - np.floor(0.5 + t * f))
-    if kind == "square":
-        return np.sign(np.sin(2 * np.pi * f * t))
-    if kind == "tri":
-        return 2.0 * np.abs(2.0 * (t * f - np.floor(0.5 + t * f))) - 1.0
-    return np.sin(2 * np.pi * f * t)            # sine
-
-
 def _make_track(seed):
-    """Synthesise ONE unique seamless loop (mono float32) determined by `seed`."""
+    """Synthesise ONE unique seamless PHONK loop (mono float32) from `seed`."""
     rng = np.random.RandomState(seed * 2654435761 % (2**31))
-    bpm = float(rng.choice([90, 100, 108, 116, 120, 128, 136, 144]))
+    bpm = float(rng.choice([128, 132, 138, 140, 145, 150, 155, 160]))   # phonk tempo
     beat = 60.0 / bpm
     beats = 8
     n = int(SR * beat * beats)
-    t = np.arange(n) / SR
     out = np.zeros(n, np.float32)
-    root = float(rng.choice([55.0, 58.27, 61.74, 65.41, 69.30, 73.42]))   # A1..D2
-    scale = SCALES[rng.choice(list(SCALES.keys()))]
+    root = float(rng.choice([48.99, 51.91, 55.0, 58.27, 61.74, 65.41]))  # G1..C2, low
+    scale = DARK_SCALES[rng.choice(list(DARK_SCALES.keys()))]
     prog = PROGRESSIONS[rng.randint(len(PROGRESSIONS))]
-    bass_kind = rng.choice(["sine", "saw", "tri", "square"])
-    lead_kind = rng.choice(["sine", "saw", "tri", "square"])
-    drum = rng.choice(DRUM_STYLES)
-    has_lead = rng.rand() < 0.7
-    has_pad = rng.rand() < 0.8
 
     def at(sec):
         return int(sec * SR)
 
-    def add(buf, start, sig, gain):
+    def add(start, sig, gain):
         s = int(start); ln = len(sig)
         if s >= n:
             return
         if s + ln > n:
             sig = sig[:n - s]; ln = n - s
-        buf[s:s+ln] += sig.astype(np.float32) * gain
+        out[s:s+ln] += sig.astype(np.float32) * gain
 
-    # --- drums ---------------------------------------------------------------
-    def kick(ln):
+    # --- PHONK voices --------------------------------------------------------
+    def kick(ln):                                  # hard, slightly distorted
         tk = np.arange(ln) / SR
-        return np.sin(2*np.pi*(95*np.exp(-tk*30)+45)*tk) * np.exp(-tk*15)
+        k = np.sin(2*np.pi*(115*np.exp(-tk*42)+50)*tk) * np.exp(-tk*11)
+        return np.tanh(k * 1.7)
+
+    def b808(f, ln):                               # distorted, gliding sub-bass
+        tk = np.arange(ln) / SR
+        gl = f * (1.0 + 0.45*np.exp(-tk*26))       # pitch drop at the attack
+        s = np.sin(2*np.pi*gl*tk)
+        s = np.tanh(s * 3.3)                        # saturation = the phonk grit
+        return s * _env(ln, 0.004, 0.25, 0.78, 0.16, 0.78)
+
+    def cowbell(f, ln):                            # metallic 808 cowbell (the hook)
+        tk = np.arange(ln) / SR
+        s = np.sign(np.sin(2*np.pi*f*tk)) + np.sign(np.sin(2*np.pi*f*1.48*tk))
+        return s * np.exp(-tk*15)                   # fast metallic decay
 
     def snare(ln):
         tk = np.arange(ln) / SR
-        return (rng.randn(ln)*np.exp(-tk*22) + 0.4*np.sin(2*np.pi*190*tk)*np.exp(-tk*26))
+        return rng.randn(ln)*np.exp(-tk*24) + 0.35*np.sin(2*np.pi*180*tk)*np.exp(-tk*28)
 
     def hat(ln):
         tk = np.arange(ln) / SR
-        return rng.randn(ln)*np.exp(-tk*120)
+        return rng.randn(ln) * np.exp(-tk*150)
 
-    if drum == "four":
-        for b in range(beats):
-            add(out, at(b*beat), kick(at(0.18)), 0.6)
-            add(out, at(b*beat+beat*0.5), hat(at(0.04)), 0.10)
-        for b in (1, 3, 5, 7):
-            add(out, at(b*beat), snare(at(0.14)), 0.28)
-    elif drum == "trap":
-        for b in (0, 2, 3, 5, 7):
-            add(out, at(b*beat), kick(at(0.18)), 0.6)
-        for b in (1, 5):
-            add(out, at(b*beat), snare(at(0.13)), 0.30)
-        for k in range(beats*4):                 # fast/rolling hats
-            g = 0.09 if k % 2 == 0 else 0.05
-            add(out, at(k*beat/2), hat(at(0.03)), g)
-    elif drum == "halftime":
-        for b in (0, 4):
-            add(out, at(b*beat), kick(at(0.2)), 0.65)
-        add(out, at(2*beat), snare(at(0.18)), 0.32)
-        add(out, at(6*beat), snare(at(0.18)), 0.32)
-        for b in range(beats):
-            add(out, at(b*beat+beat*0.5), hat(at(0.04)), 0.08)
-    else:  # breaks
-        for b in (0, 3, 4, 6):
-            add(out, at(b*beat), kick(at(0.17)), 0.55)
-        for b in (2, 6):
-            add(out, at(b*beat), snare(at(0.14)), 0.3)
-        for k in range(beats*2):
-            add(out, at(k*beat/1.0 + beat*0.5), hat(at(0.035)), 0.07)
+    # --- drums: hard phonk kick + snare on 2&4 + tight hats w/ triplet rolls --
+    kick_pat = [[0, 2, 3, 5, 6], [0, 3, 4, 6, 7], [0, 2, 4, 6], [0, 1.5, 4, 5.5]]
+    for b in kick_pat[rng.randint(len(kick_pat))]:
+        add(at(b*beat), kick(at(0.2)), 0.7)
+    for b in (2, 6):
+        add(at(b*beat), snare(at(0.14)), 0.30)
+    roll_at = rng.choice([3.5, 7.5])               # one triplet hat roll per bar
+    for k in range(beats * 2):                     # 8th-note hats
+        s = k * beat / 2.0
+        add(at(s), hat(at(0.035)), 0.07 if k % 2 else 0.10)
+    for j in range(3):                             # triplet roll
+        add(at(roll_at*beat + j*beat/3.0), hat(at(0.03)), 0.07)
 
-    # --- bassline (root of each chord, plucked) ------------------------------
-    for b in range(beats):
+    # --- cowbell melody (the signature) — a riff over the dark scale ----------
+    step = beat / 2.0
+    nsteps = beats * 2
+    octave = rng.choice([24, 24, 26])              # 2 octaves up = bright metallic
+    for k in range(nsteps):
+        if rng.rand() < 0.30:                      # leave groove space
+            continue
+        deg = (prog[(k // 4) % len(prog)] + rng.choice([0, 0, 2, 4, 6])) % len(scale)
+        f = _semi(root, scale[deg] + octave)
+        add(at(k*step), cowbell(f, at(step*0.95)), 0.16)
+
+    # --- 808 bass: chord roots, long gliding notes ---------------------------
+    for b in range(0, beats, 2):
         deg = prog[(b // 2) % len(prog)]
         f = _semi(root, scale[deg % len(scale)])
-        ln = at(beat*0.92)
-        tb = np.arange(ln) / SR
-        sig = _osc(f, tb, bass_kind) + 0.25*_osc(2*f, tb, bass_kind)
-        add(out, at(b*beat), sig * _env(ln, 0.01, 0.25, 0.5, 0.35, 0.5), 0.30)
+        add(at(b*beat), b808(f, at(beat*1.85)), 0.55)
 
-    # --- pad chord (triad of the bar's chord), soft + tremolo ----------------
-    if has_pad:
+    # --- dark atmosphere pad (very subtle, sets the mood) --------------------
+    if rng.rand() < 0.7:
+        t = np.arange(n) / SR
         pad = np.zeros(n, np.float32)
-        for bar in range(beats // 2):
-            deg = prog[bar % len(prog)]
-            s = at(bar*2*beat); ln = at(2*beat)
-            tb = np.arange(ln) / SR
-            for iv in (0, 2, 4):                 # 1-3-5 of the scale from deg
-                f = _semi(root*4, scale[(deg+iv) % len(scale)])
-                pad[s:s+ln] += np.sin(2*np.pi*f*tb).astype(np.float32)
-        pad *= (0.6 + 0.4*np.sin(2*np.pi*0.3*t)).astype(np.float32)
-        out += pad * 0.045
+        for iv in (0, 3, 7):
+            pad += np.sin(2*np.pi*_semi(root*2, scale[iv % len(scale)])*t).astype(np.float32)
+        pad *= (0.5 + 0.5*np.sin(2*np.pi*0.2*t)).astype(np.float32)
+        out += pad * 0.03
 
-    # --- lead arp/melody -----------------------------------------------------
-    if has_lead:
-        step = beat / 2.0
-        nsteps = int(beats / 0.5)
-        for k in range(nsteps):
-            if rng.rand() < 0.35:                # leave space
-                continue
-            deg = (prog[(k//4) % len(prog)] + rng.choice([0, 2, 4, 6])) % len(scale)
-            octave = rng.choice([8, 12])         # up 1-1.5 oct from root
-            f = _semi(root*4, scale[deg] + octave)
-            ln = at(step*0.9)
-            tb = np.arange(ln) / SR
-            sig = _osc(f, tb, lead_kind)
-            add(out, at(k*step), sig * _env(ln, 0.01, 0.15, 0.4, 0.5, 0.4), 0.07)
-
-    # normalise + click-free loop seam
+    # --- master: tape saturation glue + normalise + click-free loop seam -----
+    out = np.tanh(out * 1.15)
     peak = float(np.max(np.abs(out))) or 1.0
     out = (out / peak) * 0.9
     xf = at(0.012)
     out[:xf] *= np.linspace(0, 1, xf)
     out[-xf:] *= np.linspace(1, 0, xf)
-    meta = dict(bpm=int(bpm), drum=drum)
-    return out.astype(np.float32), meta
+    return out.astype(np.float32), dict(bpm=int(bpm), drum="phonk")
 
 
 class BackgroundMusic:
-    """Generative, non-repeating trading-mood playlist (own sounddevice stream)."""
+    """Generative, non-repeating PHONK playlist (own sounddevice stream)."""
 
     def __init__(self, volume=BASE_VOL):
         self.base_vol = float(volume)
@@ -206,7 +175,6 @@ class BackgroundMusic:
         self._pos = 0
         self._stream = None
         self._alive = True
-        # shuffled play order over NUM_SONGS unique seeds (no repeat per cycle)
         self._order = list(range(1, NUM_SONGS + 1))
         np.random.RandomState(12345).shuffle(self._order)
         self._oi = 0
@@ -223,12 +191,11 @@ class BackgroundMusic:
     def startup_check(self):
         if self._cur is None:
             return False, "music unavailable (synth failed)."
-        return True, (f"generative playlist ready — {NUM_SONGS} unique tracks, "
+        return True, (f"generative PHONK playlist — {NUM_SONGS} unique tracks, "
                       f"~{SONG_SECONDS:.0f}s each, ducks under voice.")
 
     # -------------------------------------------------------------------------
     def _gen_loop(self):
-        """Keep the NEXT track pre-rendered so song changes are seamless."""
         while self._alive:
             if self._cur is not None and self._next is None:
                 ni = (self._oi + 1) % len(self._order)
@@ -267,7 +234,6 @@ class BackgroundMusic:
         else:
             buf = np.concatenate([cur[self._pos:], cur[:end - len(cur)]])
             self._pos = end - len(cur)
-            # at the loop seam, advance to the NEXT unique track if it's time
             if (self._song_until and time.monotonic() >= self._song_until
                     and self._next is not None):
                 self._cur, self.meta = self._next
@@ -279,7 +245,6 @@ class BackgroundMusic:
         outdata[:, 0] = buf * gains
 
     def skip(self):
-        """Jump to the next track now (next loop boundary)."""
         self._song_until = 0.0
 
     # -------------------------------------------------------------------------
@@ -308,14 +273,13 @@ if __name__ == "__main__":
     import soundfile as sf
     m = BackgroundMusic()
     print("[MUSIC]", m.startup_check()[1])
-    # render 6 distinct tracks to one file so you can hear the variety
     if m._cur is not None:
         clips = []
         for s in m._order[:6]:
             trk, meta = _make_track(s)
-            print(f"  track seed={s}: {meta['bpm']} BPM, {meta['drum']}")
+            print(f"  phonk track seed={s}: {meta['bpm']} BPM")
             clips.append(trk)
             clips.append(np.zeros(int(SR*0.4), np.float32))
         sf.write(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                               "_bg_music_demo.wav"), np.concatenate(clips), SR)
-        print("[MUSIC] wrote _bg_music_demo.wav (6 unique tracks back-to-back)")
+        print("[MUSIC] wrote _bg_music_demo.wav (6 unique phonk tracks)")
