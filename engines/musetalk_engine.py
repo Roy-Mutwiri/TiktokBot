@@ -53,6 +53,9 @@ BLEND_FACTOR = float(os.environ.get("AVATAR_MOUTH_BLEND", "1.0"))  # 1.0 = full 
 MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.55"))  # unsharp
 MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.10"))      # mild local contrast (was 0.18 = banding)
 MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was garish)
+# DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
+# adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
+DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0.7"))
 
 SAMPLE_RATE = 16000
 AUDIO_WINDOW_MS = 200
