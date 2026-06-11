@@ -393,6 +393,11 @@ class FaceSwapEngine:
             M, _ = cv2.estimateAffinePartial2D(akps, kps.astype(np.float32), method=cv2.LMEDS)
             if M is None:
                 return out
+            # TEMPORAL smoothing of the transform — stops the hair jittering/sliding
+            # off your head; light blend = sticks but still follows quickly.
+            if getattr(self, "_hair_M", None) is not None:
+                M = 0.55 * M + 0.45 * self._hair_M
+            self._hair_M = M
             H, W = out.shape[:2]
             warped = cv2.warpAffine(rgba, M, (W, H), flags=cv2.INTER_LINEAR,
                                     borderValue=(0, 0, 0, 0))
