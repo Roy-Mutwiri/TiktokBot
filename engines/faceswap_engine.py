@@ -108,7 +108,7 @@ BEARD_COLOR = os.environ.get("AVATAR_SWAP_BEARDCOLOR", "darkbeard")
 # BEARD DENSITY — deepen + define the beard so the sparse/light gray beard reads as a
 # FULLER, thicker beard (deeper tone + masked unsharp on the beard hairs). CPU-only, so
 # no GPU lag during speech. 0 = off.
-BEARD_DENSITY = float(os.environ.get("AVATAR_BEARD_DENSITY", "0.55"))
+BEARD_DENSITY = float(os.environ.get("AVATAR_BEARD_DENSITY", "1.1"))
 # EYE COLOUR — recolour the iris (MediaPipe iris landmarks) to a target hue while
 # KEEPING luminance (pupil stays dark, highlights bright, iris shading natural).
 EYE_COLORS = {       # (HSV hue 0-180, saturation)
@@ -376,7 +376,7 @@ class FaceSwapEngine:
                 res = seg.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
                 if res.segmentation_mask is None:
                     return out
-                self._person_cache = res.segmentation_mask > 0.6
+                self._person_cache = res.segmentation_mask > 0.45
             person = self._person_cache
             hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
             sat, val = hsv[:, :, 1], hsv[:, :, 2]
@@ -393,8 +393,10 @@ class FaceSwapEngine:
             x1, y1, x2, y2 = [int(v) for v in bbox]
             fh = max(1, y2 - y1); fw = max(1, x2 - x1)
             band = np.zeros(out.shape[:2], np.float32)
-            band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.7)),
-                 max(0, x1 - int(fw * 0.45)):min(out.shape[1], x2 + int(fw * 0.45))] = 1.0
+            # extend the band DOWN (jaw/neck) + a touch WIDER (full cheeks) so more of
+            # the beard area is caught = a fuller beard.
+            band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.95)),
+                 max(0, x1 - int(fw * 0.55)):min(out.shape[1], x2 + int(fw * 0.55))] = 1.0
             m = cv2.GaussianBlur(gw * band, (0, 0), 3.0)
             # TEMPORAL smoothing of the recolour mask — stops the recoloured region
             # flickering/shifting as you move, so the beard tint STICKS to the beard.
@@ -404,7 +406,7 @@ class FaceSwapEngine:
             # split: HAIR (top) keeps the chosen hair colour; BEARD (lower face/jaw)
             # is recoloured to ONE consistent dark tone matching the swap's beard, so
             # the gray operator-beard at the edges no longer two-tones with it.
-            beard_y = max(0, y1 + int(fh * 0.55))
+            beard_y = max(0, y1 + int(fh * 0.48))      # start the beard zone higher
             zb = np.zeros_like(m); zb[beard_y:, :] = 1.0
             mh, mb = m * (1.0 - zb), m * zb
             bd = HAIR_COLORS.get(getattr(self, "_beard_color", "darkbeard"), c)
@@ -415,7 +417,19 @@ class FaceSwapEngine:
                 hsv[:, :, 2] = np.clip(hsv[:, :, 2] * (1 - mk * (1 - col["valf"])), 0, 255)
             _tint(c, mh)
             _tint(bd or c, mb)
-            return cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
+            # BEARD DENSITY: deepen the beard hairs so the sparse/light beard reads as a
+            # FULLER, thicker beard (CPU only — no GPU lag).
+            if BEARD_DENSITY > 0:
+                hsv[:, :, 2] = hsv[:, :, 2] * (1.0 - np.clip(mb, 0, 1) * BEARD_DENSITY * 0.45)
+            out = cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
+            # DEFINE the beard hairs (masked unsharp) so it looks textured/thick, not a flat patch.
+            if BEARD_DENSITY > 0:
+                bz = np.clip(mb, 0, 1)[:, :, None]
+                blur = cv2.GaussianBlur(out, (0, 0), 1.4)
+                sharp = cv2.addWeighted(out, 1.0 + BEARD_DENSITY, blur, -BEARD_DENSITY, 0)
+                out = (out.astype(np.float32) * (1 - bz) + sharp.astype(np.float32) * bz)
+                out = np.clip(out, 0, 255).astype(np.uint8)
+            return out
         except Exception:
             return out
 

@@ -34,7 +34,8 @@ BADGE_COLOR_GOLD = (0, 215, 255)
 LIVE_DOT_COLOR = (0, 0, 220)
 VIGNETTE_STRENGTH = 0.18       # softer vignette (less edge darkening)
 CAMERA_SHAKE_AMOUNT = 1.5
-GRAIN_STRENGTH = 8.0            # luminance sensor grain (real cameras aren't clean)
+GRAIN_STRENGTH = float(os.environ.get("AVATAR_GRAIN", "5.0"))   # luminance sensor grain (eased for a cleaner polish)
+POLISH_DENOISE = float(os.environ.get("AVATAR_POLISH_DENOISE", "1.0"))  # edge-preserving skin denoise (0=off)
 SOFTEN = 0.06                  # minimal — heavy soften made the swap look too smooth
 EDGE_FEATHER = 4                # selfie-seg edge softness (px) — tight, no halo
 FRAME_SIZE = 512
@@ -415,6 +416,9 @@ def enhance_frame(frame, is_speaking=False):
         if full:
             if BG_ON:                             # trading-studio background (off for now)
                 frame = background_composite(frame)
+            if POLISH_DENOISE > 0:                # POLISH: edge-preserving denoise cleans
+                frame = cv2.bilateralFilter(frame, 5,  # the skin grain/blotch WITHOUT
+                                            28 * POLISH_DENOISE, 5)  # softening the beard edges
             frame = apply_clarity(frame)          # skin micro-texture (real lens look)
         frame = apply_color_grade(frame)
         frame = apply_vignette(frame)
