@@ -222,6 +222,29 @@ class LivePortraitEngine:
         if strength is not None:
             self.gaze_strength = max(0.0, min(1.0, float(strength)))
 
+    def _build_lip_mask(self, cfg):
+        """Build the (1,21,1) mouth-keypoint mask from cfg.lip_array so the LIP
+        LOCK can neutralize only the operator's mouth keypoints."""
+        try:
+            la = np.asarray(getattr(cfg, "lip_array"), dtype=np.float32).reshape(1, 21, 3)
+            mag = np.abs(la).sum(axis=2)[0]                  # (21,) per-keypoint
+            thr = max(1e-6, float(mag.max()) * 0.05)
+            mouth = (mag > thr).astype(np.float32).reshape(1, 21, 1)
+            dev = self._x_s_info["exp"].device
+            self._lip_mask = self._torch.from_numpy(mouth).to(dev)
+            print(f"[LP] lip-lock ready — {int(mouth.sum())} mouth keypoints "
+                  f"locked (lips driven by the bot voice, not the webcam).")
+        except Exception as exc:
+            self._lip_mask = None
+            print(f"[LP] lip-lock unavailable ({exc}); operator mouth not suppressed.")
+
+    def set_lip_lock(self, on, strength=None):
+        """Toggle/strength the lip lock at runtime. on=True -> lips follow the
+        TTS bot, not the operator's mouth."""
+        self.lip_lock = bool(on)
+        if strength is not None:
+            self.lip_lock_strength = max(0.0, min(1.0, float(strength)))
+
     def recenter(self):
         """Drop the neutral reference so the NEXT driving frame becomes the new
         baseline. Call this while facing the camera upright/relaxed — it fixes a
@@ -310,6 +333,12 @@ class LivePortraitEngine:
                                         self._x_s_info["roll"])
         self._f_s = self.wrapper.extract_feature_3d(I_s)
         self._x_s = self.wrapper.transform_keypoint(self._x_s_info)
+
+        # Build the mouth-keypoint mask for the LIP LOCK (see __init__). cfg's
+        # lip_array is LivePortrait's neutral-lip expression delta — nonzero only
+        # on the mouth keypoints, so it tells us which of the 21 implicit
+        # keypoints to neutralize.
+        self._build_lip_mask(cfg)
 
         # --- confirm FP16/CUDA + source caching (per perf checklist) ---
         try:
@@ -577,6 +606,16 @@ class LivePortraitEngine:
                 try:
                     d = x_d_info["exp"] - ref["exp"]
                     x_d_info["exp"] = ref["exp"] + MOUTH_GUARD * self._torch.tanh(d / MOUTH_GUARD)
+                except Exception:
+                    pass
+            # LIP LOCK: pull the MOUTH keypoints back toward the neutral reference
+            # so the operator's real mouth does NOT transfer — the lips are left
+            # for the speaking bot (TTS mouth-sync) to drive. Head/eyes/blinks
+            # (non-mouth keypoints) are untouched and still come from the webcam.
+            if self.lip_lock and self._lip_mask is not None:
+                try:
+                    m = self._lip_mask * self.lip_lock_strength
+                    x_d_info["exp"] = ref["exp"] * m + x_d_info["exp"] * (1.0 - m)
                 except Exception:
                     pass
             if self._multi:

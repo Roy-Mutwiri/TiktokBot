@@ -585,6 +585,10 @@ class AvatarStudio:
                   style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_gaze()).pack(side="right")
 
+        self.liplock_var = tk.BooleanVar(value=True)
+        self._check(c, "Lips from bot voice only  ·  ignore my real mouth",
+                    self.liplock_var, self._on_liplock).pack(fill="x", pady=3)
+
         self.restore_var = tk.BooleanVar(value=True)
         self._check(c, "Face restoration  ·  GFPGAN (fixes plastic look)",
                     self.restore_var).pack(fill="x", pady=3)
