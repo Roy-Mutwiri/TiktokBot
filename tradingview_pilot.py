@@ -35,6 +35,8 @@ sys.path.insert(0, os.path.join(PROJECT_DIR, "engines"))
 TV_URL = "https://www.tradingview.com/chart/?symbol={sym}"
 TREND_GROUP = "[data-name='linetool-group-trend-line']"
 FIB_GROUP = "[data-name='linetool-group-gann-and-fibonacci']"
+RECT_GROUP = "[data-name='linetool-group-geometric-shapes']"
+POS_GROUP = "[data-name='linetool-group-prediction-and-measurement']"
 
 
 class _Narrator:
@@ -47,8 +49,11 @@ class _Narrator:
         self._q = []
         self._lock = threading.Lock()
         self._stop = False
+        self._loaded = threading.Event()
         if enabled:
             threading.Thread(target=self._run, daemon=True).start()
+        else:
+            self._loaded.set()
 
     def _run(self):
         try:
@@ -57,6 +62,7 @@ class _Narrator:
             self.ok = self._eng.ok
         except Exception as exc:
             print(f"[narrator] voice off ({exc})")
+        self._loaded.set()
         while not self._stop:
             line = None
             with self._lock:
@@ -79,6 +85,21 @@ class _Narrator:
             print(f"[AI] {line}"); return
         with self._lock:
             self._q = self._q[-1:] + [line]
+
+    def speak_sync(self, line):
+        """Speak `line` and BLOCK until it's finished (so we delete the drawing
+        only after the explanation is done). Falls back to a reading-time pause."""
+        print(f"[AI] {line}")
+        self._loaded.wait(timeout=60)
+        if self.enabled and self._eng and self._eng.ok:
+            try:
+                import sounddevice as sd
+                wav, sr = self._eng.synthesize(line, lang=self.lang)
+                if wav is not None and len(wav):
+                    sd.play(wav, sr); sd.wait(); return
+            except Exception:
+                pass
+        time.sleep(min(9.0, max(3.0, len(line) / 16.0)))
 
     def stop(self):
         self._stop = True
@@ -229,40 +250,86 @@ class TradingViewPilot:
             except Exception:
                 pass
 
-    # -- autonomous performance ----------------------------------------------
+    # -- one-tool-at-a-time helpers ------------------------------------------
+    def _draw_points(self, points, pause=0.7):
+        """Click a sequence of canvas-relative points (slowly), drawing a tool."""
+        box = self._canvas_box()
+        if not box:
+            return False
+        for rx, ry in points:
+            x, y = self._pt(box, rx, ry)
+            self.page.mouse.move(x, y, steps=8); time.sleep(0.25)
+            self.page.mouse.click(x, y); time.sleep(pause)
+        return True
+
+    def _draw_with_tool(self, group_sel, points):
+        self._dismiss()
+        if not self._tool(group_sel):
+            return False
+        ok = self._draw_points(points)
+        try:
+            self.page.keyboard.press("Escape"); time.sleep(0.3)
+        except Exception:
+            pass
+        return ok
+
+    def _delete_last(self, n=1):
+        """Undo the last drawing(s) so the chart is clean for the next tool."""
+        try:
+            self.page.keyboard.press("Escape"); time.sleep(0.2)
+            for _ in range(max(1, n)):
+                self.page.keyboard.press("Control+z"); time.sleep(0.7)
+        except Exception:
+            pass
+
+    def _tool_plan(self, up):
+        """The ordered tools the AI explores one by one, with what to say."""
+        return [
+            dict(group=TREND_GROUP,
+                 points=[(0.12, 0.80 if up else 0.45), (0.92, 0.56 if up else 0.72)],
+                 en="First, the trend line. I connect the swing lows; as long as price holds above this line, the uptrend stays intact."
+                    if up else "First, the trend line. I connect the swing highs; while price stays below it, the downtrend holds.",
+                 ar="أولاً، خط الاتجاه. أصل بين القيعان؛ وطالما السعر فوق هذا الخط يبقى الاتجاه الصاعد سليماً."
+                    if up else "أولاً، خط الاتجاه. أصل بين القمم؛ وطالما السعر تحته يبقى الاتجاه هابطاً."),
+            dict(group=TREND_GROUP,
+                 points=[(0.16, 0.40 if up else 0.26), (0.92, 0.24 if up else 0.50)],
+                 en="Next, the opposite trend line. A clean break of it would signal a shift in momentum.",
+                 ar="ثم خط الاتجاه المقابل. واختراقه بوضوح يشير إلى تغيّر في الزخم."),
+            dict(group=FIB_GROUP,
+                 points=[(0.30, 0.72 if up else 0.30), (0.66, 0.32 if up else 0.72)],
+                 en="Now a fibonacci retracement of the move. The point six one eight golden pocket is where pullbacks often find support.",
+                 ar="الآن تصحيح فيبوناتشي للحركة. ومنطقة 0.618 الذهبية غالباً ما يجد عندها السعر دعماً."),
+            dict(group=POS_GROUP,
+                 points=[(0.60, 0.58), (0.86, 0.40 if up else 0.74)],
+                 en="And the position tool lays out the entry, the target, and the risk to reward of the trade idea.",
+                 ar="وأداة المركز تُظهر الدخول والهدف ونسبة المخاطرة إلى العائد لفكرة الصفقة."),
+        ]
+
+    # -- deliberate, one-tool-at-a-time performance --------------------------
     def perform_cycle(self):
         res = self._analysis()
         narrative, a = (res if res else (None, None))
         up = (a.trend == "uptrend") if a else True
         self._dismiss()
+        self.zoom(-350); time.sleep(1.5)
         if narrative:
-            self.narrator.say(narrative)
-
-        self.zoom(-400); time.sleep(2.0)
-
-        if up:
-            self.draw_line((0.12, 0.80), (0.92, 0.55))
-        else:
-            self.draw_line((0.12, 0.45), (0.92, 0.72))
-        self.narrator.say("Drawing the support trendline along the swing lows."
-                          if self.lang == "en" else "أرسم خط الدعم على القيعان.")
-        time.sleep(3.0)
-
-        if up:
-            self.draw_line((0.18, 0.40), (0.92, 0.22))
-        else:
-            self.draw_line((0.18, 0.25), (0.92, 0.48))
-        self.narrator.say("And the resistance along the swing highs."
-                          if self.lang == "en" else "وخط المقاومة على القمم.")
-        time.sleep(3.0)
-
-        self.draw_line((0.30, 0.72 if up else 0.30), (0.70, 0.30 if up else 0.72), group=FIB_GROUP)
-        self.narrator.say("Adding a fibonacci retracement of the move."
-                          if self.lang == "en" else "وأضيف تصحيح فيبوناتشي للحركة.")
-        time.sleep(3.5)
-
-        time.sleep(4.0)
-        self.clear(); self._dismiss()
+            self.narrator.speak_sync(narrative)          # the overall read first
+        for tool in self._tool_plan(up):
+            if self._stop:
+                break
+            ok = self._draw_with_tool(tool["group"], tool["points"])   # draw it
+            time.sleep(0.6)
+            self.narrator.speak_sync(tool["ar"] if self.lang == "ar" else tool["en"])  # explain it
+            time.sleep(0.8)
+            if ok:
+                self._delete_last()                       # delete once done explaining
+            time.sleep(1.1)
+        # close any stray menu/tool, then loop with a fresh read
+        try:
+            self.page.keyboard.press("Escape")
+        except Exception:
+            pass
+        self._dismiss()
 
     def run(self):
         self.start()

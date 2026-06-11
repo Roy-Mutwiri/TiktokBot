@@ -42,7 +42,7 @@ PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.30"))
 # more room below = the jaw/chin drop on an open mouth is captured -> the mouth
 # OPENING reads clearly instead of being clipped.
 PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.56"))
-FEATHER_KERNEL = 21   # GaussianBlur kernel for the alpha edge feather (odd)
+FEATHER_KERNEL = 31   # GaussianBlur kernel for the alpha edge feather (odd) - softer, no seam
 COLOR_MATCH_STRENGTH = 0.6   # 0..1 how strongly to match crop colour to skin
 # Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). A little helps real
 # speech, but too much amplifies Wav2Lip's colour artifacts, so default OFF and
@@ -204,7 +204,7 @@ class Compositor:
             # through the edges (the "my mouth still syncs" bug). The box is padded
             # generously (PAD_*), so this 10% feather lands on cheek/chin SKIN.
             mask = np.ones((bh, bw), dtype=np.float32)
-            border = max(2, int(min(bw, bh) * 0.10))
+            border = max(2, int(min(bw, bh) * 0.15))
             mask[:border, :] = 0; mask[-border:, :] = 0
             mask[:, :border] = 0; mask[:, -border:] = 0
             k = FEATHER_KERNEL | 1
