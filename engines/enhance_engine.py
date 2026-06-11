@@ -396,7 +396,8 @@ def enhance_frame(frame, is_speaking=False):
             frame = cv2.resize(frame, (FRAME_SIZE, FRAME_SIZE))
         full = ENHANCE_LEVEL == "full"
         if full:
-            frame = background_composite(frame)
+            if BG_ON:                             # trading-studio background (off for now)
+                frame = background_composite(frame)
             frame = apply_clarity(frame)          # skin micro-texture (real lens look)
         frame = apply_color_grade(frame)
         frame = apply_vignette(frame)
