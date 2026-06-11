@@ -156,6 +156,7 @@ class FaceSwapEngine:
         self._lock_emb = None          # locked operator face embedding (identity lock)
         self._frame_box = None         # smoothed auto-frame crop box [cx,cy,side]
         self._hair_color = HAIR_COLOR  # hair/beard recolour target (live-settable)
+        self._hairstyle = HAIRSTYLE    # hairstyle overlay (live-settable)
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
@@ -636,9 +637,12 @@ class FaceSwapEngine:
                            + frame.astype(np.float32) * em).astype(np.uint8)
                 except Exception:
                     pass
-            # recolour gray hair/beard -> dark (match the character's photos)
+            # recolour gray hair/beard -> match the character
             if HAIR_MATCH:
                 out = self._match_hair(out, bbox)
+            # overlay a chosen hairstyle (aligned 2D hair), if selected
+            if getattr(self, "_hairstyle", "none") != "none":
+                out = self._apply_hairstyle(out, kps)
             return out
         except Exception:
             return frame
