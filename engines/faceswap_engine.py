@@ -376,6 +376,11 @@ class FaceSwapEngine:
             band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.7)),
                  max(0, x1 - int(fw * 0.45)):min(out.shape[1], x2 + int(fw * 0.45))] = True
             m = cv2.GaussianBlur((gray & band).astype(np.float32), (0, 0), 3.0)
+            # TEMPORAL smoothing of the recolour mask — stops the recoloured region
+            # flickering/shifting as you move, so the beard tint STICKS to the beard.
+            if getattr(self, "_hairm_prev", None) is not None and self._hairm_prev.shape == m.shape:
+                m = 0.45 * m + 0.55 * self._hairm_prev
+            self._hairm_prev = m
             # split: HAIR (top) keeps the chosen hair colour; BEARD (lower face/jaw)
             # is recoloured to ONE consistent dark tone matching the swap's beard, so
             # the gray operator-beard at the edges no longer two-tones with it.
