@@ -92,6 +92,14 @@ SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0"))  # OFF: whi
 # PREDICTIVE TRACKING: extrapolate face keypoints this many frames forward to
 # cancel pipeline latency (the turn lag). ~1 frame; 0 = off. Too high overshoots.
 PREDICT_LEAD = float(os.environ.get("AVATAR_SWAP_PREDICT", "1.9"))
+# FACE LOCK: lock onto ONE identity (the operator, captured on first frame). When
+# another face enters, it's ignored — only the locked face is tracked/swapped.
+FACE_LOCK = os.environ.get("AVATAR_SWAP_LOCK", "1") == "1"
+# AUTO-FRAME: crop/zoom to the locked face (head-and-shoulders) so the background
+# and any other people are cropped OUT — focused, low-noise shot that follows you.
+AUTO_FRAME = os.environ.get("AVATAR_SWAP_FRAME", "1") == "1"
+FRAME_ZOOM = float(os.environ.get("AVATAR_SWAP_FRAMEZOOM", "2.6"))   # crop = this * face
+LOCK_SIM = float(os.environ.get("AVATAR_SWAP_LOCKSIM", "0.25"))      # min match to keep lock
 
 
 def _color_transfer(source, target):
