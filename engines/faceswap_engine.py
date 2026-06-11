@@ -358,6 +358,7 @@ class FaceSwapEngine:
                 Msh = np.array([[1, 0, dx], [0, 1, dy]], np.float32)
                 frame = cv2.warpAffine(frame, Msh, (W, H), borderMode=cv2.BORDER_REPLICATE)
                 kps = kps + np.array([dx, dy], np.float32)
+                bbox = bbox + np.array([dx, dy, dx, dy], np.float32)
             self.last_found = True
             target = self._Face(bbox=bbox, kps=kps, det_score=bboxes[i, 4])
             # SWAP (aligned) + CUSTOM forehead paste-back -------------------------
