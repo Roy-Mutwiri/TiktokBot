@@ -117,6 +117,13 @@ class MuseTalkEngine:
                 self._w2l = None
         else:
             print("[MUSETALK] FALLBACK — mouth passthrough (no lip-sync).")
+        # PRELOAD the mouth de-blur upscaler now (at boot) so it never lazy-loads
+        # mid-speech and stalls the avatar the moment the bot starts talking.
+        if DEBLUR_MOUTH > 0:
+            try:
+                self._get_upscaler()
+            except Exception:
+                pass
 
     # -------------------------------------------------------------------------
     def startup_check(self):
