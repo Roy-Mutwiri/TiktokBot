@@ -274,6 +274,51 @@ class FaceSwapEngine:
         self._amask = m
         return m
 
+    def _get_seg(self):
+        """Lazy mediapipe selfie segmenter (person mask for hair recolour)."""
+        if self._seg_tried:
+            return self._seg
+        self._seg_tried = True
+        try:
+            import mediapipe as mp
+            self._seg = mp.solutions.selfie_segmentation.SelfieSegmentation(model_selection=1)
+        except Exception:
+            self._seg = None
+        return self._seg
+
+    def _match_hair(self, out, bbox):
+        """Recolour GRAY hair/beard toward the character's dark hair so the result
+        looks like the (dark-haired) source photos. Person-masked + gray-gated so
+        it never touches skin (saturated) or the background (not the person)."""
+        seg = self._get_seg()
+        if seg is None:
+            return out
+        try:
+            res = seg.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
+            if res.segmentation_mask is None:
+                return out
+            person = res.segmentation_mask > 0.6
+            hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
+            sat, val = hsv[:, :, 1], hsv[:, :, 2]
+            # gray/white hair: very low saturation, fairly bright, on the person
+            gray = (sat < 55) & (val > 80) & person
+            # restrict to the HEAD band (hair above + beard around the face box),
+            # not the shirt/torso below.
+            x1, y1, x2, y2 = [int(v) for v in bbox]
+            fh = max(1, y2 - y1)
+            band = np.zeros(out.shape[:2], bool)
+            band[max(0, y1 - int(fh * 1.0)):y2 + int(fh * 0.5),
+                 max(0, x1 - int((x2 - x1) * 0.4)):x2 + int((x2 - x1) * 0.4)] = True
+            m = (gray & band).astype(np.float32)
+            m = cv2.GaussianBlur(m, (0, 0), 3.0)[:, :, None]
+            # dark-brown target: drop value, nudge hue warm, lift saturation a touch
+            hsv[:, :, 0] = hsv[:, :, 0] * (1 - m[:, :, 0]) + 15 * m[:, :, 0]        # warm hue
+            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 - m[:, :, 0] * 0.4) + 60 * m[:, :, 0] * 0.4, 0, 255)
+            hsv[:, :, 2] = hsv[:, :, 2] * (1 - m[:, :, 0] * HAIR_DARKEN)            # darken
+            return cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
+        except Exception:
+            return out
+
     def swap(self, frame):
         """Swap the character face onto the largest face in `frame` (your real
         webcam head). Auto-centers the face, smooths keypoints, custom forehead
