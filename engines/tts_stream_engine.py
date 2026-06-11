@@ -277,6 +277,17 @@ class TTSStreamEngine:
         self._loop.run_forever()
 
     # -------------------------------------------------------------------------
+    @property
+    def pending(self):
+        """Lines IN FLIGHT (queued + currently synthesizing/speaking). Lets the
+        auto-talk brain pipeline: generate the NEXT line while this one plays,
+        without racing ahead unboundedly."""
+        try:
+            q = self.speech_queue.qsize() if self.speech_queue is not None else 0
+        except Exception:
+            q = 0
+        return q + (1 if (self.synthesizing or self.speaking) else 0)
+
     def speak(self, text):
         """Queue text to be spoken; trigger any keyword reaction immediately."""
         text = (text or "").strip()
