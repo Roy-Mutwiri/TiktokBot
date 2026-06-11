@@ -1030,6 +1030,20 @@ class AvatarStudio:
             self.engines = {"lp": lp, "mt": mt, "comp": comp, "enh": enhance_engine,
                             "chart": TradingView("XAUUSD"), "body": BodyMotionEngine(),
                             "restore": restore}
+            # LIVE market feed so the host talks about the REAL current gold price
+            # (not the simulated chart's drifting fake number). Background poller.
+            try:
+                from market_data import MarketData
+                self.market = MarketData("PAXGUSDT", "1m")
+                self.market.start()
+                self._log_msg("   -> " + self.market.startup_check()[1])
+                p = self.market.price
+                if p > 0:                       # match the visual chart to reality
+                    self.engines["chart"].price = p
+                    self.engines["chart"].day_open = p
+            except Exception as exc:
+                self.market = None
+                self._log_msg(f"[studio] live market data unavailable ({exc}).")
             self._on_quality()        # apply the selected quality preset at boot
             self._on_tilt()           # apply max-tilt (pitch) cap at boot
             self._on_turncap()        # apply max-turn (yaw) cap at boot
@@ -1470,7 +1484,9 @@ class AvatarStudio:
         def _think():
             reply = None
             try:
-                reply = self._generate(txt)   # one-at-a-time brain access
+                # give the brain the LIVE price so answers reflect the real market
+                prompt = (self._live_market_ctx() + " The viewer asks: " + txt).strip()
+                reply = self._generate(prompt)   # one-at-a-time brain access
             except Exception as exc:
                 self._log_msg(f"[studio] brain error: {exc}")
             if reply:
@@ -1491,6 +1507,38 @@ class AvatarStudio:
         "Give your honest short take on the gold trend today, bullish or bearish, and why.",
         "Tease what could happen next on gold into the session and keep them watching.",
     ]
+
+    def _live_market_ctx(self):
+        """Build a REAL-TIME market context string for the brain — the actual live
+        gold price + recent % move, fetched at THIS moment. Falls back to the
+        simulated chart only if the live feed is down. Also keeps the on-screen
+        chart price synced to reality so the visuals match the commentary."""
+        md = getattr(self, "market", None)
+        price = pct = None
+        if md is not None:
+            try:
+                p = md.price
+                if p and p > 0:
+                    price = p
+                    snap = md.snapshot()
+                    if snap is not None and len(snap) > 12:
+                        ref = float(snap[-12, 4])
+                        pct = (price - ref) / ref * 100.0 if ref else None
+                    chart = self.engines.get("chart") if self.engines else None
+                    if chart is not None:        # sync the visual chart to reality
+                        chart.price = price
+            except Exception:
+                price = None
+        if price is None:                        # live feed down -> simulated chart
+            chart = self.engines.get("chart") if self.engines else None
+            price = getattr(chart, "price", None)
+        if not price:
+            return ""
+        move = ""
+        if pct is not None:
+            move = f", {'up' if pct >= 0 else 'down'} {abs(pct):.2f}% in the last few minutes"
+        return (f" LIVE RIGHT NOW: gold (XAUUSD) is ${price:,.0f}{move}. "
+                f"Talk about THIS exact current price, not an old level.")
 
     def _autotalk_loop(self):
         """Background host: the brain writes gold commentary and the Arabic-accent TTS
@@ -1518,9 +1566,7 @@ class AvatarStudio:
                     _t.sleep(0.2)
                     continue
                 beat = self._AUTOTALK_BEATS[i % len(self._AUTOTALK_BEATS)]; i += 1
-                chart = self.engines.get("chart") if self.engines else None
-                price = getattr(chart, "price", None)
-                ctx = f" Gold (XAUUSD) is trading around {price:,.1f} right now." if price else ""
+                ctx = self._live_market_ctx()    # REAL gold price + recent move, fetched NOW
                 line = None
                 try:
                     line = self._generate(beat + ctx)   # ONE-at-a-time brain access
