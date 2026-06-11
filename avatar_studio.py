@@ -1750,37 +1750,30 @@ class AvatarStudio:
         self.root.destroy()
 
 
-_SINGLE_INSTANCE_SOCK = None
+_SINGLE_INSTANCE_HANDLE = None
 
 
 def _acquire_single_instance():
-    """Allow only ONE Avatar Studio at a time (so only one bot can speak). Binds a
-    fixed loopback port as a lock; if it's taken, another instance is already up."""
-    global _SINGLE_INSTANCE_SOCK
-    import socket
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+    """Allow only ONE Avatar Studio at a time (so only one bot can speak). Uses a
+    named Windows mutex — held for the process lifetime, released automatically when
+    the process exits. Returns False if another instance already holds it."""
+    global _SINGLE_INSTANCE_HANDLE
     try:
-        s.bind(("127.0.0.1", 50573))      # arbitrary fixed port = the lock
-        s.listen(1)
-        _SINGLE_INSTANCE_SOCK = s          # keep it alive for the process lifetime
+        import ctypes
+        ERROR_ALREADY_EXISTS = 183
+        h = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\AvatarStudioSingleInstance")
+        if not h or ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
+            return False
+        _SINGLE_INSTANCE_HANDLE = h        # keep the handle alive
         return True
-    except OSError:
-        return False
+    except Exception:
+        return True                         # non-Windows / failure: don't block
 
 
 def main():
     if not _acquire_single_instance():
-        print("[studio] Avatar Studio is already running — only one instance allowed.")
-        try:
-            import tkinter.messagebox as mb
-            r = tk.Tk(); r.withdraw()
-            mb.showwarning("Avatar Studio",
-                           "Avatar Studio is already running.\nOnly one instance can run "
-                           "at a time (so only one bot speaks).")
-            r.destroy()
-        except Exception:
-            pass
+        print("[studio] Avatar Studio is ALREADY RUNNING — only one instance is "
+              "allowed (so only one bot speaks). Exiting this one.")
         return
     root = tk.Tk()
     AvatarStudio(root)
