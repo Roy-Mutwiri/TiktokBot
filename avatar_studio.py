@@ -1222,6 +1222,13 @@ class AvatarStudio:
                         errs += 1
                         if errs <= 3:
                             self._log_msg(f"[studio] mouth error: {exc}")
+                # HD-restore the FINAL face (swap + bot mouth + real eyes) together so
+                # the MOUTH gets the same CodeFormer sharpness as the eyes/skin.
+                if did_swap and self.swap_engine is not None:
+                    try:
+                        ai = self.swap_engine.restore_face(ai)
+                    except Exception:
+                        pass
                 _t = time.perf_counter()
                 try:
                     # FACE-SWAP streamer look: force FULL enhance so the person is
