@@ -719,12 +719,19 @@ class FaceSwapEngine:
                 try:
                     eye_d = float(np.linalg.norm(kps[0] - kps[1])) + 1e-6
                     rad = max(6, int(eye_d * 0.40))
-                    em = np.zeros((H, W), np.float32)
-                    for ex, ey in (kps[0], kps[1]):
-                        cv2.circle(em, (int(ex), int(ey)), rad, 1.0, -1)
-                    em = cv2.GaussianBlur(em, (0, 0), rad * 0.5)[:, :, None] * EYE_PRESERVE
-                    out = (out.astype(np.float32) * (1 - em)
-                           + frame.astype(np.float32) * em).astype(np.uint8)
+                    # work in a small ROI around the two eyes (was a full-512 blur+blend ~27ms)
+                    pad = rad * 2
+                    xs = [kps[0][0], kps[1][0]]; ys = [kps[0][1], kps[1][1]]
+                    x0 = max(0, int(min(xs) - pad)); x1 = min(W, int(max(xs) + pad))
+                    y0 = max(0, int(min(ys) - pad)); y1 = min(H, int(max(ys) + pad))
+                    if x1 > x0 and y1 > y0:
+                        em = np.zeros((y1 - y0, x1 - x0), np.float32)
+                        for ex, ey in (kps[0], kps[1]):
+                            cv2.circle(em, (int(ex) - x0, int(ey) - y0), rad, 1.0, -1)
+                        em = cv2.GaussianBlur(em, (0, 0), rad * 0.5)[:, :, None] * EYE_PRESERVE
+                        roi = (out[y0:y1, x0:x1].astype(np.float32) * (1 - em)
+                               + frame[y0:y1, x0:x1].astype(np.float32) * em)
+                        out[y0:y1, x0:x1] = roi.astype(np.uint8)
                 except Exception:
                     pass
             # recolour gray hair/beard -> match the character
@@ -734,5 +741,10 @@ class FaceSwapEngine:
             if getattr(self, "_eye_color", "off") != "off":
                 out = self._recolor_eyes(out)
             return out
-        except Exception:
+        except Exception as e:
+            self._swap_errs = getattr(self, "_swap_errs", 0) + 1
+            if self._swap_errs <= 3:
+                import traceback
+                print(f"[SWAP] per-frame swap error ({e}) — passing raw frame")
+                traceback.print_exc()
             return frame
