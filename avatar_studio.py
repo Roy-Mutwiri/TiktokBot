@@ -1178,6 +1178,10 @@ class AvatarStudio:
             # (which we may keep alive with idle silence below).
             self._speaking = bool(self.tts is not None and getattr(self.tts, "speaking", False))
             lips_from_bot = bool(self.liplock_var.get())
+            try:                       # mouth = BOT only (closed when silent, never webcam)
+                mt.bot_only = lips_from_bot
+            except Exception:
+                pass
 
             if chart_fade >= 1.0:
                 # fully on charts — skip the (now hidden) avatar mouth/enhance work

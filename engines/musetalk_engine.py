@@ -49,7 +49,7 @@ MUSETALK_CANDIDATES = [
     os.environ.get("MUSETALK_PATH", ""),
 ]
 FACE_REGION_SIZE = 256          # MuseTalk native mouth crop resolution
-BLEND_FACTOR = 0.9              # MuseTalk vs original inside the crop (real path)
+BLEND_FACTOR = float(os.environ.get("AVATAR_MOUTH_BLEND", "1.0"))  # 1.0 = full bot mouth (no operator leak)
 
 SAMPLE_RATE = 16000
 AUDIO_WINDOW_MS = 200
@@ -154,12 +154,31 @@ class MuseTalkEngine:
         except Exception:
             return None
 
-        if not self._update_speaking():
+        speaking = self._update_speaking()
+        bot_only = getattr(self, "bot_only", False)
+        # bot_only (lip-lock): the mouth is ALWAYS the bot's — synced while it talks,
+        # a CLOSED bot mouth when silent — so the operator's webcam mouth NEVER shows.
+        # Without bot_only, fall back to the webcam mouth when not speaking.
+        if not speaking and not bot_only:
             return base_crop
 
         try:
             if self.real_ready:
-                return self._process_real(lp_face_frame, mouth_bbox, base_crop)
+                if not speaking:
+                    # SILENT + bot_only -> render a closed bot mouth (feed silence),
+                    # throttled to every ~8 frames + cached (cheap when not talking).
+                    self._cm_fc = getattr(self, "_cm_fc", 0) + 1
+                    if getattr(self, "_closed_mouth", None) is None or (self._cm_fc % 8) == 0:
+                        self.audio_buffer.extend(np.zeros(AUDIO_WINDOW, np.float32))
+                        self._closed_mouth = self._process_real(lp_face_frame, mouth_bbox, base_crop)
+                    return cv2.resize(self._closed_mouth, (x2 - x1, y2 - y1))
+                # SPEAKING — live synced; ~76ms forward, so every 2nd frame reuse last.
+                self._mt_fc = getattr(self, "_mt_fc", 0) + 1
+                if (self._mt_fc % 2) == 0 and getattr(self, "_mt_last", None) is not None:
+                    return cv2.resize(self._mt_last, (x2 - x1, y2 - y1))
+                mouth = self._process_real(lp_face_frame, mouth_bbox, base_crop)
+                self._mt_last = mouth
+                return mouth
             if self._w2l is not None:
                 synced_full = self._w2l.process_frame(lp_face_frame)
                 return synced_full[y1:y2, x1:x2].copy()
@@ -174,38 +193,25 @@ class MuseTalkEngine:
     # REAL MuseTalk PATH
     # -------------------------------------------------------------------------
     def _process_real(self, lp_face_frame, bbox, base_crop):
-        """MuseTalk UNet mouth inpainting conditioned on Whisper audio features."""
+        """MuseTalk V1.5 UNet mouth inpainting conditioned on Whisper features."""
         torch = self._torch
         x1, y1, x2, y2 = bbox
 
-        # 1) audio features from the most recent window
+        # 1) audio conditioning for the CURRENT moment from the recent window
         window = np.array(list(self.audio_buffer)[-AUDIO_WINDOW:], dtype=np.float32)
-        audio_feat = self._audio_features(window)        # (1, T, C) tensor on device
+        audio_feat = self._audio_features(window)        # (1, 50, 384) on device
         if audio_feat is None:
             return base_crop
 
-        # 2) mouth crop -> 256x256, masked lower half (MuseTalk inpaints it)
-        crop = cv2.resize(base_crop, (FACE_REGION_SIZE, FACE_REGION_SIZE))
-        crop_rgb = cv2.cvtColor(crop, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-        img = torch.from_numpy(crop_rgb.transpose(2, 0, 1))[None].to(self.device)
-        img = (img * 2.0 - 1.0).to(self._dtype)          # [-1,1] for the VAE
-
-        masked = img.clone()
-        masked[:, :, FACE_REGION_SIZE // 2:, :] = 0       # zero lower (mouth) half
-
+        # 2) VAE wrapper builds the 8-ch input (masked + ref latents); decode result
+        crop256 = cv2.resize(base_crop, (FACE_REGION_SIZE, FACE_REGION_SIZE))
         with torch.no_grad():
-            # encode both halves to latents, concat on channel dim (MuseTalk input)
-            lat_img = self._vae.encode(img).latent_dist.sample() * self._vae_scale
-            lat_msk = self._vae.encode(masked).latent_dist.sample() * self._vae_scale
-            lat_in = torch.cat([lat_msk, lat_img], dim=1).to(self._dtype)
-
-            ts = torch.tensor([0], device=self.device)
-            pred = self._unet(lat_in, ts, encoder_hidden_states=audio_feat).sample
-            out = self._vae.decode(pred / self._vae_scale).sample      # (1,3,256,256)
-
-        out = ((out.float()[0].clamp(-1, 1) + 1.0) / 2.0 * 255.0)
-        out = out.detach().cpu().numpy().transpose(1, 2, 0)
-        out = cv2.cvtColor(np.clip(out, 0, 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
+            latents = self._vae.get_latents_for_unet(crop256).to(self.device, self._dtype)
+            pred = self._unet.model(latents, self._ts,
+                                    encoder_hidden_states=audio_feat).sample
+            pred = pred.to(self._vae.vae.dtype)
+            recon = self._vae.decode_latents(pred)       # (1,256,256,3) BGR uint8
+        out = recon[0] if recon.ndim == 4 else recon
         out = cv2.resize(out, (x2 - x1, y2 - y1))
 
         # keep some of the original crop so identity/skin is preserved
@@ -214,17 +220,27 @@ class MuseTalkEngine:
         return np.clip(blended, 0, 255).astype(np.uint8)
 
     def _audio_features(self, window):
-        """Whisper encoder features for the audio window -> conditioning tensor."""
+        """V1.5: Whisper-encode the recent audio window and return the per-frame
+        conditioning (1, 50, 384) for the CURRENT moment (the end of the window)."""
         try:
             torch = self._torch
-            feat = self._whisper_feature(window)         # provided by MuseTalk utils
-            if feat is None:
-                return None
-            t = torch.as_tensor(feat, device=self.device).to(self._dtype)
-            if t.dim() == 2:
-                t = t[None]
-            return t
-        except Exception:
+            feats = self._audio_proc.feature_extractor(
+                window, return_tensors="pt", sampling_rate=SAMPLE_RATE).input_features
+            feats = feats.to(self.device).to(self._dtype)
+            with torch.no_grad():
+                hs = self._whisper.encoder(feats, output_hidden_states=True).hidden_states
+            hs = torch.stack(hs, dim=2)                  # (1, T_audio, layers, 384)
+            # V1.5 conditioning = 10 audio steps (2*(2+2+1)) at the END of the real
+            # (non-padding) audio; x5 whisper layers -> the 50-length (1,50,384) cond.
+            real = int(round(len(window) / SAMPLE_RATE * 50))      # 50 audio-fps
+            real = max(10, min(real, hs.shape[1]))
+            clip = hs[:, real - 10:real]                 # (1, 10, layers, 384)
+            clip = self._rearrange(clip, "b c h w -> b (c h) w")   # (1, 10*layers, 384)
+            return self._pe(clip.to(self._dtype)).to(self._dtype)  # pe can upcast -> recast
+        except Exception as exc:
+            if getattr(self, "_af_errs", 0) < 3:
+                self._af_errs = getattr(self, "_af_errs", 0) + 1
+                print(f"[MUSETALK] audio feature error: {exc}")
             return None
 
     def _find_musetalk(self):
@@ -255,31 +271,38 @@ class MuseTalkEngine:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self._dtype = torch.float16 if self.device == "cuda" else torch.float32
 
-        # MuseTalk ships a load_all_model() helper that returns (audio_proc,
-        # vae, unet, pe) in most revisions. Use it when present.
+        # MuseTalk V1.5: load_all_model() -> (vae_wrapper, unet_wrapper, pe). The
+        # whisper model + AudioProcessor are separate. load_all_model + the VAE use
+        # RELATIVE "models/..." paths, so we chdir into the checkout during load.
         from musetalk.utils.utils import load_all_model
-        audio_processor, vae, unet, pe = load_all_model()
-
-        self._vae = (vae.vae if hasattr(vae, "vae") else vae).to(self.device).eval()
-        self._vae_scale = getattr(getattr(self._vae, "config", None),
-                                  "scaling_factor", 0.18215)
-        self._unet = (unet.model if hasattr(unet, "model") else unet).to(self.device).eval()
-        self._pe = pe.to(self.device) if hasattr(pe, "to") else pe
-
+        from musetalk.utils.audio_processor import AudioProcessor
+        from transformers import WhisperModel
+        from einops import rearrange
+        self._rearrange = rearrange
+        _cwd = os.getcwd()
         try:
-            self._vae = self._vae.to(self._dtype)
-            self._unet = self._unet.to(self._dtype)
-        except Exception:
-            self._dtype = torch.float32   # some builds dislike fp16 weights
+            os.chdir(mt_path)
+            vae, unet, pe = load_all_model(
+                unet_model_path=os.path.join("models", "musetalkV15", "unet.pth"),
+                vae_type="sd-vae",
+                unet_config=os.path.join("models", "musetalkV15", "musetalk.json"),
+                device=self.device)
+            whisper_dir = os.path.join("models", "whisper")
+            self._audio_proc = AudioProcessor(feature_extractor_path=whisper_dir)
+            self._whisper = (WhisperModel.from_pretrained(whisper_dir)
+                             .to(device=self.device, dtype=self._dtype).eval())
+        finally:
+            os.chdir(_cwd)
 
-        # Whisper feature extractor: positional-encode the audio processor output.
-        def _whisper_feature(window):
-            feats = audio_processor.get_audio_feature(window) \
-                if hasattr(audio_processor, "get_audio_feature") else None
-            if feats is None:
-                return None
-            return self._pe(feats) if callable(self._pe) else feats
-        self._whisper_feature = _whisper_feature
+        # vae is a VAE wrapper (get_latents_for_unet / decode_latents); unet wraps
+        # a UNet2DConditionModel at .model. Keep the WRAPPERS (their helpers do the
+        # masking + scaling correctly).
+        vae.vae = vae.vae.to(device=self.device, dtype=self._dtype).eval()
+        unet.model = unet.model.to(device=self.device, dtype=self._dtype).eval()
+        self._vae = vae
+        self._unet = unet
+        self._pe = pe.to(self.device) if hasattr(pe, "to") else pe
+        self._ts = torch.tensor([0], device=self.device)
 
     def _warmup_real(self):
         """Exercise the real path once so CUDA kernels autotune at startup."""
