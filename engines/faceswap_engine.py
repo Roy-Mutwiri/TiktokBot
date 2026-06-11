@@ -114,7 +114,7 @@ CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom
 SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0"))  # OFF: white-man SOURCE handles skin, no color hacks
 # PREDICTIVE TRACKING: extrapolate face keypoints this many frames forward to
 # cancel pipeline latency (the turn lag). ~1 frame; 0 = off. Too high overshoots.
-PREDICT_LEAD = float(os.environ.get("AVATAR_SWAP_PREDICT", "1.9"))
+PREDICT_LEAD = float(os.environ.get("AVATAR_SWAP_PREDICT", "1.25"))
 # FACE LOCK: lock onto ONE identity (the operator, captured on first frame). When
 # another face enters, it's ignored — only the locked face is tracked/swapped.
 FACE_LOCK = os.environ.get("AVATAR_SWAP_LOCK", "1") == "1"
