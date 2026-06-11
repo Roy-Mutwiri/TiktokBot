@@ -253,13 +253,22 @@ def apply_chromatic_aberration(frame, amt=0.0016):
     return cv2.merge([b, g, r])
 
 
+_GRAIN_TILES = None
+_grain_i = 0
+
+
 def apply_grain(frame):
-    """Add monochromatic luminance grain — real sensors are never perfectly clean."""
+    """Add monochromatic luminance grain — real sensors are never perfectly clean.
+    Cycles a precomputed pool of noise tiles (was ~18ms of np.random.randn/frame)."""
+    global _GRAIN_TILES, _grain_i
     if GRAIN_STRENGTH <= 0:
         return frame
     h, w = frame.shape[:2]
-    noise = (np.random.randn(h, w, 1) * GRAIN_STRENGTH).astype(np.float32)
-    return np.clip(frame.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    if _GRAIN_TILES is None or _GRAIN_TILES[0].shape[:2] != (h, w):
+        _GRAIN_TILES = [(np.random.randn(h, w, 1) * GRAIN_STRENGTH).astype(np.float32)
+                        for _ in range(8)]
+    _grain_i = (_grain_i + 1) % len(_GRAIN_TILES)
+    return np.clip(frame.astype(np.float32) + _GRAIN_TILES[_grain_i], 0, 255).astype(np.uint8)
 
 
 def apply_vignette(frame):
