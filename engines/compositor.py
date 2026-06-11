@@ -87,13 +87,29 @@ class Compositor:
         return self._mesh
 
     # -------------------------------------------------------------------------
-    def detect_mouth_bbox(self, face_frame):
+    def detect_mouth_bbox(self, face_frame, mouth_hint=None):
         """Return (x1, y1, x2, y2) around the mouth, padded for jaw movement.
 
-        Falls back to a sensible lower-center box if FaceMesh can't find a face,
-        and to the last good box if a single frame drops detection.
+        If `mouth_hint` (cx, cy, mouth_width) is given — the face-swap's OWN exact
+        mouth keypoints — build the box from that (no re-detection that can mis-place
+        it and cause a doubled mouth). Else fall back to FaceMesh / center box.
         """
         h, w = face_frame.shape[:2]
+        if mouth_hint is not None:
+            try:
+                cx, cy, mw = mouth_hint
+                mw = max(12.0, float(mw))
+                bw = mw * (1.0 + 2 * PAD_X)             # mouth width + corners
+                bh = mw * 0.75                          # mouth height ~ 0.75 * width
+                x1 = int(cx - bw / 2); x2 = int(cx + bw / 2)
+                y1 = int(cy - bh * (0.5 + PAD_Y_TOP))   # room above the upper lip
+                y2 = int(cy + bh * (0.5 + PAD_Y_BOTTOM))  # room below for jaw drop
+                x1 = max(0, x1); y1 = max(0, y1); x2 = min(w, x2); y2 = min(h, y2)
+                if x2 - x1 >= MIN_BBOX and y2 - y1 >= MIN_BBOX:
+                    self._last_bbox = (x1, y1, x2, y2)
+                    return self._last_bbox
+            except Exception:
+                pass
         mesh = self._get_mesh()
         if mesh is None:
             return self._center_box(w, h)

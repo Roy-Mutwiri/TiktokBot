@@ -182,6 +182,7 @@ class FaceSwapEngine:
         self._eyemesh_tried = False
         self._stab = 0.4                # stabilization level (0..1), live-settable
         self.last_head = None           # (cx, cy, eye_w) of the swapped head (output coords)
+        self.last_mouth = None          # (cx, cy, mouth_w) of the swapped mouth (exact)
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
