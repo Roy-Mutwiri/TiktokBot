@@ -603,6 +603,13 @@ class AvatarStudio:
         self.swap_var = tk.BooleanVar(value=True)        # our focus mode -> default ON
         self._check(c, "FACE-SWAP mode  ·  real head, perfect 90° turns (GPU)",
                     self.swap_var).pack(fill="x", pady=3)
+        # CHARACTER picker — switch identity live (white man / Haddan / any folder).
+        r = self._row(c, "Character")
+        self.char_var = tk.StringVar(value="White man")
+        ttk.Combobox(r, textvariable=self.char_var, values=["White man", "Haddan"],
+                     state="readonly", width=14,
+                     style="Studio.TCombobox").pack(side="right")
+        self.char_var.trace_add("write", self._on_character)
 
         # ---- SCENE & OUTPUT ------------------------------------------------
         c = self._card(right, "SCENE & OUTPUT")
