@@ -1396,19 +1396,18 @@ class AvatarStudio:
         self._brain_answer(txt)
 
     def _brain_answer(self, txt):
-        """Generate the in-character answer on the GPU (loop pauses via
-        self._thinking, 'thinking...' overlay), then speak it. Runs in a thread
-        so the UI stays responsive."""
+        """Generate the in-character answer (serialized via _generate, loop pauses
+        via self._thinking), then speak it. Your question takes priority over the
+        Auto-host. Runs in a thread so the UI stays responsive."""
         self._log_msg("you> " + txt)
+        self._user_priority()                 # pause auto-host + clear its backlog
 
         def _think():
-            self._thinking = True
             reply = None
             try:
-                reply = self.brain.respond(txt)
+                reply = self._generate(txt)   # one-at-a-time brain access
             except Exception as exc:
                 self._log_msg(f"[studio] brain error: {exc}")
-            self._thinking = False
             if reply:
                 self._log_msg("avatar> " + reply)
                 self.tts.speak(reply)
