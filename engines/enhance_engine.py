@@ -192,18 +192,32 @@ def background_composite(frame):
         return frame
 
 
+_GRADE_LUT = None
+
+
+def _grade_lut():
+    """256-entry LUT baking exposure+gamma+contrast (the per-pixel scalar curve) so
+    the whole np.power/clip math becomes one ~0.3ms cv2.LUT instead of ~38ms."""
+    global _GRADE_LUT
+    if _GRADE_LUT is None:
+        x = np.arange(256, dtype=np.float32) / 255.0
+        x = np.clip(x * 1.12, 0, 1)                        # exposure lift
+        x = np.power(x, 0.86)                              # gamma (lift shadows/mids)
+        x = np.clip((x - 0.5) * 1.05 + 0.5, 0, 1)          # mild contrast
+        _GRADE_LUT = (x * 255).astype(np.uint8)
+    return _GRADE_LUT
+
+
 def apply_color_grade(frame):
     """Bright studio-lit streamer grade: exposure + SHADOW LIFT (so the face is
-    never dark), gentle warm key, mild contrast. Soft, flattering — not crushed."""
-    f = frame.astype(np.float32) / 255.0
-    f = np.clip(f * 1.12, 0, 1)                             # exposure lift (brighter)
-    f = np.power(f, 0.86)                                   # gamma <1 = lift shadows/mids
-    luma = (0.114 * f[:, :, 0] + 0.587 * f[:, :, 1] + 0.299 * f[:, :, 2])[:, :, None]
-    hi = np.clip((luma - 0.5) * 2.0, 0, 1)
-    f[:, :, 2] = np.clip(f[:, :, 2] + hi[:, :, 0] * 0.030 + 0.015, 0, 1)  # warm highlights
-    f[:, :, 1] = np.clip(f[:, :, 1] + hi[:, :, 0] * 0.008 + 0.004, 0, 1)
-    f = np.clip((f - 0.5) * 1.05 + 0.5, 0, 1)              # mild contrast (keeps it bright)
-    return (f * 255).astype(np.uint8)
+    never dark), gentle warm key, mild contrast. LUT-accelerated (was ~38ms)."""
+    g = cv2.LUT(frame, _grade_lut())                       # exposure+gamma+contrast
+    b, gr, r = cv2.split(g)
+    luma = 0.114 * b + 0.587 * gr + 0.299 * r              # float32
+    hi = np.clip((luma - 127.5) / 127.5, 0, 1)             # highlight weight 0..1
+    r = cv2.add(r, (hi * 7.65 + 3.8).astype(np.uint8))     # warm highlights (0.030/0.015*255)
+    gr = cv2.add(gr, (hi * 2.04 + 1.0).astype(np.uint8))
+    return cv2.merge([b, gr, r])
 
 
 def apply_soften(frame):
