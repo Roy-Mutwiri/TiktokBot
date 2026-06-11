@@ -558,7 +558,10 @@ class TTSStreamEngine:
                 pass
 
     def _set_speaking(self, speaking):
-        """Notify the optional behaviour engine of speech boundaries."""
+        """Notify the optional behaviour engine of speech boundaries. Also exposes
+        `self.speaking` — the authoritative 'the bot is ACTUALLY talking' flag
+        (unpolluted by any idle silence keep-alive the studio may feed the mouth)."""
+        self.speaking = bool(speaking)
         if self.behavior is not None:
             try:
                 self.behavior.set_speaking(speaking)
