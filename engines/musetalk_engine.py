@@ -269,11 +269,8 @@ class MuseTalkEngine:
         out = recon[oy1:oy2, ox1:ox2]
         if out.shape[:2] != base_crop.shape[:2]:
             out = cv2.resize(out, (x2 - x1, y2 - y1))
-        # the 256 VAE decode is soft -> unsharp the mouth back to crisp structure
-        if MOUTH_SHARP > 0 and out.shape[0] > 6 and out.shape[1] > 6:
-            blur = cv2.GaussianBlur(out, (0, 0), 1.2)
-            out = np.clip(out.astype(np.float32) * (1 + MOUTH_SHARP)
-                          - blur.astype(np.float32) * MOUTH_SHARP, 0, 255).astype(np.uint8)
+        # the 256 VAE decode is soft -> sharpen + pop so the mouth reads clearly
+        out = self._pop_mouth(out)
         blended = (out.astype(np.float32) * BLEND_FACTOR +
                    base_crop.astype(np.float32) * (1.0 - BLEND_FACTOR))
         return np.clip(blended, 0, 255).astype(np.uint8)
