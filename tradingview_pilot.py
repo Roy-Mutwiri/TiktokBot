@@ -101,6 +101,42 @@ class _Narrator:
                 pass
         time.sleep(min(9.0, max(3.0, len(line) / 16.0)))
 
+    def speak_async(self, line):
+        """Synthesize `line`, START playing it on a background thread, and return
+        the audio duration (seconds) so the caller can DRAW while it speaks.
+        Sets self._done when playback ends; await it with wait_done()."""
+        print(f"[AI] {line}")
+        self._loaded.wait(timeout=60)
+        self._done = threading.Event()
+        if self.enabled and self._eng and self._eng.ok:
+            try:
+                wav, sr = self._eng.synthesize(line, lang=self.lang)
+                if wav is not None and len(wav):
+                    dur = len(wav) / float(sr)
+
+                    def _play():
+                        try:
+                            import sounddevice as sd
+                            sd.play(wav, sr); sd.wait()
+                        except Exception:
+                            pass
+                        self._done.set()
+                    threading.Thread(target=_play, daemon=True).start()
+                    return dur
+            except Exception:
+                pass
+        dur = min(12.0, max(4.0, len(line) / 15.0))         # no-voice reading time
+
+        def _wait():
+            time.sleep(dur); self._done.set()
+        threading.Thread(target=_wait, daemon=True).start()
+        return dur
+
+    def wait_done(self, timeout=25):
+        d = getattr(self, "_done", None)
+        if d:
+            d.wait(timeout)
+
     def stop(self):
         self._stop = True
 
@@ -282,49 +318,102 @@ class TradingViewPilot:
         except Exception:
             pass
 
-    def _tool_plan(self, up):
-        """The ordered tools the AI explores one by one, with what to say."""
+    def _draw_points_timed(self, points, total_dur):
+        """Click the points spread over ~total_dur, with slow visible mouse
+        glides, so the DRAWING tracks the spoken explanation in real time."""
+        box = self._canvas_box()
+        if not box:
+            return False
+        n = max(1, len(points))
+        budget = max(2.0, total_dur - 0.8)
+        per = budget / n
+        for rx, ry in points:
+            x, y = self._pt(box, rx, ry)
+            self.page.mouse.move(x, y, steps=26)          # slow, visible glide
+            time.sleep(min(0.8, per * 0.35))
+            self.page.mouse.click(x, y)
+            time.sleep(min(per * 0.65, 3.0))
+        return True
+
+    def _tool_plan(self, a, up):
+        """Tools the AI explores one by one, with explanations tied to the LIVE
+        numbers (price / levels / fib), so every drawing is explained for real."""
+        price = a.price if a else 0.0
+        res_list = sorted([p for p, s, k in (a.levels if a else []) if p > price])
+        sup_list = sorted([p for p, s, k in (a.levels if a else []) if p < price], reverse=True)
+        res = res_list[0] if res_list else price * 1.01
+        sup = sup_list[0] if sup_list else price * 0.99
+        rng = max(res - sup, price * 0.008)
+        golden = sup + 0.618 * rng
+        target = price + rng
+        nm = {"XAUUSD": "gold", "GOLD": "gold", "BTCUSD": "bitcoin", "BTCUSDT": "bitcoin",
+              "ETHUSD": "ethereum", "ETHUSDT": "ethereum"}.get(
+            self.symbol.split(":")[-1].upper(), self.symbol.split(":")[-1])
+        nm_ar = {"gold": "الذهب", "bitcoin": "البيتكوين", "ethereum": "الإيثيريوم"}.get(nm, nm)
+
+        def f(x):
+            return f"{x:,.0f}"
+
         return [
             dict(group=TREND_GROUP,
                  points=[(0.12, 0.80 if up else 0.45), (0.92, 0.56 if up else 0.72)],
-                 en="First, the trend line. I connect the swing lows; as long as price holds above this line, the uptrend stays intact."
-                    if up else "First, the trend line. I connect the swing highs; while price stays below it, the downtrend holds.",
-                 ar="أولاً، خط الاتجاه. أصل بين القيعان؛ وطالما السعر فوق هذا الخط يبقى الاتجاه الصاعد سليماً."
-                    if up else "أولاً، خط الاتجاه. أصل بين القمم؛ وطالما السعر تحته يبقى الاتجاه هابطاً."),
+                 en=(f"Watch this — I'm drawing the support trend line, connecting the swing lows. "
+                     f"As long as {nm} holds above it, the buyers stay in control; it's rising right into price near {f(price)}."
+                     if up else
+                     f"I'm drawing the resistance trend line down the swing highs. While {nm} stays below it, sellers keep the upper hand near {f(price)}."),
+                 ar=(f"انظر، أرسم خط الدعم واصلاً بين القيعان. وطالما بقي {nm_ar} فوقه فالمشترون مسيطرون، وهو يصعد قرب {f(price)}."
+                     if up else
+                     f"أرسم خط المقاومة على القمم. وطالما بقي {nm_ar} تحته يبقى البائعون مسيطرين قرب {f(price)}.")),
             dict(group=TREND_GROUP,
                  points=[(0.16, 0.40 if up else 0.26), (0.92, 0.24 if up else 0.50)],
-                 en="Next, the opposite trend line. A clean break of it would signal a shift in momentum.",
-                 ar="ثم خط الاتجاه المقابل. واختراقه بوضوح يشير إلى تغيّر في الزخم."),
+                 en=(f"Up here is the resistance line, capping the swing highs around {f(res)}. "
+                     f"A clean break above {f(res)} is the trigger for the next leg higher."),
+                 ar=(f"وهنا خط المقاومة، يحدّ القمم قرب {f(res)}. واختراق {f(res)} بوضوح هو إشارة الموجة الصاعدة التالية.")),
             dict(group=FIB_GROUP,
                  points=[(0.30, 0.72 if up else 0.30), (0.66, 0.32 if up else 0.72)],
-                 en="Now a fibonacci retracement of the move. The point six one eight golden pocket is where pullbacks often find support.",
-                 ar="الآن تصحيح فيبوناتشي للحركة. ومنطقة 0.618 الذهبية غالباً ما يجد عندها السعر دعماً."),
+                 en=(f"Now I'll map the fibonacci of this leg. The level that matters is the point-six-one-eight "
+                     f"retracement around {f(golden)} — the golden pocket, where dips usually get bought."),
+                 ar=(f"الآن أرسم فيبوناتشي لهذه الموجة. وأهم مستوى هو 0.618 قرب {f(golden)}، المنطقة الذهبية حيث يُشترى التصحيح عادة.")),
             dict(group=POS_GROUP,
                  points=[(0.60, 0.58), (0.86, 0.40 if up else 0.74)],
-                 en="And the position tool lays out the entry, the target, and the risk to reward of the trade idea.",
-                 ar="وأداة المركز تُظهر الدخول والهدف ونسبة المخاطرة إلى العائد لفكرة الصفقة."),
+                 en=(f"And here's the trade idea — a long from {f(price)}, targeting {f(target)} at resistance, "
+                     f"with the stop tucked under support at {f(sup)}. That's a clean risk-to-reward."),
+                 ar=(f"وهذه فكرة الصفقة: شراء من {f(price)} بهدف {f(target)} عند المقاومة، ووقف الخسارة تحت الدعم عند {f(sup)}. نسبة مخاطرة إلى عائد جيدة.")),
         ]
 
-    # -- deliberate, one-tool-at-a-time performance --------------------------
+    # -- synchronized performance: DRAW while it EXPLAINS --------------------
     def perform_cycle(self):
         res = self._analysis()
         narrative, a = (res if res else (None, None))
         up = (a.trend == "uptrend") if a else True
         self._dismiss()
-        self.zoom(-350); time.sleep(1.5)
+        # overall live read while slowly framing the chart
         if narrative:
-            self.narrator.speak_sync(narrative)          # the overall read first
-        for tool in self._tool_plan(up):
+            dur = self.narrator.speak_async(narrative)
+            self.zoom(-300)
+            for _ in range(max(1, int(dur / 1.4))):
+                if self._stop:
+                    break
+                time.sleep(1.2)
+            self.narrator.wait_done()
+        else:
+            self.zoom(-300); time.sleep(1.0)
+        # tools, one by one — arm tool, then DRAW it AS the voice explains it
+        for tool in self._tool_plan(a, up):
             if self._stop:
                 break
-            ok = self._draw_with_tool(tool["group"], tool["points"])   # draw it
-            time.sleep(0.6)
-            self.narrator.speak_sync(tool["ar"] if self.lang == "ar" else tool["en"])  # explain it
+            self._dismiss()
+            self._tool(tool["group"])                     # arm the drawing tool
+            dur = self.narrator.speak_async(tool["ar"] if self.lang == "ar" else tool["en"])
+            self._draw_points_timed(tool["points"], dur)  # draw in sync with speech
+            self.narrator.wait_done()
+            try:
+                self.page.keyboard.press("Escape")
+            except Exception:
+                pass
+            time.sleep(0.5)
+            self._delete_last()                            # clear it for the next tool
             time.sleep(0.8)
-            if ok:
-                self._delete_last()                       # delete once done explaining
-            time.sleep(1.1)
-        # close any stray menu/tool, then loop with a fresh read
         try:
             self.page.keyboard.press("Escape")
         except Exception:
