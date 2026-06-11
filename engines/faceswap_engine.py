@@ -80,6 +80,10 @@ CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))       # target 
 # Blend YOUR real eyes back over the swap (0 = Haddan's AI eyes, 1 = fully your
 # real eyes). AI source faces have dead eyes; your live eyes look human.
 EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.6"))
+# Recolour gray hair/beard toward the character's dark hair (the biggest "doesn't
+# look like the photos" tell when the operator is older/gray). 0 = off.
+HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "1") == "1"
+HAIR_DARKEN = float(os.environ.get("AVATAR_SWAP_HAIRDARKEN", "0.55"))
 
 
 def _color_transfer(source, target):
@@ -114,6 +118,8 @@ class FaceSwapEngine:
         self._kps_euro = None          # temporal smoothing of target keypoints
         self.enhancer = None           # CodeFormer HD face enhancement (lazy)
         self._enh_tried = False
+        self._seg = None
+        self._seg_tried = False
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
