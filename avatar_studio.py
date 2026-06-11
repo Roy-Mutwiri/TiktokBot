@@ -1268,7 +1268,12 @@ class AvatarStudio:
                 except Exception:
                     final = ai
                 t_enh += time.perf_counter() - _t
-                if chart_fade > 0.0:      # crossfade avatar <-> chart
+                # TRADER SCENE (merged AI-trader): the live CHART is the main view and
+                # the avatar host sits in a picture-in-picture corner, narrating the
+                # market. When the face is lost it falls back to the full chart.
+                if getattr(self, "trader_var", None) and self.trader_var.get():
+                    final = self._trader_scene(final, chart, self._speaking)
+                elif chart_fade > 0.0:    # (classic) crossfade avatar <-> chart
                     cf = chart.render(speaking=self._speaking)
                     final = cv2.addWeighted(final, 1.0 - chart_fade, cf, chart_fade, 0)
 
