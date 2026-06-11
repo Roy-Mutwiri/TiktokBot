@@ -53,6 +53,7 @@ BLEND_FACTOR = float(os.environ.get("AVATAR_MOUTH_BLEND", "1.0"))  # 1.0 = full 
 MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.55"))  # unsharp
 MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.10"))      # mild local contrast (was 0.18 = banding)
 MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was garish)
+MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.5"))    # CPU local-contrast crisp (no GPU lag)
 # DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
 # adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
 DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0"))  # OFF: GPU op contends with voice synth during speech = lag. CPU crisp in _pop_mouth instead
@@ -170,12 +171,21 @@ class MuseTalkEngine:
             if mouth.shape[0] < 6 or mouth.shape[1] < 6:
                 return mouth
             m = mouth.astype(np.float32)
-            if MOUTH_SHARP > 0:                              # crisp detail
-                blur = cv2.GaussianBlur(m, (0, 0), 1.2)
-                m = m * (1 + MOUTH_SHARP) - blur * MOUTH_SHARP
+            if MOUTH_SHARP > 0:                              # TWO-SCALE unsharp = crisp
+                blur1 = cv2.GaussianBlur(m, (0, 0), 1.0)     # fine edges (lips/teeth)
+                m = m * (1 + MOUTH_SHARP) - blur1 * MOUTH_SHARP
+                blur2 = cv2.GaussianBlur(m, (0, 0), 2.6)     # medium detail / structure
+                m = m * (1 + MOUTH_SHARP * 0.5) - blur2 * (MOUTH_SHARP * 0.5)
             if MOUTH_POP > 0:                                # contrast: opening darkens, lips define
                 m = (m - 128.0) * (1.0 + MOUTH_POP) + 128.0
             m = np.clip(m, 0, 255).astype(np.uint8)
+            if MOUTH_CLAHE > 0:                              # CPU local contrast defines a soft
+                if getattr(self, "_mclahe", None) is None:   # (e.g. White-Haddan) mouth, NO GPU lag
+                    self._mclahe = cv2.createCLAHE(clipLimit=2.4, tileGridSize=(4, 4))
+                lab = cv2.cvtColor(m, cv2.COLOR_BGR2LAB)
+                lab[:, :, 0] = cv2.addWeighted(lab[:, :, 0], 1.0 - MOUTH_CLAHE,
+                                               self._mclahe.apply(lab[:, :, 0]), MOUTH_CLAHE, 0)
+                m = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
             if MOUTH_SAT > 0:                                # redder, livelier lips
                 hsv = cv2.cvtColor(m, cv2.COLOR_BGR2HSV).astype(np.float32)
                 hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 + MOUTH_SAT), 0, 255)
