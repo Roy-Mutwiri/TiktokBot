@@ -69,13 +69,24 @@ entirely: `install.ps1 -Uninstall`.
 | `vcam_host.cpp` | creates the session-lifetime virtual camera and holds it open |
 | `setup.ps1` / `build.ps1` / `install.ps1` | fetch + graft, compile, register |
 
-## Status / notes for the build pass
+## Status: BUILT & VERIFIED on this machine (2026-06-10)
 
-- The Python side (`avatar_sharedframe.py`, `avatar_camera.py --native`) is
-  complete and tested — it already writes frames to the shared file.
-- The C++ is written against Microsoft's sample + the verified shared-frame
-  protocol. It is **pending its first compile** on this machine (no toolchain
-  yet); expect to finalize two things during that pass:
-  1. the media type is forced to **512×512 RGB32** (the avatar size) — `setup.ps1`
-     auto-patches `SimpleMediaSource.cpp`; verify the patch took.
-  2. `IMFVirtualCamera::Start` / `Stop` signatures against the installed SDK.
+The full path is working and tested end-to-end:
+- VS Build Tools 2022 + Win11 SDK 10.0.26100 installed; DLL + `vcam_host.exe`
+  compiled clean.
+- The DLL is installed to `C:\Program Files\AvatarStudioCamera\` and registered
+  (InprocServer32). It MUST live in a system path - the Frame Server service
+  cannot load a media source from a user-profile folder (that caused an early
+  `BindToObject` / `E_ACCESSDENIED` failure).
+- Verified with ffmpeg: the camera appears as "Avatar Studio Camera (Windows
+  Virtual Camera)" at 512x512 @ 30fps, streams the exact fed frames (BLUE and
+  GREEN color round-trips confirmed across repeated trials), and vanishes the
+  instant `vcam_host.exe` exits (Session lifetime).
+
+Notes if you rebuild against a newer SDK:
+- `setup.ps1` patches the resolution (NUM_IMAGE_ROWS/COLS -> 512) and removes the
+  sample's duplicate `MF_VIRTUALCAMERA_*` GUID definitions (the SDK provides them).
+- `build.ps1` retargets WindowsTargetPlatformVersion to the installed SDK and
+  restores packages.config NuGet packages (CppWinRT, wil) via a fetched nuget.exe.
+- `IMFVirtualCamera::Start()` is required for the camera to surface (it may return
+  E_ACCESSDENIED but still works - the host logs and continues).

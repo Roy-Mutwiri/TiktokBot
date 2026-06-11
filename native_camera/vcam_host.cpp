@@ -61,10 +61,12 @@ int wmain(int argc, wchar_t** argv)
         return 1;
     }
 
-    // Start streaming/availability for the session.
+    // Start() is REQUIRED for the camera to surface to consumers / the DShow
+    // bridge. It returns E_ACCESSDENIED in some contexts but the camera still
+    // works, so we log-and-continue rather than abort.
     hr = vcam->Start(nullptr);
     if (FAILED(hr))
-        wprintf(L"IMFVirtualCamera::Start warning 0x%08X (camera may still appear)\n", hr);
+        wprintf(L"(Start returned 0x%08X - continuing)\n", hr);
 
     wprintf(L"Avatar Studio Camera LIVE as \"%s\". Close this to remove it.\n", name);
     fflush(stdout);

@@ -83,10 +83,12 @@ ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.8"))
 COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.0"))
 AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "0") == "1"          # auto-framing (off)
 CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))
-EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.0"))         # real-eye blend (off)
+EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.5"))         # real-eye blend
 HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "0") == "1"        # hair recolour (off)
 HAIR_DARKEN = float(os.environ.get("AVATAR_SWAP_HAIRDARKEN", "0.55"))
 CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
+# Lighten the face skin toward a Caucasian tone (0 = off, ~0.6 = clearly lighter).
+SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0.65"))
 
 
 def _color_transfer(source, target):
@@ -123,6 +125,7 @@ class FaceSwapEngine:
         self._enh_tried = False
         self._seg = None
         self._seg_tried = False
+        self._last_center = None       # last frame's face center (lock-on tracking)
         try:
             from one_euro import OneEuroFilter
             # one filter per kps coordinate (5 pts x 2) — kills swap jitter on move
@@ -328,6 +331,55 @@ class FaceSwapEngine:
         except Exception:
             return out
 
+    def _lighten_skin(self, out):
+        """Shift ALL visible skin (face, NECK, HANDS) toward a lighter / less-warm
+        Caucasian tone — consistent body, no white-face/dark-neck mismatch. YCrCb
+        skin-gated + saturation gate so the red shirt, beard, eyes, hair and
+        background are left untouched."""
+        try:
+            f = out.astype(np.float32)
+            ycc = cv2.cvtColor(out, cv2.COLOR_BGR2YCrCb)
+            hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV)
+            cr, cb = ycc[:, :, 1], ycc[:, :, 2]
+            sat, val = hsv[:, :, 1], hsv[:, :, 2]
+            # skin: classic YCrCb range, moderate saturation (the bright RED SHIRT is
+            # far more saturated), reasonably bright (not the dark beard/shadows).
+            skin = ((cr > 133) & (cr < 173) & (cb > 77) & (cb < 127) &
+                    (sat > 25) & (sat < 150) & (val > 60)).astype(np.float32)
+            skin = cv2.GaussianBlur(skin, (0, 0), 2.5)[:, :, None] * SKIN_LIGHTEN
+            lighter = f.copy()
+            lighter += (255 - lighter) * 0.22           # lift toward white
+            lighter[:, :, 0] = np.clip(lighter[:, :, 0] * 1.06, 0, 255)   # +blue (cooler)
+            lighter[:, :, 2] = np.clip(lighter[:, :, 2] * 0.97, 0, 255)   # -red (less warm)
+            return np.clip(f * (1 - skin) + lighter * skin, 0, 255).astype(np.uint8)
+        except Exception:
+            return out
+
+    def _paste_seamless(self, frame, target):
+        """Paste the swapped face with Poisson seamless cloning so the boundary
+        (esp. the FOREHEAD) matches the surrounding skin tone/lighting — no visible
+        'mask line'. Falls back to a feathered alpha blend if seamlessClone fails."""
+        H, W = frame.shape[:2]
+        bgr_fake, M = self.swapper.get(frame, target, self.source_face, paste_back=False)
+        S = bgr_fake.shape[0]
+        IM = cv2.invertAffineTransform(M)
+        fake_full = cv2.warpAffine(bgr_fake, IM, (W, H))
+        white = np.full((S, S), 255, np.uint8)
+        er = max(4, S // 11)
+        white = cv2.erode(white, np.ones((er, er), np.uint8))      # pull in from edges
+        mask = cv2.warpAffine(white, IM, (W, H))
+        ys, xs = np.where(mask > 10)
+        if len(xs) == 0:
+            return None
+        cx, cy = int((xs.min() + xs.max()) / 2), int((ys.min() + ys.max()) / 2)
+        mask[:3, :] = 0; mask[-3:, :] = 0; mask[:, :3] = 0; mask[:, -3:] = 0
+        try:
+            return cv2.seamlessClone(fake_full, frame, mask, (cx, cy), cv2.NORMAL_CLONE)
+        except Exception:
+            m = (cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 7) / 255.0)[:, :, None]
+            return (frame.astype(np.float32) * (1 - m)
+                    + fake_full.astype(np.float32) * m).astype(np.uint8)
+
     def swap(self, frame):
         """Swap the character face onto the largest face in `frame` (your real
         webcam head). Auto-centers the face, smooths keypoints, custom forehead
@@ -389,24 +441,24 @@ class FaceSwapEngine:
                 bbox = bbox + np.array([dx, dy, dx, dy], np.float32)
             self.last_found = True
             target = self._Face(bbox=bbox, kps=kps, det_score=bboxes[i, 4])
-            if CUSTOM_PASTE:
-                # opt-in: custom forehead paste + gentle skin-tone match
-                bgr_fake, M = self.swapper.get(frame, target, self.source_face, paste_back=False)
-                S = bgr_fake.shape[0]
-                if COLOR_MATCH and COLOR_STRENGTH > 0.0:
-                    aimg = cv2.warpAffine(frame, M, (S, S))
-                    matched = _color_transfer(bgr_fake, aimg)
-                    bgr_fake = cv2.addWeighted(bgr_fake, 1.0 - COLOR_STRENGTH,
-                                               matched, COLOR_STRENGTH, 0)
-                mask = self._aligned_mask(S)
-                IM = cv2.invertAffineTransform(M)
-                fake_full = cv2.warpAffine(bgr_fake, IM, (W, H))
-                mask_full = cv2.warpAffine(mask, IM, (W, H))[:, :, None]
-                out = (frame.astype(np.float32) * (1 - mask_full)
-                       + fake_full.astype(np.float32) * mask_full).astype(np.uint8)
-            else:
-                # CLEAN BASELINE: the inswapper model's OWN proven paste-back.
+            # SEAMLESS paste (Poisson) — boundary matches skin tone, no forehead line.
+            out = self._paste_seamless(frame, target)
+            if out is None:
                 out = self.swapper.get(frame, target, self.source_face, paste_back=True)
+            # GENTLE LIGHTING: if the face is dark, lift it toward FACE_LIGHT (soft,
+            # face-region only) so you're not under-lit. Never darkens.
+            if FACE_LIGHT > 0:
+                x1, y1, x2, y2 = [int(v) for v in bbox]
+                x1, y1 = max(0, x1), max(0, y1); x2, y2 = min(W, x2), min(H, y2)
+                if x2 > x1 and y2 > y1:
+                    reg = out[y1:y2, x1:x2]
+                    mean = float(reg.reshape(-1, 3).mean())
+                    if 5 < mean < FACE_LIGHT:
+                        gain = min(1.6, FACE_LIGHT / mean)
+                        out = np.clip(out.astype(np.float32) * gain, 0, 255).astype(np.uint8)
+            # lighten ALL skin (face, neck, hands) toward a Caucasian tone
+            if SKIN_LIGHTEN > 0.0:
+                out = self._lighten_skin(out)
             # CodeFormer HD enhancement (inswapper is only 128px -> crisp + exact).
             if ENHANCE_SWAP:
                 if self.enhancer is None and not self._enh_tried:
