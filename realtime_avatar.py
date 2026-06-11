@@ -219,6 +219,13 @@ def startup(cam=None, backend=None, hints=True):
     """
     print(BANNER)
 
+    # JARVIS-style boot cue the moment we come online (non-blocking, crash-proof).
+    try:
+        from startup_sound import play_startup_sound
+        play_startup_sound()
+    except Exception:
+        pass
+
     import pyvirtualcam
     from liveportrait_engine import LivePortraitEngine
     from musetalk_engine import MuseTalkEngine
@@ -267,6 +274,17 @@ def startup(cam=None, backend=None, hints=True):
               "virtual cam.")
         print("  Run  python control_gui.py  in another terminal to type what the AI says.")
         print("  Keys here:  [M] mute   [Q] quit\n")
+
+    # Optional spoken "JARVIS" greeting once everything is online, in the avatar's
+    # own voice (mouth-synced by the run loop). Set AVATAR_GREETING="0" to mute it,
+    # or to any custom line to change it.
+    greeting = os.environ.get(
+        "AVATAR_GREETING", "Good evening. All systems are now online and operational.")
+    if greeting and greeting != "0":
+        try:
+            tts.speak(greeting)
+        except Exception:
+            pass
 
     return {"liveportrait": liveportrait, "musetalk": musetalk,
             "compositor": compositor, "tts": tts, "enhance": enhance_engine,

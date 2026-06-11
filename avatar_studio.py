@@ -825,6 +825,12 @@ class AvatarStudio:
         if self.running or self.booting:
             return
         self.booting = True
+        # JARVIS-style boot cue the moment START is pressed (non-blocking).
+        try:
+            from startup_sound import play_startup_sound
+            play_startup_sound()
+        except Exception:
+            pass
         self.start_btn.configure(state="disabled", text="STARTING...")
         self.lp_interval = max(1, int(self.interval_var.get()))
         self._set_status("starting...", "#cc9933")
@@ -849,7 +855,6 @@ class AvatarStudio:
                 lp._multi = bool(self.multiref_var.get()) and len(getattr(lp, "_refs", [])) > 1
                 lp.set_stabilization(self.stab_var.get() / 100.0)
                 lp.set_gaze(self.gaze_var.get(), self.gaze_var2.get() / 100.0)
-                lp.set_lip_lock(self.liplock_var.get())
             except Exception:
                 pass
             self._log_msg("   -> " + lp.startup_check()[1])
@@ -1429,16 +1434,6 @@ class AvatarStudio:
             try:
                 self.engines["lp"].set_gaze(self.gaze_var.get(),
                                             self.gaze_var2.get() / 100.0)
-            except Exception:
-                pass
-
-    def _on_liplock(self):
-        if self.engines:
-            try:
-                self.engines["lp"].set_lip_lock(self.liplock_var.get())
-                self._log_msg("[studio] lips: "
-                              + ("BOT VOICE only (your mouth ignored)"
-                                 if self.liplock_var.get() else "follow your webcam mouth"))
             except Exception:
                 pass
 
