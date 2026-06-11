@@ -339,20 +339,21 @@ class FaceSwapEngine:
             hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
             sat, val = hsv[:, :, 1], hsv[:, :, 2]
             # gray/white hair: very low saturation, fairly bright, on the person
-            gray = (sat < 55) & (val > 80) & person
-            # restrict to the HEAD band (hair above + beard around the face box),
-            # not the shirt/torso below.
+            c = HAIR_COLORS.get(getattr(self, "_hair_color", HAIR_COLOR))
+            if c is None:
+                return out
+            gray = (sat < 60) & (val > 70) & person      # gray/white hair+beard
+            # HEAD band: hair above + beard well below the face box (catch the jaw).
             x1, y1, x2, y2 = [int(v) for v in bbox]
-            fh = max(1, y2 - y1)
+            fh = max(1, y2 - y1); fw = max(1, x2 - x1)
             band = np.zeros(out.shape[:2], bool)
-            band[max(0, y1 - int(fh * 1.0)):y2 + int(fh * 0.5),
-                 max(0, x1 - int((x2 - x1) * 0.4)):x2 + int((x2 - x1) * 0.4)] = True
-            m = (gray & band).astype(np.float32)
-            m = cv2.GaussianBlur(m, (0, 0), 3.0)[:, :, None]
-            # dark-brown target: drop value, nudge hue warm, lift saturation a touch
-            hsv[:, :, 0] = hsv[:, :, 0] * (1 - m[:, :, 0]) + 15 * m[:, :, 0]        # warm hue
-            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 - m[:, :, 0] * 0.4) + 60 * m[:, :, 0] * 0.4, 0, 255)
-            hsv[:, :, 2] = hsv[:, :, 2] * (1 - m[:, :, 0] * HAIR_DARKEN)            # darken
+            band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.7)),
+                 max(0, x1 - int(fw * 0.45)):min(out.shape[1], x2 + int(fw * 0.45))] = True
+            m = cv2.GaussianBlur((gray & band).astype(np.float32), (0, 0), 3.0)
+            mm = m
+            hsv[:, :, 0] = hsv[:, :, 0] * (1 - mm) + c["hue"] * mm                 # target hue
+            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 - mm * 0.5) + c["sat"] * mm * 0.5, 0, 255)
+            hsv[:, :, 2] = np.clip(hsv[:, :, 2] * (1 - mm * (1 - c["valf"])), 0, 255)  # darken/lighten
             return cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
         except Exception:
             return out
