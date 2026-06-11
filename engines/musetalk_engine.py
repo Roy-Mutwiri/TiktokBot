@@ -54,9 +54,12 @@ MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.55"))  # unsharp
 MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.10"))      # mild local contrast (was 0.18 = banding)
 MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was garish)
 MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.5"))    # CPU local-contrast crisp (no GPU lag)
-# HI-RES crisp: sharpen the talking mouth at 2x then resample back — defines lips/teeth
-# closer to the GPU de-blur but PURE CPU (no speech lag). 0 = off.
-MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.95"))
+# HI-RES crisp: sharpen the talking mouth at 2x then resample back. OFF — on top of
+# the existing sharpen + the final enhance it over-crunches the 96px mouth.
+MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.35"))
+# CLEAN-then-crisp: bilateral denoise the mouth BEFORE sharpening so the crisp defines
+# real lip/teeth edges instead of amplifying 96px sensor noise (the "crunch"). 0 = off.
+MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "1.0"))
 # DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
 # adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
 DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0"))  # OFF: GPU op contends with voice synth during speech = lag. CPU crisp in _pop_mouth instead
@@ -173,6 +176,8 @@ class MuseTalkEngine:
         try:
             if mouth.shape[0] < 6 or mouth.shape[1] < 6:
                 return mouth
+            if MOUTH_DENOISE > 0:                            # CLEAN first (edge-preserving)
+                mouth = cv2.bilateralFilter(mouth, 5, int(30 * MOUTH_DENOISE), 5)
             m = mouth.astype(np.float32)
             if MOUTH_SHARP > 0:                              # TWO-SCALE unsharp = crisp
                 blur1 = cv2.GaussianBlur(m, (0, 0), 1.0)     # fine edges (lips/teeth)
@@ -193,6 +198,12 @@ class MuseTalkEngine:
                 hsv = cv2.cvtColor(m, cv2.COLOR_BGR2HSV).astype(np.float32)
                 hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 + MOUTH_SAT), 0, 255)
                 m = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+            if MOUTH_HIRES > 0 and m.shape[0] >= 8:          # HI-RES CPU crisp (lips/teeth)
+                h, w = m.shape[:2]
+                big = cv2.resize(m, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+                blur = cv2.GaussianBlur(big, (0, 0), 1.6)
+                big = cv2.addWeighted(big, 1.0 + MOUTH_HIRES, blur, -MOUTH_HIRES, 0)
+                m = cv2.resize(big, (w, h), interpolation=cv2.INTER_AREA)
             return m
         except Exception:
             return mouth
