@@ -1339,11 +1339,34 @@ class AvatarStudio:
         self.entry.delete("1.0", "end")
         self._speak_text(txt)
 
+    USER_COOLDOWN = 6.0       # seconds Auto-host yields after you ASK/SPEAK
+
+    def _user_priority(self):
+        """Mark that YOU just spoke: pause auto-host + clear its queued backlog so
+        your line plays next, not behind auto-host commentary."""
+        import time as _t
+        self._user_active_until = _t.monotonic() + self.USER_COOLDOWN
+        try:
+            self.tts.clear_pending()
+        except Exception:
+            pass
+
+    def _generate(self, prompt):
+        """The ONE brain entry point — serialized so two speech sources can never
+        generate at once (no GPU clash, no interleaved conversation history)."""
+        with self._brain_lock:
+            self._thinking = True
+            try:
+                return self.brain.respond(prompt)
+            finally:
+                self._thinking = False
+
     def _speak_text(self, txt):
         """SPEAK box / quick phrases: the avatar says EXACTLY this text."""
         if self.tts is None or not self.running:
             self._log_msg("[studio] press START first.")
             return
+        self._user_priority()                 # you take precedence over auto-host
         self.tts.speak(txt)
         self._log_msg("> " + txt)
 
