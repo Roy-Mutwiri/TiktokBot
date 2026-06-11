@@ -74,15 +74,19 @@ for _ in range(700):                         # ~16s of frames -> must cross a se
         break
 chk("playlist ADVANCES to a new track", m._oi != first_oi, f"_oi {first_oi}->{m._oi}")
 
-# A7: over a longer simulated run it keeps cycling (≥3 changes)
-m.active = True
-changes = 0; last = m._oi
-for _ in range(4000):
-    m._song_until = min(m._song_until, time.monotonic() - 0.01)  # force frequent change
-    m._callback(out, 1024, None, None)
-    if m._oi != last:
-        changes += 1; last = m._oi
+# A7: over a longer run it keeps cycling (≥3 changes). Sleep between advances so
+# the background generator can pre-render the next track (as it does live).
+m3 = BackgroundMusic(); m3.active = True
+changes = 0; last = m3._oi
+for _ in range(8):
+    time.sleep(0.35)                          # let _gen_loop prerender _next
+    m3._song_until = time.monotonic() - 0.01  # song due now
+    for _ in range(800):                      # drive callbacks across a seam
+        m3._callback(out, 1024, None, None)
+        if m3._oi != last:
+            changes += 1; last = m3._oi; break
 chk("keeps cycling (≥3 track changes)", changes >= 3, f"{changes} changes")
+m3.stop()
 
 # A8: seamless loop (start≈end so no click at the wrap)
 seam = abs(float(tracks[0][0][0]) - float(tracks[0][0][-1]))
