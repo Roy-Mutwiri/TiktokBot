@@ -165,6 +165,13 @@ class AvatarStudio:
         self._diag = ""                      # per-stage ms readout
         self._speaking = False
         self._worker = None
+        if not hasattr(self, "_thinking"):
+            self._thinking = False
+        try:
+            from bg_music import BackgroundMusic
+            self.music = BackgroundMusic()       # trading-mood bed, ducks under voice
+        except Exception:
+            self.music = None
 
         root.title("AVATAR STUDIO ◆ neural pipeline")
         root.configure(bg=BG)

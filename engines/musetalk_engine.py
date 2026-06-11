@@ -51,6 +51,8 @@ MUSETALK_CANDIDATES = [
 FACE_REGION_SIZE = 256          # MuseTalk native mouth crop resolution
 BLEND_FACTOR = float(os.environ.get("AVATAR_MOUTH_BLEND", "1.0"))  # 1.0 = full bot mouth (no operator leak)
 MOUTH_SHARP = float(os.environ.get("AVATAR_MOUTH_SHARP", "0.7"))   # unsharp the soft VAE mouth
+MOUTH_POP = float(os.environ.get("AVATAR_MOUTH_POP", "0.35"))      # local contrast (opening/lips pop)
+MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.20"))      # redder/livelier lips
 
 SAMPLE_RATE = 16000
 AUDIO_WINDOW_MS = 200
@@ -135,6 +137,28 @@ class MuseTalkEngine:
                 self._w2l.feed_audio(audio_chunk)     # keep fallback buffer in sync
         except Exception as exc:
             print(f"[MUSETALK] feed_audio error: {exc}")
+
+    def _pop_mouth(self, mouth):
+        """Make the mouth movement READ CLEARLY: unsharp + local contrast (the dark
+        opening pops, lips define) + a touch of saturation (redder lips). Tunable via
+        AVATAR_MOUTH_SHARP / AVATAR_MOUTH_POP / AVATAR_MOUTH_SAT."""
+        try:
+            if mouth.shape[0] < 6 or mouth.shape[1] < 6:
+                return mouth
+            m = mouth.astype(np.float32)
+            if MOUTH_SHARP > 0:                              # crisp detail
+                blur = cv2.GaussianBlur(m, (0, 0), 1.2)
+                m = m * (1 + MOUTH_SHARP) - blur * MOUTH_SHARP
+            if MOUTH_POP > 0:                                # contrast: opening darkens, lips define
+                m = (m - 128.0) * (1.0 + MOUTH_POP) + 128.0
+            m = np.clip(m, 0, 255).astype(np.uint8)
+            if MOUTH_SAT > 0:                                # redder, livelier lips
+                hsv = cv2.cvtColor(m, cv2.COLOR_BGR2HSV).astype(np.float32)
+                hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 + MOUTH_SAT), 0, 255)
+                m = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+            return m
+        except Exception:
+            return mouth
 
     def _update_speaking(self):
         """Decay is_speaking after SILENCE_FRAMES with no fresh audio. Returns
