@@ -74,16 +74,15 @@ ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "1") == "1"
 # How much CodeFormer to blend in (0 = raw swap/most real, 1 = full CodeFormer/
 # smoothest). Low keeps the eyes/mouth real while still adding crispness.
 ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.8"))
-COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.45"))  # gentle = keep Haddan skin
-AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "1") == "1"          # auto-framing
-CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))       # target face y (0..1)
-# Blend YOUR real eyes back over the swap (0 = Haddan's AI eyes, 1 = fully your
-# real eyes). AI source faces have dead eyes; your live eyes look human.
-EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.6"))
-# Recolour gray hair/beard toward the character's dark hair (the biggest "doesn't
-# look like the photos" tell when the operator is older/gray). 0 = off.
-HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "1") == "1"
+# CLEAN BASELINE: the swap uses the inswapper model's OWN proven paste-back. All
+# the experimental layers below are OFF by default — opt in one at a time.
+COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.0"))
+AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "0") == "1"          # auto-framing (off)
+CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))
+EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.0"))         # real-eye blend (off)
+HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "0") == "1"        # hair recolour (off)
 HAIR_DARKEN = float(os.environ.get("AVATAR_SWAP_HAIRDARKEN", "0.55"))
+CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
 
 
 def _color_transfer(source, target):
