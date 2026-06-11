@@ -734,6 +734,12 @@ class FaceSwapEngine:
             ec = kps.mean(axis=0)
             ew = float(np.linalg.norm(kps[0] - kps[1])) + 1e-6
             self.last_head = (float(ec[0]), float(ec[1]), ew)
+            # publish the EXACT mouth location (kps[3]/[4] = mouth corners) so the
+            # mouth-sync bbox uses the swap's own geometry, not a re-detection that
+            # mis-places it on this character (causing the doubled-mouth look).
+            mc = (kps[3] + kps[4]) / 2.0
+            mw = float(np.linalg.norm(kps[3] - kps[4])) + 1e-6
+            self.last_mouth = (float(mc[0]), float(mc[1]), mw)
             target = self._Face(bbox=bbox, kps=kps, det_score=bboxes[i, 4])
             # SEAMLESS paste (Poisson) — boundary matches skin tone, no forehead line.
             out = self._paste_seamless(frame, target)
