@@ -360,20 +360,24 @@ class FaceSwapEngine:
                 bbox = bbox + np.array([dx, dy, dx, dy], np.float32)
             self.last_found = True
             target = self._Face(bbox=bbox, kps=kps, det_score=bboxes[i, 4])
-            # SWAP (aligned) + CUSTOM forehead paste-back -------------------------
-            bgr_fake, M = self.swapper.get(frame, target, self.source_face, paste_back=False)
-            S = bgr_fake.shape[0]
-            if COLOR_MATCH:                                # GENTLE skin-tone match
-                aimg = cv2.warpAffine(frame, M, (S, S))
-                matched = _color_transfer(bgr_fake, aimg)
-                bgr_fake = cv2.addWeighted(bgr_fake, 1.0 - COLOR_STRENGTH,
-                                           matched, COLOR_STRENGTH, 0)
-            mask = self._aligned_mask(S)
-            IM = cv2.invertAffineTransform(M)
-            fake_full = cv2.warpAffine(bgr_fake, IM, (W, H))
-            mask_full = cv2.warpAffine(mask, IM, (W, H))[:, :, None]
-            out = (frame.astype(np.float32) * (1 - mask_full)
-                   + fake_full.astype(np.float32) * mask_full).astype(np.uint8)
+            if CUSTOM_PASTE:
+                # opt-in: custom forehead paste + gentle skin-tone match
+                bgr_fake, M = self.swapper.get(frame, target, self.source_face, paste_back=False)
+                S = bgr_fake.shape[0]
+                if COLOR_MATCH and COLOR_STRENGTH > 0.0:
+                    aimg = cv2.warpAffine(frame, M, (S, S))
+                    matched = _color_transfer(bgr_fake, aimg)
+                    bgr_fake = cv2.addWeighted(bgr_fake, 1.0 - COLOR_STRENGTH,
+                                               matched, COLOR_STRENGTH, 0)
+                mask = self._aligned_mask(S)
+                IM = cv2.invertAffineTransform(M)
+                fake_full = cv2.warpAffine(bgr_fake, IM, (W, H))
+                mask_full = cv2.warpAffine(mask, IM, (W, H))[:, :, None]
+                out = (frame.astype(np.float32) * (1 - mask_full)
+                       + fake_full.astype(np.float32) * mask_full).astype(np.uint8)
+            else:
+                # CLEAN BASELINE: the inswapper model's OWN proven paste-back.
+                out = self.swapper.get(frame, target, self.source_face, paste_back=True)
             # CodeFormer HD enhancement (inswapper is only 128px -> crisp + exact).
             if ENHANCE_SWAP:
                 if self.enhancer is None and not self._enh_tried:
