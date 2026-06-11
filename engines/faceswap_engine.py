@@ -169,6 +169,7 @@ class FaceSwapEngine:
         self._frame_box = None         # smoothed auto-frame crop box [cx,cy,side]
         self._hair_color = HAIR_COLOR  # hair recolour target (live-settable)
         self._beard_color = BEARD_COLOR  # beard recolour target (consistent dark)
+        self._hairm_prev = None          # previous hair/beard mask (temporal stick)
         self._eye_color = EYE_COLOR     # iris recolour target (live-settable)
         self._eyemesh = None
         self._eyemesh_tried = False
