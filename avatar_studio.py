@@ -1566,6 +1566,14 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _on_swap(self):
+        # FACE-SWAP shows YOUR real head/mouth — mutually exclusive with bot-only
+        # lips. Turning it on disables the lip-lock.
+        if self.swap_var.get() and getattr(self, "liplock_var", None) and self.liplock_var.get():
+            self.liplock_var.set(False)
+            self._log_msg("[studio] FACE-SWAP on — shows YOUR real mouth "
+                          "(lip-lock off). Untick it for bot-only lips.")
+
     def _on_autotalk(self):
         on = bool(self.autotalk_var.get())
         if on and (self.brain is None or not getattr(self.brain, "ok", False)):
