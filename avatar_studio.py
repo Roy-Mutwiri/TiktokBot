@@ -1750,7 +1750,38 @@ class AvatarStudio:
         self.root.destroy()
 
 
+_SINGLE_INSTANCE_SOCK = None
+
+
+def _acquire_single_instance():
+    """Allow only ONE Avatar Studio at a time (so only one bot can speak). Binds a
+    fixed loopback port as a lock; if it's taken, another instance is already up."""
+    global _SINGLE_INSTANCE_SOCK
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 0)
+    try:
+        s.bind(("127.0.0.1", 50573))      # arbitrary fixed port = the lock
+        s.listen(1)
+        _SINGLE_INSTANCE_SOCK = s          # keep it alive for the process lifetime
+        return True
+    except OSError:
+        return False
+
+
 def main():
+    if not _acquire_single_instance():
+        print("[studio] Avatar Studio is already running — only one instance allowed.")
+        try:
+            import tkinter.messagebox as mb
+            r = tk.Tk(); r.withdraw()
+            mb.showwarning("Avatar Studio",
+                           "Avatar Studio is already running.\nOnly one instance can run "
+                           "at a time (so only one bot speaks).")
+            r.destroy()
+        except Exception:
+            pass
+        return
     root = tk.Tk()
     AvatarStudio(root)
     root.mainloop()
