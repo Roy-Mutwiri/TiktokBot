@@ -1432,12 +1432,6 @@ class AvatarStudio:
             self.swap_engine._hair_color = self.hair_var.get()
             self._log_msg(f"[studio] hair colour -> {self.hair_var.get()}")
 
-    def _on_hairstyle(self, *args):
-        """Set the hairstyle overlay live."""
-        if self.swap_engine is not None:
-            self.swap_engine._hairstyle = self.hairstyle_var.get()
-            self._log_msg(f"[studio] hair style -> {self.hairstyle_var.get()}")
-
     def _on_pose(self, *args):
         """Safe / Cinematic / Free — sets the turn + tilt caps together."""
         p = POSE_PRESETS.get(self.pose_var.get())
