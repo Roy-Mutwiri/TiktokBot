@@ -348,8 +348,10 @@ def run():
     for d in (SCAN_VIDEO_DIR, SEG_REP_DIR, CACHE_DIR):
         os.makedirs(d, exist_ok=True)
 
+    # model_selection=1 = full-range detector: catches the small corner-inset
+    # webcam faces this channel uses (short-range misses faces under ~5% area).
     detector = mp.solutions.face_detection.FaceDetection(
-        model_selection=0, min_detection_confidence=DETECT_CONFIDENCE)
+        model_selection=1, min_detection_confidence=DETECT_CONFIDENCE)
 
     all_segments = []
     scanned_ids = []
