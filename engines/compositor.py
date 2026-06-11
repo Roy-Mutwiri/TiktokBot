@@ -170,8 +170,12 @@ class Compositor:
             crop = np.clip(crop + shift, 0, 255)
 
             # --- feathered alpha mask (1 inside, ramping to 0 at the edges) ---
+            # Border kept SMALL (10%) so the whole mouth sits in the fully-replaced
+            # centre — otherwise the operator's lip corners / jaw motion leak in
+            # through the edges (the "my mouth still syncs" bug). The box is padded
+            # generously (PAD_*), so this 10% feather lands on cheek/chin SKIN.
             mask = np.ones((bh, bw), dtype=np.float32)
-            border = max(2, int(min(bw, bh) * 0.18))
+            border = max(2, int(min(bw, bh) * 0.10))
             mask[:border, :] = 0; mask[-border:, :] = 0
             mask[:, :border] = 0; mask[:, -border:] = 0
             k = FEATHER_KERNEL | 1
