@@ -19,8 +19,9 @@ app = insightface.app.FaceAnalysis(name="buffalo_l", allowed_modules=["detection
 app.prepare(ctx_id=0, det_size=(640, 640))
 
 PROMPT = ("RAW photo, photorealistic headshot of a WHITE caucasian man, fair light "
-          "skin, same face shape and beard, neutral expression, looking at camera, "
-          "soft studio light, plain background, ultra detailed realistic skin, 85mm")
+          "skin, gray hair, neat gray salt-and-pepper beard, same face shape, "
+          "neutral expression, looking at camera, soft studio light, plain "
+          "background, ultra detailed realistic skin, 85mm")
 NEG = ("dark skin, tan, cartoon, anime, cgi, plastic, blurry, deformed, multiple "
        "people, hat, watermark, text")
 
