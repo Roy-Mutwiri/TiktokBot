@@ -123,10 +123,20 @@ class FaceSwapEngine:
             if path is None:
                 print("[SWAP] inswapper model not found — face swap disabled.")
                 return
-            self.swapper = insightface.model_zoo.get_model(path, providers=providers)
+            # Force the INSwapper class with a GPU session (the model_zoo router
+            # mis-detects some ReSwapper exports as a recognition model).
+            try:
+                import onnxruntime
+                from insightface.model_zoo.inswapper import INSwapper
+                sess = onnxruntime.InferenceSession(path, providers=providers)
+                self.swapper = INSwapper(model_file=path, session=sess)
+            except Exception:
+                self.swapper = insightface.model_zoo.get_model(path, providers=providers)
             self._provider = self.app.models["detection"].session.get_providers()[0]
             self.ready = True
-            print(f"[SWAP] FaceSwapEngine ready | provider={self._provider} | model={os.path.basename(path)}")
+            sz = getattr(self.swapper, "input_size", ("?",))[0]
+            print(f"[SWAP] FaceSwapEngine ready | provider={self._provider} | "
+                  f"model={os.path.basename(path)} ({sz}px)")
             if source_image_path:
                 self.set_source(source_image_path)
         except Exception as exc:

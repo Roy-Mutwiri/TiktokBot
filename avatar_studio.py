@@ -600,7 +600,7 @@ class AvatarStudio:
         self.multiref_var = tk.BooleanVar(value=False)
         self._check(c, "Extended turning  ·  multi-view (wider, less stable)",
                     self.multiref_var, self._on_multiref).pack(fill="x", pady=3)
-        self.swap_var = tk.BooleanVar(value=False)
+        self.swap_var = tk.BooleanVar(value=True)        # our focus mode -> default ON
         self._check(c, "FACE-SWAP mode  ·  real head, perfect 90° turns (GPU)",
                     self.swap_var).pack(fill="x", pady=3)
 
