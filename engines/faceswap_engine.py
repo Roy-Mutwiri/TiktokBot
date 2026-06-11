@@ -356,7 +356,7 @@ class FaceSwapEngine:
             # the selfie-seg forward is the cost — run it every 3rd frame, reuse the
             # person mask between (hair/head moves slowly). Big speed win.
             self._hair_fn = getattr(self, "_hair_fn", 0) + 1
-            if getattr(self, "_person_cache", None) is None or self._hair_fn % 3 == 0:
+            if getattr(self, "_person_cache", None) is None or self._hair_fn % 2 == 0:
                 res = seg.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
                 if res.segmentation_mask is None:
                     return out
