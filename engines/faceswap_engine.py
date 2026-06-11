@@ -429,6 +429,29 @@ class FaceSwapEngine:
               f"{os.path.basename(folder_b)}*{1-w:.2f}")
         return 1
 
+    def restore_face(self, frame):
+        """CodeFormer HD restoration of the FINAL composited face (swap + bot mouth +
+        real eyes) — run by the loop AFTER the mouth is added so the mouth, eyes and
+        skin are all restored together and consistently. Blended (not replaced) so the
+        live expression detail survives. Returns `frame` unchanged if unavailable."""
+        if not ENHANCE_SWAP or frame is None:
+            return frame
+        if self.enhancer is None and not self._enh_tried:
+            self._enh_tried = True
+            try:
+                from face_restore_engine import FaceRestoreEngine
+                self.enhancer = FaceRestoreEngine()
+                print("[SWAP] CodeFormer restoration ON (after-mouth pass)")
+            except Exception as exc:
+                print(f"[SWAP] enhancer unavailable ({exc})")
+        if self.enhancer is not None and getattr(self.enhancer, "ready", False):
+            try:
+                enh = self.enhancer.process_frame(frame)
+                return cv2.addWeighted(frame, 1.0 - ENHANCE_BLEND, enh, ENHANCE_BLEND, 0)
+            except Exception:
+                return frame
+        return frame
+
     def set_stabilization(self, level):
         """0 = responsive, 1 = max stability. Heavily smooths the face keypoints +
         framing and eases off prediction so the swapped face is rock-steady."""
