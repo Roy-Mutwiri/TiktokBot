@@ -68,17 +68,44 @@ def _env(n, a, d, s, r, sus=0.6):
     return e
 
 
+def _osc(f, t, kind):
+    if kind == "saw":
+        return 2.0 * (t * f - np.floor(0.5 + t * f))
+    if kind == "square":
+        return np.sign(np.sin(2 * np.pi * f * t))
+    if kind == "tri":
+        return 2.0 * np.abs(2.0 * (t * f - np.floor(0.5 + t * f))) - 1.0
+    return np.sin(2 * np.pi * f * t)
+
+
+# Distinct phonk "vibes" so the 50 tracks don't all sound the same.
+STYLES = ["aggressive", "melodic", "classic", "dark"]
+LEAD_KINDS = ["bell", "saw", "square", "tri"]
+
+
 def _make_track(seed):
-    """Synthesise ONE unique seamless PHONK loop (mono float32) from `seed`."""
+    """Synthesise ONE unique seamless PHONK loop (mono float32) from `seed`.
+    Each track picks a STYLE + key + tempo + chord prog + cowbell & lead motifs
+    (A/B halves) so it has its own character — not a clone of the others."""
     rng = np.random.RandomState(seed * 2654435761 % (2**31))
-    bpm = float(rng.choice([128, 132, 138, 140, 145, 150, 155, 160]))   # phonk tempo
+    style = STYLES[rng.randint(len(STYLES))]
+    bpm = float(rng.choice([128, 132, 138, 140, 145, 150, 155, 160]))
     beat = 60.0 / bpm
-    beats = 8
+    beats = 16                                     # longer loop = far less repetitive
     n = int(SR * beat * beats)
     out = np.zeros(n, np.float32)
-    root = float(rng.choice([48.99, 51.91, 55.0, 58.27, 61.74, 65.41]))  # G1..C2, low
-    scale = DARK_SCALES[rng.choice(list(DARK_SCALES.keys()))]
+    root = float(rng.choice([48.99, 51.91, 55.0, 58.27, 61.74, 65.41]))   # G1..C2
+    sc_name = rng.choice(["phrygian", "harmonic_minor"]) if style == "dark" \
+        else rng.choice(list(DARK_SCALES.keys()))
+    scale = DARK_SCALES[sc_name]
     prog = PROGRESSIONS[rng.randint(len(PROGRESSIONS))]
+    # per-style character
+    distort = {"aggressive": 2.2, "melodic": 1.0, "classic": 1.5, "dark": 1.2}[style]
+    hat_div = {"aggressive": 4, "melodic": 2, "classic": 2, "dark": 2}[style]   # subdivisions/beat
+    cow_gain = {"aggressive": 0.11, "melodic": 0.12, "classic": 0.17, "dark": 0.10}[style]
+    has_lead = style != "aggressive" and rng.rand() < 0.85
+    lead_kind = LEAD_KINDS[rng.randint(len(LEAD_KINDS))]
+    has_pad = style in ("dark", "melodic") or rng.rand() < 0.5
 
     def at(sec):
         return int(sec * SR)
@@ -92,22 +119,31 @@ def _make_track(seed):
         out[s:s+ln] += sig.astype(np.float32) * gain
 
     # --- PHONK voices --------------------------------------------------------
-    def kick(ln):                                  # hard, slightly distorted
+    def kick(ln):
         tk = np.arange(ln) / SR
         k = np.sin(2*np.pi*(115*np.exp(-tk*42)+50)*tk) * np.exp(-tk*11)
         return np.tanh(k * 1.7)
 
-    def b808(f, ln):                               # distorted, gliding sub-bass
+    def b808(f, ln):
         tk = np.arange(ln) / SR
-        gl = f * (1.0 + 0.45*np.exp(-tk*26))       # pitch drop at the attack
-        s = np.sin(2*np.pi*gl*tk)
-        s = np.tanh(s * 3.3)                        # saturation = the phonk grit
+        gl = f * (1.0 + 0.45*np.exp(-tk*26))
+        s = np.tanh(np.sin(2*np.pi*gl*tk) * 2.4 * distort)
         return s * _env(ln, 0.004, 0.25, 0.78, 0.16, 0.78)
 
-    def cowbell(f, ln):                            # metallic 808 cowbell (the hook)
+    def cowbell(f, ln):
         tk = np.arange(ln) / SR
         s = np.sign(np.sin(2*np.pi*f*tk)) + np.sign(np.sin(2*np.pi*f*1.48*tk))
-        return s * np.exp(-tk*15)                   # fast metallic decay
+        return s * np.exp(-tk*15)
+
+    def lead(f, ln, kind):
+        tk = np.arange(ln) / SR
+        if kind == "bell":
+            s = np.sin(2*np.pi*f*tk) + 0.5*np.sin(2*np.pi*f*2.01*tk) + 0.25*np.sin(2*np.pi*f*3.0*tk)
+            env = _env(ln, 0.004, 0.18, 0.0, 0.6, 0.0)
+        else:
+            s = _osc(f, tk, kind)
+            env = _env(ln, 0.01, 0.2, 0.4, 0.4, 0.4)
+        return s * env
 
     def snare(ln):
         tk = np.arange(ln) / SR
@@ -117,38 +153,52 @@ def _make_track(seed):
         tk = np.arange(ln) / SR
         return rng.randn(ln) * np.exp(-tk*150)
 
-    # --- drums: hard phonk kick + snare on 2&4 + tight hats w/ triplet rolls --
-    kick_pat = [[0, 2, 3, 5, 6], [0, 3, 4, 6, 7], [0, 2, 4, 6], [0, 1.5, 4, 5.5]]
-    for b in kick_pat[rng.randint(len(kick_pat))]:
-        add(at(b*beat), kick(at(0.2)), 0.7)
-    for b in (2, 6):
-        add(at(b*beat), snare(at(0.14)), 0.30)
-    roll_at = rng.choice([3.5, 7.5])               # one triplet hat roll per bar
-    for k in range(beats * 2):                     # 8th-note hats
-        s = k * beat / 2.0
-        add(at(s), hat(at(0.035)), 0.07 if k % 2 else 0.10)
-    for j in range(3):                             # triplet roll
-        add(at(roll_at*beat + j*beat/3.0), hat(at(0.03)), 0.07)
+    # --- A/B melodic motifs (scale-degree offsets) so the two halves differ --
+    motifA = [int(rng.choice([0, 0, 2, 3, 4, 5, 6, 7])) for _ in range(8)]
+    motifB = [int(rng.choice([0, 0, 2, 3, 4, 5, 6, 7])) for _ in range(8)]
+    half = beats // 2
 
-    # --- cowbell melody (the signature) — a riff over the dark scale ----------
+    # --- drums: kick pattern (repeats each 8-beat half, fill in the 2nd) ------
+    base_kick = [[0, 2, 3, 5, 6], [0, 3, 4, 6, 7], [0, 2, 4, 6], [0, 1.5, 4, 5.5]][rng.randint(4)]
+    for hh in (0, 8):
+        for b in base_kick:
+            add(at((hh + b) * beat), kick(at(0.2)), 0.7)
+    for bar in range(beats // 4):                  # snare on beats 2 & 4 of each bar
+        add(at((bar*4 + 2) * beat), snare(at(0.14)), 0.30)
+    for k in range(beats * hat_div):               # hats (style density)
+        add(at(k * beat / hat_div), hat(at(0.03)), 0.06 if k % 2 else 0.09)
+    for j in range(3):                             # one triplet hat roll near the end
+        add(at((beats - 0.5) * beat + j*beat/3.0), hat(at(0.03)), 0.07)
+
+    # --- cowbell melody (the hook) — A motif first half, B motif second -------
     step = beat / 2.0
     nsteps = beats * 2
-    octave = rng.choice([24, 24, 26])              # 2 octaves up = bright metallic
     for k in range(nsteps):
-        if rng.rand() < 0.30:                      # leave groove space
+        if rng.rand() < 0.28:
             continue
-        deg = (prog[(k // 4) % len(prog)] + rng.choice([0, 0, 2, 4, 6])) % len(scale)
-        f = _semi(root, scale[deg] + octave)
-        add(at(k*step), cowbell(f, at(step*0.95)), 0.16)
+        m = motifA if k < nsteps // 2 else motifB
+        deg = (prog[(k // 4) % len(prog)] + m[k % len(m)]) % len(scale)
+        f = _semi(root, scale[deg] + int(rng.choice([24, 24, 26])))
+        add(at(k*step), cowbell(f, at(step*0.9)), cow_gain)
+
+    # --- optional lead melody (quarter notes) — gives melodic tracks identity -
+    if has_lead:
+        for k in range(beats):
+            if rng.rand() < 0.45:
+                continue
+            m = motifA if k < half else motifB
+            deg = (prog[(k // 4) % len(prog)] + m[k % len(m)]) % len(scale)
+            f = _semi(root, scale[deg] + int(rng.choice([12, 12, 24])))
+            add(at(k*beat), lead(f, at(beat*0.85), lead_kind), 0.07)
 
     # --- 808 bass: chord roots, long gliding notes ---------------------------
     for b in range(0, beats, 2):
         deg = prog[(b // 2) % len(prog)]
         f = _semi(root, scale[deg % len(scale)])
-        add(at(b*beat), b808(f, at(beat*1.85)), 0.55)
+        add(at(b*beat), b808(f, at(beat*1.85)), 0.5)
 
-    # --- dark atmosphere pad (very subtle, sets the mood) --------------------
-    if rng.rand() < 0.7:
+    # --- dark atmosphere pad -------------------------------------------------
+    if has_pad:
         t = np.arange(n) / SR
         pad = np.zeros(n, np.float32)
         for iv in (0, 3, 7):
@@ -163,7 +213,7 @@ def _make_track(seed):
     xf = at(0.012)
     out[:xf] *= np.linspace(0, 1, xf)
     out[-xf:] *= np.linspace(1, 0, xf)
-    return out.astype(np.float32), dict(bpm=int(bpm), drum="phonk")
+    return out.astype(np.float32), dict(bpm=int(bpm), style=style, scale=sc_name)
 
 
 class BackgroundMusic:
@@ -177,8 +227,11 @@ class BackgroundMusic:
         self._pos = 0
         self._stream = None
         self._alive = True
+        # Shuffle a FRESH random order every launch (was a fixed seed, so every
+        # session opened on the SAME track — that's why it felt like "same music").
+        import random as _random
         self._order = list(range(1, NUM_SONGS + 1))
-        np.random.RandomState(12345).shuffle(self._order)
+        _random.shuffle(self._order)
         self._oi = 0
         try:
             self._cur, self.meta = _make_track(self._order[0])
