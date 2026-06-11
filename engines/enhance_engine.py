@@ -377,6 +377,9 @@ def draw_speaking_indicator(frame, is_speaking):
 # "light" = skip the costly background segmentation + grain/soften (saves ~20ms);
 # overlays (ticker/badges) always stay since they're cheap.
 ENHANCE_LEVEL = "full"          # "full" | "light"
+# Trading-studio background composite. OFF for now (show the real background) — also
+# saves the per-frame selfie-segmentation cost. Re-enable with AVATAR_BG=1.
+BG_ON = os.environ.get("AVATAR_BG", "0") == "1"
 
 
 def set_level(level):
