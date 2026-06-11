@@ -69,7 +69,7 @@ DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N fr
 # ignore faces smaller than this fraction of the frame (background people/objects)
 MIN_FACE_FRAC = float(os.environ.get("AVATAR_SWAP_MINFACE", "0.12"))
 # gentle lighting lift: pull the face up to ~this mean brightness if it's dark
-FACE_LIGHT = float(os.environ.get("AVATAR_SWAP_FACELIGHT", "135"))  # 0 = off
+FACE_LIGHT = float(os.environ.get("AVATAR_SWAP_FACELIGHT", "155"))  # 0 = off
 # match the swapped face's colour to the target head (LAB Reinhard) so it blends
 # into the operator's real lighting instead of carrying the source clip's tone.
 COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
@@ -88,7 +88,7 @@ HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "0") == "1"        # hair r
 HAIR_DARKEN = float(os.environ.get("AVATAR_SWAP_HAIRDARKEN", "0.55"))
 CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
 # Lighten the face skin toward a Caucasian tone (0 = off, ~0.6 = clearly lighter).
-SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0.65"))
+SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0.85"))
 
 
 def _color_transfer(source, target):
