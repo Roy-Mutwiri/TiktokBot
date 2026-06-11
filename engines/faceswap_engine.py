@@ -437,29 +437,66 @@ class FaceSwapEngine:
                 self._last_center = None
                 return frame
             cx0, cy0 = W / 2.0, H / 2.0
-            best, bi = -1.0, -1
-            for k in range(len(bboxes)):
-                x1, y1, x2, y2 = bboxes[k, :4]
-                if max(x2 - x1, y2 - y1) < W * MIN_FACE_FRAC:
-                    continue                                   # too small = background
-                area = (x2 - x1) * (y2 - y1)
-                fcx, fcy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
-                dist = ((fcx - cx0) ** 2 + (fcy - cy0) ** 2) ** 0.5 / cx0
-                sc = area * (1.0 - 0.4 * min(dist, 1.0))       # large + central
-                if self._last_center is not None:             # stick to last face
-                    ld = ((fcx - self._last_center[0]) ** 2 +
-                          (fcy - self._last_center[1]) ** 2) ** 0.5 / cx0
-                    sc *= (1.0 - 0.5 * min(ld, 1.0))
-                if sc > best:
-                    best, bi = sc, k
-            if bi < 0:
+            cands = [k for k in range(len(bboxes))
+                     if max(bboxes[k, 2] - bboxes[k, 0],
+                            bboxes[k, 3] - bboxes[k, 1]) >= W * MIN_FACE_FRAC]
+            if not cands:
                 self.last_found = False
                 self._last_center = None
                 return frame
-            i = bi
+            i = -1
+            # IDENTITY LOCK: if a 2nd+ face is present, pick the one matching the
+            # LOCKED operator embedding (so an intruder face is ignored, not swapped).
+            if FACE_LOCK and self._lock_emb is not None and len(cands) > 1:
+                best_sim = -1.0
+                for k in cands:
+                    e = self._embed(frame, kpss[k])
+                    if e is None:
+                        continue
+                    sim = float(e @ self._lock_emb)
+                    if sim > best_sim:
+                        best_sim, i = sim, k
+                if best_sim < LOCK_SIM:          # lock lost -> fall back to spatial
+                    i = -1
+            if i < 0:                            # spatial pick (largest+central+last)
+                best = -1.0
+                for k in cands:
+                    x1, y1, x2, y2 = bboxes[k, :4]
+                    area = (x2 - x1) * (y2 - y1)
+                    fcx, fcy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                    dist = ((fcx - cx0) ** 2 + (fcy - cy0) ** 2) ** 0.5 / cx0
+                    sc = area * (1.0 - 0.4 * min(dist, 1.0))
+                    if self._last_center is not None:
+                        ld = ((fcx - self._last_center[0]) ** 2 +
+                              (fcy - self._last_center[1]) ** 2) ** 0.5 / cx0
+                        sc *= (1.0 - 0.5 * min(ld, 1.0))
+                    if sc > best:
+                        best, i = sc, k
             kps = kpss[i].astype(np.float32)
             bbox = bboxes[i, :4].astype(np.float32)
             self._last_center = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+            # capture the operator's identity once (lock onto the first face seen)
+            if FACE_LOCK and self._lock_emb is None:
+                self._lock_emb = self._embed(frame, kps)
+            # AUTO-FRAME: crop/zoom to the locked face (head & shoulders) so the
+            # background AND any other person are cropped OUT. Smoothed framing.
+            if AUTO_FRAME:
+                fw = bbox[2] - bbox[0]; fh = bbox[3] - bbox[1]
+                fcx = (bbox[0] + bbox[2]) / 2.0
+                fcy = (bbox[1] + bbox[3]) / 2.0 + fh * 0.15      # bias down for shoulders
+                side = min(max(fw, fh) * FRAME_ZOOM, float(min(W, H)))
+                box = np.array([fcx, fcy, side], np.float32)
+                self._frame_box = (box if self._frame_box is None
+                                   else 0.82 * self._frame_box + 0.18 * box)
+                fcx, fcy, side = self._frame_box
+                x1c = float(np.clip(fcx - side / 2, 0, W - side))
+                y1c = float(np.clip(fcy - side / 2, 0, H - side))
+                crop = frame[int(y1c):int(y1c + side), int(x1c):int(x1c + side)]
+                if crop.size > 0:
+                    frame = cv2.resize(crop, (W, H))
+                    s = W / side
+                    kps = (kps - np.array([x1c, y1c], np.float32)) * s
+                    bbox = (bbox - np.array([x1c, y1c, x1c, y1c], np.float32)) * s
             # TEMPORAL SMOOTHING of the 5 keypoints — no jitter/slide on movement.
             t = self._n / 30.0
             if self._kps_euro is not None:
