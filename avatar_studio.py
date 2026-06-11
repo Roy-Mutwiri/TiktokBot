@@ -622,7 +622,8 @@ class AvatarStudio:
         r = self._row(c, "Hair style")
         self.hairstyle_var = tk.StringVar(value="none")
         ttk.Combobox(r, textvariable=self.hairstyle_var,
-                     values=["none", "short", "medium", "long", "slick", "curly"],
+                     values=["none", "buzz", "fade", "quiff", "undercut",
+                             "crewcut", "curly", "long"],
                      state="readonly", width=14,
                      style="Studio.TCombobox").pack(side="right")
         self.hairstyle_var.trace_add("write", self._on_hairstyle)
