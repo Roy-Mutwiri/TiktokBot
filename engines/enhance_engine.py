@@ -34,7 +34,7 @@ BADGE_COLOR_GOLD = (0, 215, 255)
 LIVE_DOT_COLOR = (0, 0, 220)
 VIGNETTE_STRENGTH = 0.18       # softer vignette (less edge darkening)
 CAMERA_SHAKE_AMOUNT = 1.5
-GRAIN_STRENGTH = 6.0            # luminance sensor grain (real cameras aren't clean)
+GRAIN_STRENGTH = 8.0            # luminance sensor grain (real cameras aren't clean)
 SOFTEN = 0.06                  # minimal — heavy soften made the swap look too smooth
 EDGE_FEATHER = 4                # selfie-seg edge softness (px) — tight, no halo
 FRAME_SIZE = 512
@@ -51,7 +51,7 @@ _segmenter = None
 _segmenter_tried = False
 _seg_mask_cache = None
 _seg_counter = 0
-SEG_INTERVAL = 3               # recompute the selfie-seg mask every N frames
+SEG_INTERVAL = 2               # every 2 frames: tracks head, less added latency
 
 
 # -----------------------------------------------------------------------------
@@ -167,18 +167,20 @@ def background_composite(frame):
         return frame
     try:
         _seg_counter += 1
+        # recompute EVERY frame so the cut tracks your head — a stale/lagged mask
+        # let the background cut into your moving face.
         if _seg_mask_cache is None or (_seg_counter % SEG_INTERVAL) == 0:
             res = seg.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             if res.segmentation_mask is not None:
-                # higher threshold + ERODE pulls the cut INWARD so the background
-                # fringe (the white-wall HALO) is removed, then a tight feather.
-                m = (res.segmentation_mask > 0.62).astype(np.float32)
-                m = cv2.erode(m, np.ones((5, 5), np.uint8), iterations=1)
+                # DILATE slightly (margin) so a fast-moving head stays INSIDE the
+                # person cut — better to keep a sliver of real edge than to slice
+                # the head with the background.
+                m = (res.segmentation_mask > 0.5).astype(np.float32)
+                m = cv2.dilate(m, np.ones((5, 5), np.uint8), iterations=1)
                 m = cv2.GaussianBlur(m, (0, 0), EDGE_FEATHER)
-                # TEMPORAL smoothing: blend with the previous mask so the edge
-                # doesn't flicker/tear as you move (the "background errors").
+                # light temporal blend only (responsive, not lagging the head)
                 if _seg_mask_cache is not None and _seg_mask_cache.shape[:2] == m.shape[:2]:
-                    m = 0.6 * m + 0.4 * _seg_mask_cache[:, :, 0]
+                    m = 0.85 * m + 0.15 * _seg_mask_cache[:, :, 0]
                 _seg_mask_cache = m[:, :, None]
         if _seg_mask_cache is None or _seg_mask_cache.shape[:2] != frame.shape[:2]:
             return frame
@@ -340,11 +342,12 @@ def enhance_frame(frame, is_speaking=False):
         full = ENHANCE_LEVEL == "full"
         if full:
             frame = background_composite(frame)
-            frame = apply_soften(frame)           # reduce the over-sharp AI look
+            frame = apply_clarity(frame)          # skin micro-texture (real lens look)
         frame = apply_color_grade(frame)
         frame = apply_vignette(frame)
         frame = apply_camera_shake(frame)
         if full:
+            frame = apply_chromatic_aberration(frame)   # subtle lens fringe
             frame = apply_grain(frame)            # sensor grain (before UI overlays)
         frame = draw_ticker(frame)
         frame = draw_live_badge(frame)
