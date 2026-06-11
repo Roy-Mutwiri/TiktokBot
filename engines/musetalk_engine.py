@@ -208,6 +208,14 @@ class MuseTalkEngine:
                 blur = cv2.GaussianBlur(big, (0, 0), 1.6)
                 big = cv2.addWeighted(big, 1.0 + MOUTH_HIRES, blur, -MOUTH_HIRES, 0)
                 m = cv2.resize(big, (w, h), interpolation=cv2.INTER_AREA)
+            if MOUTH_INTERIOR > 0:                           # lift black interior -> dark red
+                b, g, rr = cv2.split(m.astype(np.float32))
+                gray = (0.114 * b + 0.587 * g + 0.299 * rr)
+                dark = np.clip((52.0 - gray) / 52.0, 0, 1) * MOUTH_INTERIOR
+                rr = np.clip(rr + dark * 42, 0, 255)         # warm (red) + lift the opening
+                g = np.clip(g + dark * 14, 0, 255)
+                b = np.clip(b + dark * 14, 0, 255)
+                m = cv2.merge([b, g, rr]).astype(np.uint8)
             return m
         except Exception:
             return mouth
