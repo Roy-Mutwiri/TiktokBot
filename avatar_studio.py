@@ -1032,29 +1032,14 @@ class AvatarStudio:
             motion = float(np.mean(np.abs(small - prev_small))) if prev_small is not None else 99.0
             prev_small = small
 
-            # While a HEAVY expressive voice (Maya1/Chatterbox) is GENERATING a
-            # new line, give it the whole GPU: skip LivePortrait + MuseTalk this
-            # frame. Running them concurrently with the 3B TTS thrashes the GPU
-            # and can OOM (which poisons the CUDA context -> everything freezes).
-            # Hold the last frame with a clear overlay so it reads as "working".
-            _busy = None
-            if self._thinking:
-                _busy = "thinking..."
-            elif self.tts is not None and getattr(self.tts, "synthesizing", False):
-                _busy = "generating voice..."
-            if _busy is not None:
-                hold = last_final.copy()
-                ov = hold.copy()
-                cv2.rectangle(ov, (0, FRAME_SIZE // 2 - 26),
-                              (FRAME_SIZE, FRAME_SIZE // 2 + 26), (0, 0, 0), -1)
-                cv2.addWeighted(ov, 0.55, hold, 0.45, 0, hold)
-                cv2.putText(hold, _busy,
-                            (FRAME_SIZE // 2 - 150, FRAME_SIZE // 2 + 8),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 215, 255), 2, cv2.LINE_AA)
-                with self._frame_lock:
-                    self._latest = hold
-                time.sleep(0.05)
-                continue
+            # The avatar KEEPS RENDERING while the brain thinks and the TTS generates
+            # voice — those run on separate threads/process (Ollama + Chatterbox fit
+            # alongside the swap in 16GB), so the face must NEVER freeze on stream.
+            # (The old code held a "thinking..." frame here — that read as the avatar
+            # breaking, which is exactly what we're removing.)
+            self._busy_gen = bool(self._thinking
+                                  or (self.tts is not None
+                                      and getattr(self.tts, "synthesizing", False)))
 
             # WHILE THE BOT IS TALKING: keep the frame budget low so the lip-sync
             # stays smooth (no lag). The head and skin are basically static during
