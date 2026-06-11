@@ -338,13 +338,38 @@ class FaceSwapEngine:
         try:
             H, W = frame.shape[:2]
             self._n += 1
-            bboxes, kpss = self.app.det_model.detect(frame, max_num=1, metric="default")
+            # detect ALL faces, then lock onto YOURS: largest + most central, with
+            # tiny background faces gated out + a bias toward last frame's position
+            # (so it never jumps to a face/object in the background).
+            bboxes, kpss = self.app.det_model.detect(frame, max_num=0, metric="default")
             if bboxes is None or len(bboxes) == 0:
                 self.last_found = False
+                self._last_center = None
                 return frame
-            i = int(np.argmax((bboxes[:, 2] - bboxes[:, 0]) * (bboxes[:, 3] - bboxes[:, 1])))
+            cx0, cy0 = W / 2.0, H / 2.0
+            best, bi = -1.0, -1
+            for k in range(len(bboxes)):
+                x1, y1, x2, y2 = bboxes[k, :4]
+                if max(x2 - x1, y2 - y1) < W * MIN_FACE_FRAC:
+                    continue                                   # too small = background
+                area = (x2 - x1) * (y2 - y1)
+                fcx, fcy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                dist = ((fcx - cx0) ** 2 + (fcy - cy0) ** 2) ** 0.5 / cx0
+                sc = area * (1.0 - 0.4 * min(dist, 1.0))       # large + central
+                if self._last_center is not None:             # stick to last face
+                    ld = ((fcx - self._last_center[0]) ** 2 +
+                          (fcy - self._last_center[1]) ** 2) ** 0.5 / cx0
+                    sc *= (1.0 - 0.5 * min(ld, 1.0))
+                if sc > best:
+                    best, bi = sc, k
+            if bi < 0:
+                self.last_found = False
+                self._last_center = None
+                return frame
+            i = bi
             kps = kpss[i].astype(np.float32)
             bbox = bboxes[i, :4].astype(np.float32)
+            self._last_center = ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
             # TEMPORAL SMOOTHING of the 5 keypoints — no jitter/slide on movement.
             if self._kps_euro is not None:
                 t = self._n / 30.0
