@@ -545,7 +545,7 @@ class AvatarStudio:
                     command=self._on_interval, style="Studio.TSpinbox").pack(side="right")
 
         r = self._row(c, "Stabilization")
-        self.stab_var = tk.IntVar(value=100)
+        self.stab_var = tk.IntVar(value=20)
         ttk.Scale(r, from_=0, to=100, variable=self.stab_var, length=150,
                   style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_stab()).pack(side="right")
@@ -612,7 +612,7 @@ class AvatarStudio:
         self.char_var.trace_add("write", self._on_character)
         # Hair / beard COLOUR — recolours gray hair+beard to match the character.
         r = self._row(c, "Hair colour")
-        self.hair_var = tk.StringVar(value="blonde")
+        self.hair_var = tk.StringVar(value="gray")
         ttk.Combobox(r, textvariable=self.hair_var,
                      values=["brown", "black", "blonde", "gray", "none"],
                      state="readonly", width=14,

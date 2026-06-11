@@ -64,7 +64,7 @@ SWAPPER_PATHS = ([os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx")] if 
     os.path.join(PROJECT_DIR, "ai-face", "models", "inswapper_128.onnx"),
     os.path.join(PROJECT_DIR, "models", "reswapper_256.onnx"),
 ]
-DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "512"))   # bigger = more reliable detect
+DET_SIZE = int(os.environ.get("AVATAR_SWAP_DET", "384"))   # bigger = more reliable detect
 DET_EVERY = int(os.environ.get("AVATAR_SWAP_DET_EVERY", "1"))  # reuse bbox N frames
 # ignore faces smaller than this fraction of the frame (background people/objects)
 MIN_FACE_FRAC = float(os.environ.get("AVATAR_SWAP_MINFACE", "0.05"))
