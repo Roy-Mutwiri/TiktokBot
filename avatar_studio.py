@@ -689,8 +689,9 @@ class AvatarStudio:
         self.multiref_var = tk.BooleanVar(value=False)
         self._check(c, "Extended turning  ·  multi-view (wider, less stable)",
                     self.multiref_var, self._on_multiref).pack(fill="x", pady=3)
-        # OFF by default: face-swap shows YOUR real mouth (breaks bot-only lips).
-        self.swap_var = tk.BooleanVar(value=False)
+        # ON by default: face-swap (White-Haddan onto your real head). Bot-only lip-lock
+        # keeps the mouth driven by the voice, not your webcam mouth.
+        self.swap_var = tk.BooleanVar(value=True)
         self._check(c, "FACE-SWAP mode  ·  YOUR real head (your real mouth)",
                     self.swap_var, self._on_swap).pack(fill="x", pady=3)
         # CHARACTER picker — switch identity live (white man / Haddan / any folder).
@@ -703,7 +704,7 @@ class AvatarStudio:
         self.char_var.trace_add("write", self._on_character)
         # Hair / beard COLOUR — recolours gray hair+beard to match the character.
         r = self._row(c, "Hair colour")
-        self.hair_var = tk.StringVar(value="none")
+        self.hair_var = tk.StringVar(value="gray")
         ttk.Combobox(r, textvariable=self.hair_var,
                      values=["brown", "black", "blonde", "gray", "none"],
                      state="readonly", width=14,
