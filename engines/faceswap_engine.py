@@ -373,10 +373,20 @@ class FaceSwapEngine:
             band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.7)),
                  max(0, x1 - int(fw * 0.45)):min(out.shape[1], x2 + int(fw * 0.45))] = True
             m = cv2.GaussianBlur((gray & band).astype(np.float32), (0, 0), 3.0)
-            mm = m
-            hsv[:, :, 0] = hsv[:, :, 0] * (1 - mm) + c["hue"] * mm                 # target hue
-            hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 - mm * 0.5) + c["sat"] * mm * 0.5, 0, 255)
-            hsv[:, :, 2] = np.clip(hsv[:, :, 2] * (1 - mm * (1 - c["valf"])), 0, 255)  # darken/lighten
+            # split: HAIR (top) keeps the chosen hair colour; BEARD (lower face/jaw)
+            # is recoloured to ONE consistent dark tone matching the swap's beard, so
+            # the gray operator-beard at the edges no longer two-tones with it.
+            beard_y = max(0, y1 + int(fh * 0.55))
+            zb = np.zeros_like(m); zb[beard_y:, :] = 1.0
+            mh, mb = m * (1.0 - zb), m * zb
+            bd = HAIR_COLORS.get(getattr(self, "_beard_color", "darkbeard"), c)
+
+            def _tint(col, mk):
+                hsv[:, :, 0] = hsv[:, :, 0] * (1 - mk) + col["hue"] * mk
+                hsv[:, :, 1] = np.clip(hsv[:, :, 1] * (1 - mk * 0.5) + col["sat"] * mk * 0.5, 0, 255)
+                hsv[:, :, 2] = np.clip(hsv[:, :, 2] * (1 - mk * (1 - col["valf"])), 0, 255)
+            _tint(c, mh)
+            _tint(bd or c, mb)
             return cv2.cvtColor(np.clip(hsv, 0, 255).astype(np.uint8), cv2.COLOR_HSV2BGR)
         except Exception:
             return out
