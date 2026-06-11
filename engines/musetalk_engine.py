@@ -203,18 +203,37 @@ class MuseTalkEngine:
         if audio_feat is None:
             return base_crop
 
-        # 2) VAE wrapper builds the 8-ch input (masked + ref latents); decode result
-        crop256 = cv2.resize(base_crop, (FACE_REGION_SIZE, FACE_REGION_SIZE))
+        # 2) MuseTalk needs a SQUARE face crop with the mouth in the LOWER (inpainted)
+        # half — a wide mouth box stretched to 256² distorts -> garbage, and a centred
+        # mouth leaks the operator's upper lip (the kept upper half). So build a square
+        # region whose lower half holds the whole mouth, run MuseTalk, then lift the
+        # original mouth bbox back out of the result.
+        H, W = lp_face_frame.shape[:2]
+        mcx = (x1 + x2) // 2
+        mw = max(8, x2 - x1)
+        side = int(mw * 1.7)                              # square ~ lower face
+        sy2 = min(H, y2 + int(mw * 0.10))                 # bottom just under the mouth
+        sy1 = max(0, sy2 - side)
+        sx1 = max(0, mcx - side // 2); sx2 = min(W, sx1 + side)
+        sx1 = max(0, sx2 - side)
+        sq = lp_face_frame[sy1:sy2, sx1:sx2]
+        if sq.shape[0] < 8 or sq.shape[1] < 8:
+            return base_crop
+        sq256 = cv2.resize(sq, (FACE_REGION_SIZE, FACE_REGION_SIZE))
         with torch.no_grad():
-            latents = self._vae.get_latents_for_unet(crop256).to(self.device, self._dtype)
+            latents = self._vae.get_latents_for_unet(sq256).to(self.device, self._dtype)
             pred = self._unet.model(latents, self._ts,
                                     encoder_hidden_states=audio_feat).sample
             pred = pred.to(self._vae.vae.dtype)
-            recon = self._vae.decode_latents(pred)       # (1,256,256,3) BGR uint8
-        out = recon[0] if recon.ndim == 4 else recon
-        out = cv2.resize(out, (x2 - x1, y2 - y1))
-
-        # keep some of the original crop so identity/skin is preserved
+            recon = self._vae.decode_latents(pred)        # (1,256,256,3) BGR uint8
+        recon = recon[0] if recon.ndim == 4 else recon
+        recon = cv2.resize(recon, (sx2 - sx1, sy2 - sy1)) # back to the square's size
+        # lift the original mouth bbox region out of the square result
+        oy1, oy2 = y1 - sy1, y2 - sy1
+        ox1, ox2 = x1 - sx1, x2 - sx1
+        out = recon[oy1:oy2, ox1:ox2]
+        if out.shape[:2] != base_crop.shape[:2]:
+            out = cv2.resize(out, (x2 - x1, y2 - y1))
         blended = (out.astype(np.float32) * BLEND_FACTOR +
                    base_crop.astype(np.float32) * (1.0 - BLEND_FACTOR))
         return np.clip(blended, 0, 255).astype(np.uint8)
