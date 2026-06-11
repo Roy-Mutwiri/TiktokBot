@@ -212,6 +212,31 @@ def apply_soften(frame):
     return cv2.addWeighted(frame, 1.0 - SOFTEN, blur, SOFTEN, 0)
 
 
+def apply_clarity(frame, amount=0.30):
+    """Local-contrast (clarity) — large-radius unsharp mask. Brings back skin
+    micro-texture/pores that enhancement smooths away, so it reads as real skin
+    through a lens, not a clean AI render."""
+    blur = cv2.GaussianBlur(frame, (0, 0), 3.0)
+    return cv2.addWeighted(frame, 1.0 + amount, blur, -amount, 0)
+
+
+def _scale_channel(ch, s, cx, cy):
+    M = cv2.getRotationMatrix2D((cx, cy), 0, s)
+    return cv2.warpAffine(ch, M, (ch.shape[1], ch.shape[0]), borderMode=cv2.BORDER_REPLICATE)
+
+
+def apply_chromatic_aberration(frame, amt=0.0016):
+    """Subtle lens chromatic aberration: scale R out / B in around centre so the
+    edges get a faint colour fringe — a real-lens characteristic that sells it as
+    camera footage rather than a perfect digital composite."""
+    h, w = frame.shape[:2]
+    cx, cy = w / 2.0, h / 2.0
+    b, g, r = cv2.split(frame)
+    r = _scale_channel(r, 1.0 + amt, cx, cy)
+    b = _scale_channel(b, 1.0 - amt, cx, cy)
+    return cv2.merge([b, g, r])
+
+
 def apply_grain(frame):
     """Add monochromatic luminance grain — real sensors are never perfectly clean."""
     if GRAIN_STRENGTH <= 0:
