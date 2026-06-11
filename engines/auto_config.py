@@ -34,7 +34,12 @@ except Exception:
 VOICE_VRAM = [("chatterbox", 3.5), ("kokoro", 0.4), ("edge", 0.0)]   # preference order
 BRAIN_VRAM = [("qwen2.5:14b", 9.0), ("qwen2.5:7b", 4.7),
               ("llama3.1:8b", 5.0), ("llama3.2:3b", 2.0)]            # best -> smallest
-VIDEO_RESERVE = 7.0     # GB held back for LivePortrait + mouth-sync + restore + overhead
+# GB held back for the FULL video pipeline (swap + LP + Wav2Lip + restore + Real-ESRGAN
+# + per-frame buffers) PLUS the voice-synthesis spike during speech. The old 7.0 was
+# too low: at runtime the brain+voice+video exceeded 16GB and OOM'd (corrupting the
+# CUDA context → avatar froze, beard/swap failed, mouth blurred). 10.5 leaves real
+# headroom so a speaking bot never OOMs.
+VIDEO_RESERVE = float(os.environ.get("AVATAR_VIDEO_RESERVE", "10.5"))
 
 
 def _ollama_models():
