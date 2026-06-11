@@ -375,6 +375,19 @@ class FaceSwapEngine:
         except Exception:
             return out
 
+    def set_stabilization(self, level):
+        """0 = responsive, 1 = max stability. Heavily smooths the face keypoints +
+        framing and eases off prediction so the swapped face is rock-steady."""
+        level = max(0.0, min(1.0, float(level)))
+        self._stab = level
+        mc = 4.0 - 3.6 * level          # 1€ min_cutoff 4.0 (snappy) -> 0.4 (very smooth)
+        bt = 0.10 - 0.088 * level       # 1€ beta 0.10 -> 0.012
+        if self._kps_euro is not None:
+            for j in range(5):
+                for k in range(2):
+                    self._kps_euro[j][k].min_cutoff = mc
+                    self._kps_euro[j][k].beta = bt
+
     def _get_eyemesh(self):
         if self._eyemesh_tried:
             return self._eyemesh
