@@ -962,6 +962,11 @@ class AvatarStudio:
                 pass
             self._worker = threading.Thread(target=self._loop, daemon=True)
             self._worker.start()
+            # AUTO-TALK: the brain writes + speaks gold commentary on its own, PIPELINED
+            # (generates the next line while the current one plays — voice gen never
+            # pauses the LLM).
+            self._autotalk_thread = threading.Thread(target=self._autotalk_loop, daemon=True)
+            self._autotalk_thread.start()
 
             def _enable():
                 self.start_btn.configure(text="START")
