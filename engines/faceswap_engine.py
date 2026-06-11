@@ -418,20 +418,27 @@ class FaceSwapEngine:
         if mesh is None:
             return out
         try:
-            res = mesh.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
-            if not res.multi_face_landmarks:
-                return out
             H, W = out.shape[:2]
-            lm = res.multi_face_landmarks[0].landmark
-            mask = np.zeros((H, W), np.float32)
-            for ring in ([469, 470, 471, 472], [474, 475, 476, 477]):  # the two irises
-                pts = np.array([[lm[i].x * W, lm[i].y * H] for i in ring], np.float32)
-                (cx, cy), r = cv2.minEnclosingCircle(pts)
-                if r > 1:
-                    cv2.circle(mask, (int(cx), int(cy)), int(r * 1.05), 1.0, -1)
+            # FaceMesh (refine) is the cost — run it every 2nd frame, reuse the iris
+            # mask between (eyes move little frame-to-frame).
+            self._eye_fn = getattr(self, "_eye_fn", 0) + 1
+            if getattr(self, "_iris_cache", None) is None or self._eye_fn % 2 == 0 \
+                    or self._iris_cache.shape[:2] != (H, W):
+                res = mesh.process(cv2.cvtColor(out, cv2.COLOR_BGR2RGB))
+                if not res.multi_face_landmarks:
+                    return out
+                lm = res.multi_face_landmarks[0].landmark
+                mk = np.zeros((H, W), np.float32)
+                for ring in ([469, 470, 471, 472], [474, 475, 476, 477]):
+                    pts = np.array([[lm[i].x * W, lm[i].y * H] for i in ring], np.float32)
+                    (cx, cy), r = cv2.minEnclosingCircle(pts)
+                    if r > 1:
+                        cv2.circle(mk, (int(cx), int(cy)), int(r * 1.05), 1.0, -1)
+                self._iris_cache = cv2.GaussianBlur(mk, (0, 0), 1.5)
+            mask = self._iris_cache
             if mask.max() < 0.5:
                 return out
-            mask = cv2.GaussianBlur(mask, (0, 0), 1.5) * EYE_STRENGTH
+            mask = mask * EYE_STRENGTH
             hsv = cv2.cvtColor(out, cv2.COLOR_BGR2HSV).astype(np.float32)
             th, ts = c
             hsv[:, :, 0] = hsv[:, :, 0] * (1 - mask) + th * mask          # target hue
