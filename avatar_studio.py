@@ -681,6 +681,10 @@ class AvatarStudio:
         self.chart_var = tk.BooleanVar(value=True)
         self._check(c, "Show live charts when face is lost",
                     self.chart_var).pack(fill="x", pady=3)
+        # TRADER SCENE: live chart full-frame + avatar host in a PiP corner (one app).
+        self.trader_var = tk.BooleanVar(value=True)
+        self._check(c, "Trader scene  ·  chart + avatar PiP (AI trading host)",
+                    self.trader_var).pack(fill="x", pady=3)
         self.obs_var = tk.BooleanVar(value=False)
         self._check(c, "Also send to OBS virtual camera",
                     self.obs_var).pack(fill="x", pady=3)
