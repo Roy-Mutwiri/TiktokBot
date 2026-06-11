@@ -96,6 +96,9 @@ HAIR_COLORS = {
     "gray":   dict(hue=0,  sat=8,   valf=0.92),
 }
 HAIR_COLOR = os.environ.get("AVATAR_SWAP_HAIRCOLOR", "brown")
+# HAIRSTYLE overlay (none/short/medium/long/slick/curly) — aligned 2D hair cut-out
+# from hairstyles/. Forward-facing; 2D so it won't rotate in 3D on hard profiles.
+HAIRSTYLE = os.environ.get("AVATAR_SWAP_HAIRSTYLE", "none")
 CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
 # Lighten the face skin toward a Caucasian tone (0 = off, ~0.6 = clearly lighter).
 SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0"))  # OFF: white-man SOURCE handles skin, no color hacks
