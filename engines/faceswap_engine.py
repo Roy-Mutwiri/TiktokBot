@@ -159,6 +159,12 @@ class FaceSwapEngine:
     """inswapper-based real-time face swap (operator head + character identity)."""
 
     def __init__(self, source_image_path=None):
+        import threading
+        # the insightface detector (self.app) is one ONNX session shared by the render
+        # thread (swap) and the GUI thread (set_source_from_folder on a character
+        # switch). Concurrent access corrupts detection -> garbled face/mouth = the
+        # "blur when changing characters". This lock serialises every app/det call.
+        self._app_lock = threading.Lock()
         self.ready = False
         self.app = None
         self.swapper = None

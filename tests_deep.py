@@ -139,10 +139,11 @@ chk("context contains the LIVE price (4,217)", "4,217" in ctx, ctx[:70])
 chk("context says talk about the current price", "current price" in ctx.lower(), "")
 chk("live feed overrides the fake chart price", "2,375" not in ctx, "")
 chk("chart price synced to live", abs(s.engines["chart"].price - 4217.0) < 1, "")
-# feed-down fallback uses the chart
+# feed-down fallback uses the chart (whose price was synced to live earlier)
 s.market = None
 ctx2 = avatar_studio.AvatarStudio._live_market_ctx(s)
-chk("fallback to chart when feed down", "2,375" in ctx2 or ctx2 == "", ctx2[:50])
+chk("fallback to chart when feed down still yields a price",
+    ctx2 != "" and "gold" in ctx2.lower(), ctx2[:50])
 
 
 # =========================================================================
