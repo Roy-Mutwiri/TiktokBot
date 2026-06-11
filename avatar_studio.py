@@ -92,8 +92,8 @@ QUICK_PHRASES = [
 #   Maya1  ~10s + 25s load — laughs/emotion tags, but too slow for smooth live;
 #          best for pre-rendering / repeated (cached) lines
 VOICE_MODES = [
+    ("English · Arabic accent ~3s (Chatterbox)", "chatterbox"),   # DEFAULT
     ("Fast — instant (Kokoro)",            "kokoro"),
-    ("Real human voice ~3s (Chatterbox)",  "chatterbox"),
     ("Arabic + English (Multilingual)",    "multilingual"),
     ("Laughs/emotion — SLOW ~10s (Maya1)", "maya1"),
     ("Cloud (edge)",                       "edge"),
