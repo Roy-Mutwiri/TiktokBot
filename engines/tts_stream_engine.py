@@ -158,6 +158,7 @@ class TTSStreamEngine:
         # the AVATAR_TTS env default.
         self.tts_backend = TTS_BACKEND
         self.synthesizing = False        # True while a line is being generated
+        self.speaking = False            # True while the bot is ACTUALLY talking
         # Serializes model loading so a SPEAK fired during a (slow) warm waits
         # for the model instead of racing in, seeing it half-loaded, and silently
         # falling back to a different voice.

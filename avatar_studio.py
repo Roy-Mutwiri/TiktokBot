@@ -1173,13 +1173,26 @@ class AvatarStudio:
                 in_chart = False
                 self._log_msg("[studio] face back — avatar resumed.")
 
-            self._speaking = bool(getattr(mt, "is_speaking", False))
+            # "the bot is ACTUALLY talking" — from the TTS, NOT the mouth engine
+            # (which we may keep alive with idle silence below).
+            self._speaking = bool(self.tts is not None and getattr(self.tts, "speaking", False))
+            lips_from_bot = bool(self.liplock_var.get())
 
             if chart_fade >= 1.0:
                 # fully on charts — skip the (now hidden) avatar mouth/enhance work
                 final = chart.render(speaking=self._speaking)
             else:
-                if self._speaking:
+                # LIPS FROM BOT: the mouth is driven by the TTS EVERY frame —
+                # talking when the bot speaks, CLOSED (neutral) when it's silent —
+                # so the operator's real mouth NEVER shows. Works in face-swap mode
+                # too (where LivePortrait/lip-lock is bypassed). When lip-lock is
+                # off, fall back to old behaviour (mouth-sync only while speaking).
+                if lips_from_bot and not self._speaking:
+                    try:                       # trickle silence -> closed-mouth render
+                        mt.feed_audio((np.random.randn(640).astype(np.float32)) * 1e-3)
+                    except Exception:
+                        pass
+                if self._speaking or lips_from_bot:
                     try:
                         if lp_fresh or cached_bbox is None:
                             cached_bbox = comp.detect_mouth_bbox(ai)
