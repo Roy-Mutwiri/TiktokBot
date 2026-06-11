@@ -159,6 +159,7 @@ class AvatarStudio:
         self.swap_engine = None              # lazy inswapper face-swap (real head)
         self.tts = None
         self.brain = None                    # Ollama LLM brain (answers in character)
+        self.market = None                   # LIVE gold price feed (Binance PAXG)
         self._thinking = False               # True while the brain is generating
         self.cap = None
         self.obs_cam = None
