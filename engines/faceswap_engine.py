@@ -74,7 +74,7 @@ FACE_LIGHT = float(os.environ.get("AVATAR_SWAP_FACELIGHT", "0"))  # OFF: adaptiv
 # into the operator's real lighting instead of carrying the source clip's tone.
 COLOR_MATCH = os.environ.get("AVATAR_SWAP_COLORMATCH", "1") == "1"
 # CodeFormer HD enhancement of the swapped face (inswapper is only 128px).
-ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "1") == "1"
+ENHANCE_SWAP = os.environ.get("AVATAR_SWAP_ENHANCE", "0") == "1"  # OFF for speed; 256 swap is sharp enough
 # How much CodeFormer to blend in (0 = raw swap/most real, 1 = full CodeFormer/
 # smoothest). Low keeps the eyes/mouth real while still adding crispness.
 ENHANCE_BLEND = float(os.environ.get("AVATAR_SWAP_ENHANCE_BLEND", "0.8"))
