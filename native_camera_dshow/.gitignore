@@ -1,0 +1,10 @@
+# fetched DirectShow base classes (cloned by build.ps1) and build artifacts
+baseclasses/
+_classic/
+obj/
+*.dll
+*.exe
+*.obj
+*.lib
+*.exp
+*.pdb

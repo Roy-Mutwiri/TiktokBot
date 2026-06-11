@@ -16,6 +16,9 @@
 #   python avatar_camera.py --native        # feed the native "Avatar Studio
 #                                           # Camera" that appears only while
 #                                           # running (see native_camera\README)
+#   python avatar_camera.py --dshow         # feed the DirectShow "Avatar Studio
+#                                           # Camera" - a normal webcam with NO
+#                                           # virtual-camera tag (OBS/Zoom/TikTok)
 #
 # Type what the avatar says with:  python control_gui.py   (another terminal)
 # Stop with [Q] here (or Ctrl+C).
@@ -185,6 +188,30 @@ def _run_native(prefer_name):
     return 0
 
 
+def _run_dshow():
+    """--dshow: feed the DirectShow "Avatar Studio Camera" (no virtual tag).
+
+    That camera is a registered DirectShow filter (native_camera_dshow), so it is
+    always present in apps that block/flag virtual cameras (OBS, Zoom, Discord,
+    Chrome, TikTok Live Studio) as an ordinary webcam. We only need to write the
+    avatar frames into the shared file it reads - no host process required.
+    """
+    import realtime_avatar as ra
+    cam = _SharedMemCam(ra.FRAME_SIZE, ra.FRAME_SIZE)
+    print(f"[DSHOW] feeding 'Avatar Studio Camera' (DirectShow, no virtual tag).")
+    print(f"[DSHOW] writing avatar frames to: {cam.path}")
+    print("[DSHOW] pick 'Avatar Studio Camera' in OBS / Zoom / Discord / Chrome /")
+    print("[DSHOW] TikTok Live Studio. (If it's missing, run native_camera_dshow\\install.ps1)")
+    try:
+        eng = ra.startup(cam=cam, hints=False)
+    except Exception as exc:
+        print(f"[DSHOW] engine startup failed: {exc}")
+        cam.close()
+        return 1
+    ra.run(eng)
+    return 0
+
+
 def main(argv):
     prefer = None
     args = [a for a in argv[1:]]
@@ -198,6 +225,9 @@ def main(argv):
     if "--list" in args:
         _list_devices()
         return 0
+
+    if "--dshow" in args:
+        return _run_dshow()
 
     if "--native" in args:
         name = None
