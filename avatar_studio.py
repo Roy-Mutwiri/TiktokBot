@@ -545,7 +545,7 @@ class AvatarStudio:
                     command=self._on_interval, style="Studio.TSpinbox").pack(side="right")
 
         r = self._row(c, "Stabilization")
-        self.stab_var = tk.IntVar(value=40)
+        self.stab_var = tk.IntVar(value=100)
         ttk.Scale(r, from_=0, to=100, variable=self.stab_var, length=150,
                   style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_stab()).pack(side="right")
@@ -605,14 +605,14 @@ class AvatarStudio:
                     self.swap_var).pack(fill="x", pady=3)
         # CHARACTER picker — switch identity live (white man / Haddan / any folder).
         r = self._row(c, "Character")
-        self.char_var = tk.StringVar(value="White man")
+        self.char_var = tk.StringVar(value="Haddan")
         ttk.Combobox(r, textvariable=self.char_var, values=["White man", "Haddan"],
                      state="readonly", width=14,
                      style="Studio.TCombobox").pack(side="right")
         self.char_var.trace_add("write", self._on_character)
         # Hair / beard COLOUR — recolours gray hair+beard to match the character.
         r = self._row(c, "Hair colour")
-        self.hair_var = tk.StringVar(value="brown")
+        self.hair_var = tk.StringVar(value="blonde")
         ttk.Combobox(r, textvariable=self.hair_var,
                      values=["brown", "black", "blonde", "gray", "none"],
                      state="readonly", width=14,
@@ -620,7 +620,7 @@ class AvatarStudio:
         self.hair_var.trace_add("write", self._on_hair)
         # Eye COLOUR — recolour the iris (off keeps the swapped source's eyes).
         r = self._row(c, "Eye colour")
-        self.eye_var = tk.StringVar(value="off")
+        self.eye_var = tk.StringVar(value="gray")
         ttk.Combobox(r, textvariable=self.eye_var,
                      values=["off", "blue", "green", "hazel", "brown", "amber", "gray"],
                      state="readonly", width=14,
