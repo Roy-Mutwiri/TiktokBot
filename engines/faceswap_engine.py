@@ -84,8 +84,18 @@ COLOR_STRENGTH = float(os.environ.get("AVATAR_SWAP_COLORSTR", "0.0"))
 AUTO_CENTER = os.environ.get("AVATAR_SWAP_CENTER", "0") == "1"          # auto-framing (off)
 CENTER_Y = float(os.environ.get("AVATAR_SWAP_CENTER_Y", "0.46"))
 EYE_PRESERVE = float(os.environ.get("AVATAR_SWAP_EYES", "0.5"))         # real-eye blend
-HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "0") == "1"        # hair recolour (off)
+HAIR_MATCH = os.environ.get("AVATAR_SWAP_HAIRMATCH", "1") == "1"        # hair/beard recolour
 HAIR_DARKEN = float(os.environ.get("AVATAR_SWAP_HAIRDARKEN", "0.55"))
+# Hair/beard colour presets (recolours gray hair+beard so they match the
+# character — fixes the "lost beard" + lets you pick a hair colour).
+HAIR_COLORS = {
+    "none":   None,
+    "brown":  dict(hue=12, sat=95,  valf=0.55),
+    "black":  dict(hue=0,  sat=25,  valf=0.32),
+    "blonde": dict(hue=23, sat=120, valf=1.18),
+    "gray":   dict(hue=0,  sat=8,   valf=0.92),
+}
+HAIR_COLOR = os.environ.get("AVATAR_SWAP_HAIRCOLOR", "brown")
 CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
 # Lighten the face skin toward a Caucasian tone (0 = off, ~0.6 = clearly lighter).
 SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0"))  # OFF: white-man SOURCE handles skin, no color hacks
