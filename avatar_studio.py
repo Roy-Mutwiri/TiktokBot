@@ -1384,6 +1384,7 @@ class AvatarStudio:
                     final = cv2.addWeighted(final, 1.0 - chart_fade, cf, chart_fade, 0)
                 elif getattr(self, "broadcast_var", None) and self.broadcast_var.get():
                     final = self._broadcast_frame(final)   # sharper mouth, no stretch
+                final = self._stats_overlay(final)         # likes/coins/goal bar (if live)
 
             last_final = final            # remember for the "generating" hold
             with self._frame_lock:
@@ -1539,6 +1540,8 @@ class AvatarStudio:
         "Call out a key support or resistance level on gold and what you'd do around it.",
         "Read the REAL technicals out loud — trend, RSI, the exact support/resistance — like a sharp analyst.",
         "Hype the chat — tell viewers to smash like and post their gold targets.",
+        "Push the gift goal — tell viewers to send a rose or any gift to unlock the next gold signal.",
+        "Tell viewers to drop a follow and smash like if they're catching these gold moves with you.",
         "Give your honest short take on the gold trend today, bullish or bearish, and why.",
         "Tease what could happen next on gold into the session and keep them watching.",
     ]
