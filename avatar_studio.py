@@ -1911,7 +1911,10 @@ class AvatarStudio:
         except Exception:
             pass
         data = "; ".join(facts)
-        return (f" LIVE GOLD DATA RIGHT NOW (XAUUSD, real, this second): {data}. "
+        news = getattr(self, "_gold_news", "")
+        news_clause = (f" Latest real market headline: \"{news}\" — you MAY weave in why "
+                       "gold is moving if it fits, but never invent news.") if news else ""
+        return (f" LIVE GOLD DATA RIGHT NOW (XAUUSD, real, this second): {data}.{news_clause} "
                 "Reason like a sharp analyst USING ONLY THESE EXACT NUMBERS — never "
                 "invent a price or level. Read what's ACTUALLY happening: where price "
                 "sits vs support/resistance, the trend, RSI, the 24h move, and what you "
