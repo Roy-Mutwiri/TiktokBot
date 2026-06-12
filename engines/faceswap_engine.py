@@ -305,7 +305,8 @@ class FaceSwapEngine:
             done.append(fn); done_set.add(fn)
             if img is None:
                 continue
-            faces = self.app.get(img)
+            with self._app_lock:                 # don't collide with the render's detect
+                faces = self.app.get(img)
             if not faces:
                 continue
             face = max(faces, key=lambda f: (f.bbox[2] - f.bbox[0]) * (f.bbox[3] - f.bbox[1]))
@@ -532,7 +533,8 @@ class FaceSwapEngine:
         the operator and ignore any other face that enters the frame."""
         try:
             f = self._Face(bbox=None, kps=kps.astype(np.float32), det_score=1.0)
-            e = self.app.models["recognition"].get(frame, f)
+            with self._app_lock:
+                e = self.app.models["recognition"].get(frame, f)
             n = np.linalg.norm(e)
             return e / n if n > 1e-6 else None
         except Exception:
@@ -651,7 +653,8 @@ class FaceSwapEngine:
             # detect ALL faces, then lock onto YOURS: largest + most central, with
             # tiny background faces gated out + a bias toward last frame's position
             # (so it never jumps to a face/object in the background).
-            bboxes, kpss = self.app.det_model.detect(frame, max_num=0, metric="default")
+            with self._app_lock:
+                bboxes, kpss = self.app.det_model.detect(frame, max_num=0, metric="default")
             if bboxes is None or len(bboxes) == 0:
                 self.last_found = False
                 self._last_center = None
