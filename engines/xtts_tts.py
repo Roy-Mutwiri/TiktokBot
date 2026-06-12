@@ -85,7 +85,12 @@ class XTTSBackend:
 
     def __init__(self, ref_path=None):
         self.ready = False
-        self.ref_path = ref_path or XTTS_REF
+        if ref_path:
+            self.refs = ref_path if isinstance(ref_path, list) else [ref_path]
+        else:
+            self.refs = XTTS_REFS
+        self.refs = [p for p in self.refs if os.path.exists(p)]
+        self.ref_path = self.refs[0] if self.refs else None
         self.sr = 24000                       # XTTS native output rate
         self.device = "cpu"
         self._model = None
@@ -113,13 +118,15 @@ class XTTSBackend:
         print("[XTTS] loading XTTS-v2 (first run downloads ~1.8GB)...")
         api = TTS(MODEL_NAME).to(self.device)
         self._model = api.synthesizer.tts_model        # low-level Xtts for speed
-        if self.ref_path and not os.path.exists(self.ref_path):
-            print(f"[XTTS] ref not found: {self.ref_path} — using built-in voice.")
-            self.ref_path = None
-        # compute the speaker latents ONCE (cloning) -> fast per-line synth
-        ref = self.ref_path or _DEFAULT_REF
+        refs = self.refs or _default_refs()
+        refs = [p for p in refs if os.path.exists(p)]
+        if not refs:
+            raise RuntimeError("no XTTS reference audio found")
+        print(f"[XTTS] cloning from {len(refs)} reference clip(s): "
+              + ", ".join(os.path.basename(p) for p in refs))
+        # compute the speaker latents ONCE from ALL refs -> richer, fast per-line
         self._gpt_latent, self._spk_emb = self._model.get_conditioning_latents(
-            audio_path=[ref], gpt_cond_len=30, max_ref_length=60)
+            audio_path=refs, gpt_cond_len=30, max_ref_length=60)
         self._warmup()
         self.ready = True
         if self.device == "cuda":

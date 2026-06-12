@@ -24,10 +24,15 @@ except Exception:
 class TikTokComments:
     """Background TikTok-Live comment reader -> on_comment(user, text)."""
 
-    def __init__(self, username, on_comment):
+    def __init__(self, username, on_comment, on_gift=None, on_follow=None,
+                 on_like=None, on_share=None):
         u = (username or "").strip()
         self.username = u if u.startswith("@") else "@" + u
         self.on_comment = on_comment
+        self.on_gift = on_gift          # (user, gift_name, count, coins)
+        self.on_follow = on_follow      # (user)
+        self.on_like = on_like          # (user, total_likes)
+        self.on_share = on_share        # (user)
         self.connected = False
         self.status = "idle"
         self._stop = False
