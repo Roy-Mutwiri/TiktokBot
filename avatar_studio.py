@@ -2074,6 +2074,70 @@ class AvatarStudio:
             self._log_msg(f"[comments] {exc}")
             return False
 
+    def _set_live_light(self, state):
+        """Drive the live-status dot. state: 'live' (green), 'off' (red),
+        'none' (grey, no handle). Thread-safe (marshalled onto the Tk thread)."""
+        dot, glow = {
+            "live": ("#27ff9e", "#0c4a32"),   # bright green + dark green halo
+            "off":  ("#ff3b5c", "#4a0c1a"),   # red + dark red halo
+            "none": ("#3a3f4a", ""),          # grey, no halo
+        }.get(state, ("#3a3f4a", ""))
+
+        def _apply():
+            try:
+                self.live_light.itemconfig(self._live_dot, fill=dot)
+                self.live_light.itemconfig(self._live_glow, fill=glow)
+            except Exception:
+                pass
+        try:
+            self.root.after(0, _apply)
+        except Exception:
+            pass
+
+    def _live_status_loop(self):
+        """ALWAYS-ON: continuously poll TikTok for whether the entered @handle is
+        LIVE and drive the green/red light in real time. When the handle goes live
+        and 'Answer live comments' is ticked, auto-connects the reader so it never
+        misses the start of a stream. Cheap is_live() check, no long sleeps."""
+        import asyncio
+        import time as _t
+        try:
+            asyncio.set_event_loop(asyncio.new_event_loop())
+        except Exception:
+            pass
+        last = None
+        while not getattr(self, "_live_stop", False):
+            handle = (self.handle_var.get() or "").strip()
+            if not handle:
+                if last is not None:
+                    self._set_live_light("none")
+                    last = None
+                _t.sleep(1.2)
+                continue
+            if not handle.startswith("@"):
+                handle = "@" + handle
+            try:
+                from TikTokLive import TikTokLiveClient
+                live = bool(asyncio.get_event_loop().run_until_complete(
+                    TikTokLiveClient(unique_id=handle).is_live()))
+            except Exception:
+                live = False
+            self._handle_live = live
+            self._set_live_light("live" if live else "off")
+            if live != last:
+                self._log_msg(f"[live] {handle} is "
+                              + ("LIVE \U0001f7e2 — comments incoming" if live
+                                 else "offline \U0001f534"))
+                last = live
+            # auto-connect the comment reader the moment the stream goes live
+            if (live and self.comments_var.get() and self.tiktok is None
+                    and self.brain is not None):
+                try:
+                    self.root.after(0, self._on_comments)
+                except Exception:
+                    pass
+            _t.sleep(3.0)
+
     def _on_comments(self):
         """Toggle the live TikTok comment responder on/off."""
         try:
