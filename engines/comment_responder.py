@@ -135,24 +135,49 @@ class CommentResponder:
 
     # -- live-event reactions (gifts / follows / likes / shares) -------------
     def react_gift(self, user, gift, count, coins):
-        amt = f"{count} {gift}s" if count > 1 else f"a {gift}"
+        c = int(coins or 0)
+        s = self._support(user)
+        repeat = s["gifts"] > 0
+        s["coins"] += c
+        s["gifts"] += int(count or 1)
+        amt = f"{count} {gift}s" if count and count > 1 else f"a {gift}"
+        # scale the appreciation to how big the gift is
+        if c >= 5000:
+            tier = ("a HUGE top-tier gift — react like they just made your whole night, "
+                    "give them a massive VIP shoutout and call them a legend of the stream")
+        elif c >= 500:
+            tier = "a big, generous gift — be genuinely moved and hype them up hard"
+        elif c >= 50:
+            tier = "a generous gift — be warm and clearly grateful"
+        else:
+            tier = "a kind gift — give a warm, genuine thank-you"
+        extra = ""
+        if repeat:
+            extra = (f" They've supported you before ({s['coins']} coins total now) — "
+                     "recognise them as a loyal regular / one of your top supporters.")
         r = self.brain.quick(
-            f"A viewer named {user} just sent you {amt} ({coins} coins) on your live "
-            "gold-trading stream. Give an EXCITED, genuine one-line thank-you by name, "
-            "like a real streamer who's grateful. Max 16 words. No emojis.",
-            system="You are an enthusiastic, grateful live-stream host.", max_tokens=44) \
-            if self.brain else None
-        return self._say(r) or f"Thank you so much {user} for the {gift}, I appreciate you!"
+            f"A viewer named {user} just sent you {amt} ({c} coins) on your live gold stream. "
+            f"That is {tier}. Thank them BY NAME, genuinely and with real energy.{extra} "
+            "1-2 short spoken sentences. No emojis.",
+            system=self._ARAB_HOST_SYS, max_tokens=70) if self.brain else None
+        return self._say(r) or f"Wallahi thank you so much {user} for the {gift}, I appreciate you habibi!"
 
     def react_follow(self, user):
+        s = self._support(user)
+        s["follow"] = True
         r = self.brain.quick(
-            f"{user} just FOLLOWED your live gold-trading stream. Give a short, warm "
-            "welcome-to-the-family one-liner by name. Max 13 words. No emojis.",
-            system="You are a warm live-stream host.", max_tokens=34) if self.brain else None
-        return self._say(r) or f"Welcome to the family {user}, thanks for the follow!"
+            f"{user} just FOLLOWED your live gold stream. Thank them BY NAME for the follow "
+            "with a warm, genuine welcome-to-the-family — like you really appreciate them "
+            "joining the community. One short spoken sentence. No emojis.",
+            system=self._ARAB_HOST_SYS, max_tokens=40) if self.brain else None
+        return self._say(r) or f"Welcome to the family {user}, wallahi thank you for the follow habibi!"
 
     def react_share(self, user):
-        return f"Thanks for sharing the stream, {user}, that means a lot!"
+        r = self.brain.quick(
+            f"{user} just SHARED your live gold stream with others. Thank them BY NAME warmly "
+            "for spreading the stream — it genuinely helps. One short spoken sentence. No emojis.",
+            system=self._ARAB_HOST_SYS, max_tokens=38) if self.brain else None
+        return self._say(r) or f"Ya salam, thank you for sharing the stream {user}, that means a lot habibi!"
 
     def react_goal(self, coins):
         r = self.brain.quick(
