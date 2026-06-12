@@ -1,0 +1,76 @@
+; RoyCamDriver.inf — RoyCam HD Camera (AVStream software camera minidriver)
+;
+; LEGITIMATE, OWN-BRANDED software camera. Root-enumerated under our own
+; hardware ID (root\RoyCamHDCamera). Does NOT impersonate any vendor, spoof any
+; VID/PID/hardware-ID/signature, and does NOT claim to be physical USB hardware.
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Camera
+ClassGuid   = {ca3e7ab9-b4c3-4ae6-8251-579ef933890f}
+Provider    = %ProviderName%
+CatalogFile = RoyCamDriver.cat
+DriverVer   = 06/12/2026,1.0.0.0
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir = 13   ; driver store
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+RoyCamDriver.sys = 1
+
+[Manufacturer]
+%ManufacturerName% = RoyCam, NT$ARCH$.10.0...16299
+
+; Root-enumerated software device.
+[RoyCam.NT$ARCH$.10.0...16299]
+%RoyCam.DeviceDesc% = RoyCam_Install, root\RoyCamHDCamera
+
+; ----------------------------------------------------------------------------
+[RoyCam_Install.NT]
+CopyFiles = RoyCam_CopyFiles
+
+[RoyCam_CopyFiles]
+RoyCamDriver.sys
+
+[RoyCam_Install.NT.Services]
+AddService = RoyCamDriver, 0x00000002, RoyCam_Service
+
+[RoyCam_Service]
+DisplayName   = %RoyCam.SvcDesc%
+ServiceType   = 1                       ; SERVICE_KERNEL_DRIVER
+StartType     = 3                       ; SERVICE_DEMAND_START
+ErrorControl  = 1                       ; SERVICE_ERROR_NORMAL
+ServiceBinary = %13%\RoyCamDriver.sys
+
+; Register the streaming/camera interfaces so Frame Server + MF surface it.
+[RoyCam_Install.NT.Interfaces]
+AddInterface = %KSCATEGORY_VIDEO_CAMERA%, %RoyCam.Reference%, RoyCam_Interface
+AddInterface = %KSCATEGORY_CAPTURE%,      %RoyCam.Reference%, RoyCam_Interface
+AddInterface = %KSCATEGORY_VIDEO%,        %RoyCam.Reference%, RoyCam_Interface
+
+[RoyCam_Interface]
+AddReg = RoyCam_Interface.AddReg
+
+[RoyCam_Interface.AddReg]
+HKR,,FriendlyName,,%RoyCam.FriendlyName%
+HKR,,CLSID,,%KSProxy.CLSID%
+
+[Strings]
+ProviderName        = "RoyCam"
+ManufacturerName    = "RoyCam"
+DiskName            = "RoyCam HD Camera Installation Media"
+RoyCam.DeviceDesc   = "RoyCam HD Camera"
+RoyCam.FriendlyName = "RoyCam HD Camera"
+RoyCam.SvcDesc      = "RoyCam HD Camera (AVStream minidriver)"
+RoyCam.Reference    = "RoyCamHDCamera.Capture"
+
+; KS category GUIDs (standard streaming categories — not vendor identifiers).
+KSCATEGORY_VIDEO_CAMERA = "{E5323777-F976-4F5B-9B55-B94699C46E44}"
+KSCATEGORY_CAPTURE      = "{65E8773D-8F56-11D0-A3B9-00A0C9223196}"
+KSCATEGORY_VIDEO        = "{6994AD05-93EF-11D0-A3CC-00A0C9223196}"
+; Standard KS proxy (ksproxy.ax) CLSID — the OS-provided streaming proxy.
+KSProxy.CLSID           = "{17CCA71B-ECD7-11D0-B908-00A0C9223196}"
