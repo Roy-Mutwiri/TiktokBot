@@ -72,15 +72,52 @@ def _default_refs():
 _env_ref = os.environ.get("AVATAR_XTTS_REF", "").strip()
 XTTS_REFS = [p.strip() for p in _env_ref.split(",") if p.strip()] or _default_refs()
 XTTS_REF = XTTS_REFS[0]
-# Expressive sampling — higher temperature + sampling = livelier, more emotional,
-# less monotone delivery (laughs/excitement land better). All env-tunable.
-XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.85"))
-XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "4.0"))
+# Expressive but STABLE sampling. Temperature too high (0.85+) made XTTS distort
+# on longer speech, so keep it lively-yet-stable (0.75) and rely on per-sentence
+# chunking (below) to keep every generation short. repetition_penalty prevents the
+# autoregressive repeat/garble loop. All env-tunable.
+XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.75"))
+XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "5.0"))
 XTTS_TOP_K = int(os.environ.get("AVATAR_XTTS_TOP_K", "50"))
-XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.88"))
+XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.85"))
 XTTS_LEN_PEN = float(os.environ.get("AVATAR_XTTS_LEN_PENALTY", "1.0"))
 XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "1.0"))
+# Hard cap on characters per XTTS call — long single generations are what distort.
+XTTS_MAX_CHARS = int(os.environ.get("AVATAR_XTTS_MAX_CHARS", "170"))
 MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
+
+_SENT_SPLIT = re.compile(r"(?<=[\.\!\?\:؟…])\s+")
+_CLAUSE_SPLIT = re.compile(r"(?<=[,،;:\-—])\s+")
+
+
+def chunk_text(text, max_chars=None):
+    """Split into short, sentence-sized chunks so each XTTS generation stays
+    short and stable (long single generations are what distort/drift)."""
+    max_chars = max_chars or XTTS_MAX_CHARS
+    out = []
+    for sent in _SENT_SPLIT.split((text or "").strip()):
+        sent = sent.strip()
+        if not sent:
+            continue
+        if len(sent) <= max_chars:
+            out.append(sent)
+            continue
+        cur = ""                                  # long sentence -> split at clauses
+        for piece in _CLAUSE_SPLIT.split(sent):
+            if len(cur) + len(piece) + 1 <= max_chars:
+                cur = (cur + " " + piece).strip()
+            else:
+                if cur:
+                    out.append(cur)
+                # piece itself too long -> hard-split on words
+                while len(piece) > max_chars:
+                    cut = piece.rfind(" ", 0, max_chars)
+                    cut = cut if cut > 0 else max_chars
+                    out.append(piece[:cut].strip()); piece = piece[cut:].strip()
+                cur = piece
+        if cur:
+            out.append(cur)
+    return out
 
 _ARABIC = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
 
