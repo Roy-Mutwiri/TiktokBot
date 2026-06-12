@@ -1360,6 +1360,8 @@ class AvatarStudio:
                 elif chart_fade > 0.0:    # (classic) crossfade avatar <-> chart
                     cf = chart.render(speaking=self._speaking)
                     final = cv2.addWeighted(final, 1.0 - chart_fade, cf, chart_fade, 0)
+                elif getattr(self, "broadcast_var", None) and self.broadcast_var.get():
+                    final = self._broadcast_frame(final)   # sharper mouth, no stretch
 
             last_final = final            # remember for the "generating" hold
             with self._frame_lock:
