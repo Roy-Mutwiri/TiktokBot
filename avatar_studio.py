@@ -1351,7 +1351,7 @@ class AvatarStudio:
             # CPU+GPU are saturated (hysteresis) so it never lags.
             if (did_swap and getattr(self, "hd_var", None) and self.hd_var.get()
                     and (self.monitor is None or (not self.monitor.saturated()
-                                                  and self.monitor.gpu_free(86)))):
+                                                  and self.monitor.vram < 86))):
                 try:
                     if self.face_restore is None:
                         os.environ.setdefault("AVATAR_RESTORE_INTERVAL", "1")  # no cache = smooth
