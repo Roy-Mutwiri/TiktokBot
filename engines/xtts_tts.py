@@ -160,6 +160,59 @@ def detect_lang(text):
     return "ar" if _ARABIC.search(text or "") else "en"
 
 
+# The persona writes Arabic words in LATIN letters (wallahi, habibi...). XTTS then
+# reads them with ENGLISH phonetics = wrong, robotic Arabic. Convert the common ones
+# to ARABIC SCRIPT before synthesis so the code-switcher routes them to the Arabic
+# voice and they sound like a real Arab speaker. Add more freely.
+ARABIC_WORDS = {
+    "wallahi": "والله", "wallah": "والله", "wallahy": "والله", "wallahi!": "والله",
+    "habibi": "حبيبي", "habibti": "حبيبتي", "habayebi": "حبايبي", "habayb": "حبايب",
+    "mashallah": "ما شاء الله", "masha'allah": "ما شاء الله",
+    "inshallah": "إن شاء الله", "insha'allah": "إن شاء الله",
+    "alhamdulillah": "الحمد لله", "alhamdullah": "الحمد لله", "hamdulillah": "الحمد لله",
+    "yalla": "يلا", "yallah": "يلا",
+    "akhi": "أخي", "ya": "يا", "yaani": "يعني", "yani": "يعني",
+    "khalas": "خلاص", "sahbi": "صاحبي", "shukran": "شكراً",
+    "salam": "سلام", "salaam": "سلام", "habibo": "حبيبو", "tamam": "تمام",
+    "bismillah": "بسم الله", "subhanallah": "سبحان الله", "wala": "ولا",
+}
+_AR_WORD_RE = re.compile(
+    r"\b(" + "|".join(re.escape(w) for w in sorted(ARABIC_WORDS, key=len, reverse=True))
+    + r")\b", re.I)
+
+
+def arabicize(text):
+    """Swap transliterated Arabic words for Arabic script so they're pronounced
+    correctly (whole-word, case-insensitive)."""
+    if not text:
+        return text
+    return _AR_WORD_RE.sub(lambda m: ARABIC_WORDS.get(m.group(0).lower(), m.group(0)), text)
+
+
+_HYPE_RE = re.compile(
+    r"\b(yalla|let'?s\s*go+|smash|goo+|come on|right now|wow|insane|huge|legend|"
+    r"crazy|let'?s\s*gooo|pump|moon|fire|lets go)\b|!!", re.I)
+_CALM_RE = re.compile(
+    r"\b(support|resistance|level|levels|trend|rsi|analysis|patient|careful|"
+    r"carefully|wait|watching|notice|remember|steady|slowly|consider|honestly|"
+    r"the key|keep in mind)\b", re.I)
+
+
+def pace_for(text):
+    """A calm man's pace by default, a touch FASTER when excited and SLOWER when
+    analysing — so it's never a flat, uniform (robotic) speed."""
+    if not PACE_DYNAMIC:
+        return XTTS_SPEED
+    t = text or ""
+    if t.count("!") >= 2 or _HYPE_RE.search(t):
+        s = XTTS_SPEED * PACE_FAST
+    elif _CALM_RE.search(t) or len(t) > 170:
+        s = XTTS_SPEED * PACE_SLOW
+    else:
+        s = XTTS_SPEED
+    return max(0.78, min(1.08, s))
+
+
 def codeswitch_segments(text):
     """Split mixed text into consecutive runs of Arabic-script vs Latin so each
     run is synthesised in its OWN language (XTTS takes one language per call).
@@ -234,13 +287,14 @@ class XTTSBackend:
         except Exception:
             pass
 
-    def _synth_one(self, text, lang):
+    def _synth_one(self, text, lang, speed=None):
         # already-short chunk -> own splitting OFF (we control chunk size)
         out = self._model.inference(
             text, lang, self._gpt_latent, self._spk_emb,
             temperature=XTTS_TEMP, length_penalty=XTTS_LEN_PEN,
             repetition_penalty=XTTS_REP_PEN, top_k=XTTS_TOP_K, top_p=XTTS_TOP_P,
-            speed=XTTS_SPEED, enable_text_splitting=False)
+            speed=speed if speed is not None else XTTS_SPEED,
+            enable_text_splitting=False)
         wav = out["wav"] if isinstance(out, dict) else out
         if hasattr(wav, "detach"):
             wav = wav.detach().float().cpu().numpy()
