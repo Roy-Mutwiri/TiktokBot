@@ -94,6 +94,14 @@ class CommentResponder:
         r = (reply or "").strip().strip('"').strip("'").strip("`").strip()
         return r or None
 
+    @staticmethod
+    def _lang(text):
+        """Detect the viewer's language so we can answer in it (Arabic vs English)."""
+        for ch in (text or ""):
+            if "؀" <= ch <= "ۿ" or "ݐ" <= ch <= "ݿ":
+                return "Arabic"
+        return "English"
+
     # -- live-event reactions (gifts / follows / likes / shares) -------------
     def react_gift(self, user, gift, count, coins):
         amt = f"{count} {gift}s" if count > 1 else f"a {gift}"
@@ -128,6 +136,7 @@ class CommentResponder:
         try:
             if self._rule_skip(text):
                 return None
+            lang = self._lang(text)               # answer in the viewer's language
             kind = self._triage(text)
             if kind == "SKIP":
                 return None
