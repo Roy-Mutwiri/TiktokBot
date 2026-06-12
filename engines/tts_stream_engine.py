@@ -163,6 +163,8 @@ class TTSStreamEngine:
         self._chatter_tried = False
         self._mltts = None               # Chatterbox Multilingual (Arabic+English+)
         self._mltts_tried = False
+        self._xtts = None                # Coqui XTTS-v2 (Arabic + English clone)
+        self._xtts_tried = False
         self.backend = "edge-tts"
         # Active backend (switchable at runtime via set_backend) — starts from
         # the AVATAR_TTS env default.
@@ -273,6 +275,22 @@ class TTSStreamEngine:
                 print(f"[TTS] Multilingual TTS unavailable ({exc}).")
             self._mltts_tried = True
             return self._mltts
+
+    def _get_xtts(self):
+        """Lazily load Coqui XTTS-v2 (Arabic + English voice clone). Lock +
+        tried-after-load so a SPEAK fired mid-warm waits for the model."""
+        with self._load_lock:
+            if self._xtts_tried:
+                return self._xtts
+            try:
+                from xtts_tts import XTTSBackend
+                eng = XTTSBackend()
+                self._xtts = eng if eng.ok else None
+            except Exception as exc:
+                self._xtts = None
+                print(f"[TTS] XTTS unavailable ({exc}).")
+            self._xtts_tried = True
+            return self._xtts
 
     # -------------------------------------------------------------------------
     def _run_loop(self):
