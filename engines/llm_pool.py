@@ -50,7 +50,8 @@ class BrainPool:
         self._threads = []
         self._i = 0
         self._i_lock = threading.Lock()
-        self._recent = collections.deque(maxlen=40)      # dedupe signatures
+        self._recent = collections.deque(maxlen=40)      # full-line dedupe signatures
+        self._recent_openers = collections.deque(maxlen=14)  # first-3-word openers
         self._recent_lock = threading.Lock()
         self.ready = queue.Queue(
             maxsize=int(buffer or os.environ.get("AVATAR_LLM_BUFFER", "6")))
@@ -88,17 +89,26 @@ class BrainPool:
             self._i += 1
             return b, self._i
 
+    @staticmethod
+    def _sigs(line):
+        w = (line or "").lower().split()
+        return " ".join(w[:7]), " ".join(w[:3])   # full signature, opener signature
+
     def _is_dup(self, line):
-        sig = " ".join((line or "").lower().split()[:7])
-        if not sig:
+        """Reject near-repeats: same opening 7 words OR same opening 3 words as a
+        recent line — so the host never hands back a line that STARTS the same."""
+        full, opener = self._sigs(line)
+        if not full:
             return True
         with self._recent_lock:
-            return sig in self._recent
+            return full in self._recent or (bool(opener) and opener in self._recent_openers)
 
     def _remember(self, line):
-        sig = " ".join((line or "").lower().split()[:7])
+        full, opener = self._sigs(line)
         with self._recent_lock:
-            self._recent.append(sig)
+            self._recent.append(full)
+            if opener:
+                self._recent_openers.append(opener)
 
     def _route(self):
         """Pick a lane from live load (the CPU/GPU governor idea, for the LLM).
