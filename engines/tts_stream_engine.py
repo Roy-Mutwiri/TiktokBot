@@ -443,6 +443,15 @@ class TTSStreamEngine:
                 + "|" + os.environ.get("AVATAR_TTS_LANG", "auto")
         elif self.tts_backend in ("auto", "kokoro"):
             ident += "|" + KOKORO_VOICE
+        elif self.tts_backend == "xtts":
+            # key on the CLONE REFERENCE so swapping the voice invalidates old cache
+            try:
+                import xtts_tts
+                ident += "|" + ",".join(os.path.basename(p) for p in (xtts_tts.XTTS_REFS or []))
+            except Exception:
+                ident += "|xtts"
+        elif self.tts_backend == "elevenlabs":
+            ident += "|eleven|" + os.environ.get("AVATAR_ELEVEN_VOICE", "default")
         else:
             ident += "|" + self.voice
         h = hashlib.sha1(f"{ident}|{text}".encode("utf-8")).hexdigest()[:16]
