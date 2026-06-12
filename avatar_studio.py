@@ -2001,14 +2001,15 @@ class AvatarStudio:
                 if _t.monotonic() < self._user_active_until:
                     _t.sleep(0.3)
                     continue
+                # PRIORITY 1 (checked BEFORE the buffer pace): react to gifts /
+                # follows / shares / like-milestones IMMEDIATELY — thank supporters
+                # without waiting for the line buffer to drain.
+                if self._react_one_event():
+                    continue
                 # pace to the look-ahead — NOT blocked by the voice; the brain just
                 # doesn't run more than LEAD lines ahead of playback.
                 if tts.pending > LEAD:
                     _t.sleep(0.2)
-                    continue
-                # PRIORITY 1: react to gifts / follows / shares / like-milestones and
-                # BREAKING market moves (the monitor queues those) — always first.
-                if self._react_one_event():
                     continue
                 # HUMAN BALANCE: a real streamer fluidly juggles THREE things —
                 # READING/answering the chat, ANALYSING the market, and ENGAGING the
