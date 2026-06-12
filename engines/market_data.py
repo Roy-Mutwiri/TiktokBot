@@ -185,11 +185,16 @@ class MarketData:
         self._thread.start()
 
     def _loop(self):
-        # poll a few times per candle so the forming bar looks live
-        period = max(2.0, _INTERVAL_SEC.get(self.interval, 300) / 12.0)
+        # refresh the REAL-TIME ticker every ~2.5s (the exact live price) and the
+        # candle buffer alongside it, so the host always talks the current number.
+        period = 2.5
+        i = 0
         while not self._stop.is_set():
             try:
-                self.update()
+                self.live_ticker(max_age=0.0)        # force a fresh real-time price
+                if i % 2 == 0:                       # candles a bit less often
+                    self.update()
+                i += 1
             except Exception:
                 pass
             self._stop.wait(period)
