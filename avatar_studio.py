@@ -2010,39 +2010,42 @@ class AvatarStudio:
                 # BREAKING market moves (the monitor queues those) — always first.
                 if self._react_one_event():
                     continue
-                # ADAPTIVE BALANCE: when gold is MOVING, focus on the market (analysis
-                # beats, only glance at the chat occasionally); when it's QUIET, work
-                # the COMMENT SECTION + engagement so there's never dead air.
+                # HUMAN BALANCE: a real streamer fluidly juggles THREE things —
+                # READING/answering the chat, ANALYSING the market, and ENGAGING the
+                # room. Weight them by whatever's most pressing right now, with
+                # natural randomness so it's never a rigid, predictable pattern (not a
+                # hard mode-switch). Comments waiting pull attention; a moving market
+                # pulls attention; otherwise keep the energy up.
+                import random as _r
+                now = _t.monotonic()
                 active = self._market_active()
-                # NOTE: counter name must NOT be self._mix — that's the colour-mixing
-                # method (self._mix(a,b,t)); reusing it threw "function + int" each loop.
-                self._chat_mix = getattr(self, "_chat_mix", 0) + 1
-                # PRIORITY 2: answer the live chat. Moving market -> sparingly (~1 in 4,
-                # so analysis leads); quiet market -> eagerly (viewers come first).
-                if active:
-                    if self._chat_mix % 4 == 0 and self._answer_one_comment():
+                has_comments = not self._comment_q.empty()
+                waited = now - getattr(self, "_last_comment_t", 0.0)
+                w_comment = 4.0 if has_comments else 0.0
+                if has_comments and waited > 15:      # a viewer is waiting — don't ignore them
+                    w_comment *= 1.8
+                w_market = 3.5 if active else 1.4
+                w_engage = 1.2
+                opts = [(k, v) for k, v in
+                        (("comment", w_comment), ("market", w_market), ("engage", w_engage))
+                        if v > 0]
+                mode = _r.choices([k for k, _ in opts],
+                                  weights=[v for _, v in opts], k=1)[0]
+                if mode == "comment":
+                    if self._answer_one_comment():    # read + respond to a viewer
+                        self._last_comment_t = now
                         continue
-                else:
-                    if self._answer_one_comment():
-                        continue
-                # PRIORITY 3: keep talking. FIRST try a PRE-GENERATED line from the
-                # parallel pool — instant, no waiting on the model = no dead air. The
-                # pool's beats are already chart-forward (market beats weighted).
+                    mode = "market" if active else "engage"   # nothing to answer -> talk
+                # keep talking with no dead air: instant pre-generated line first
                 line = None
                 if self.brain_pool is not None:
                     line = self.brain_pool.get(timeout=0.1)
                 if line is None:
-                    # pool cold/empty -> generate ONE inline (chart-forward + buffer-
-                    # aware), same as before so we always have a fallback.
-                    if active:
-                        pool = self._MARKET_BEATS
-                    else:
-                        pool = (self._ENGAGE_BEATS if (self._chat_mix % 3 == 0)
-                                else self._MARKET_BEATS)
+                    pool = self._MARKET_BEATS if mode == "market" else self._ENGAGE_BEATS
                     pend = getattr(self.tts, "pending", 0) or 0
                     if pend <= 0:
                         beat = self._SHORT_BEATS[i % len(self._SHORT_BEATS)]
-                    elif pend >= 2 and self._chat_mix % 7 == 0:
+                    elif pend >= 2 and i % 7 == 0:
                         beat = self._DEEP_BEATS[i % len(self._DEEP_BEATS)]
                     else:
                         beat = pool[i % len(pool)]
