@@ -11,11 +11,11 @@
  | > Torch CUDNN deterministic: False
  | > Torch CUDNN benchmark: False
  | > Torch TF32 MatMul: False
- > Start Tensorboard: tensorboard --logdir=C:\Users\user\Documents\TiktokBot\voice_train\run\run\training\GPT_XTTS_FT-June-12-2026_02+45PM-151998e
+ > Start Tensorboard: tensorboard --logdir=C:\Users\user\Documents\TiktokBot\voice_train\run\run\training\GPT_XTTS_FT-June-12-2026_02+45PM-4760cc4
 
  > Model has 518442047 parameters
 
 [4m[1m > EPOCH: 0/0[0m
- --> C:\Users\user\Documents\TiktokBot\voice_train\run\run\training\GPT_XTTS_FT-June-12-2026_02+45PM-151998e
+ --> C:\Users\user\Documents\TiktokBot\voice_train\run\run\training\GPT_XTTS_FT-June-12-2026_02+45PM-4760cc4
 
-[1m > TRAINING (2026-06-12 14:45:28) [0m
+[1m > TRAINING (2026-06-12 14:45:40) [0m
