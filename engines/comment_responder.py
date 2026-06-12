@@ -88,6 +88,12 @@ class CommentResponder:
                 return k
         return "SKIP"
 
+    @staticmethod
+    def _say(reply):
+        """Strip wrapping quotes / stray markup so the TTS speaks clean text."""
+        r = (reply or "").strip().strip('"').strip("'").strip("`").strip()
+        return r or None
+
     # -- 3) compose the spoken answer ----------------------------------------
     def respond(self, user, text):
         """Return a spoken-ready reply for this comment, or None to ignore."""
