@@ -82,8 +82,10 @@ XTTS_TOP_K = int(os.environ.get("AVATAR_XTTS_TOP_K", "50"))
 XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.85"))
 XTTS_LEN_PEN = float(os.environ.get("AVATAR_XTTS_LEN_PENALTY", "1.0"))
 XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "1.0"))
-# Hard cap on characters per XTTS call — long single generations are what distort.
-XTTS_MAX_CHARS = int(os.environ.get("AVATAR_XTTS_MAX_CHARS", "170"))
+# Per-call cap: keep WHOLE SENTENCES together (natural human speech), only split a
+# sentence if it's longer than this (rare). A full sentence is stable in one call;
+# it's MULTI-sentence runs that distort, so we split at sentence boundaries only.
+XTTS_MAX_CHARS = int(os.environ.get("AVATAR_XTTS_MAX_CHARS", "250"))
 MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
 
 _SENT_SPLIT = re.compile(r"(?<=[\.\!\?\:؟…])\s+")
@@ -220,7 +222,9 @@ class XTTSBackend:
         generation runs long enough to drift/distort. Pieces are concatenated."""
         if self._model is None or not (text or "").strip():
             return None, self.sr
-        gap = np.zeros(int(0.05 * self.sr), dtype=np.float32)
+        # a SHORT natural pause between sentences (like a real person breathing/
+        # pacing) — small enough that the speech still flows, not choppy.
+        gap = np.zeros(int(0.12 * self.sr), dtype=np.float32)
         parts = []
         for seg_text, lang in codeswitch_segments(text):
             for chunk in chunk_text(seg_text):

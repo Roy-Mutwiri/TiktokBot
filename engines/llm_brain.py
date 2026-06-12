@@ -47,7 +47,7 @@ OLLAMA_HOST = os.environ.get("AVATAR_OLLAMA_HOST", "http://localhost:11434")
 # qwen2.5:7b for the stronger brain ONLY if you have spare VRAM.
 MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "llama3.2:3b")
 HISTORY_TURNS = int(os.environ.get("AVATAR_BRAIN_HISTORY", "6"))   # user+assistant pairs kept
-MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "120"))  # short = fast + speakable
+MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "240"))  # room for natural, flowing replies
 TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.8"))
 # Keep the model RESIDENT in VRAM so it doesn't unload between questions and pay
 # the ~45s cold-load again mid-stream. -1 = never unload; or "30m".
