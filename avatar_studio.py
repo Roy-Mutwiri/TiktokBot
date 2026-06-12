@@ -889,6 +889,13 @@ class AvatarStudio:
         ttk.Scale(r, from_=0, to=100, variable=self.skin_var, length=150,
                   style="Studio.Horizontal.TScale",
                   command=lambda e: self._on_skin()).pack(side="right")
+        # fairer-skin tone: shifts ALL visible skin toward a lighter Caucasian tone
+        # (skin-gated, won't touch shirt/beard/eyes/bg). 0 = source tone, 100 = fairest.
+        r = self._row(c, "Skin tone (fairer)")
+        self.skintone_var = tk.IntVar(value=50)
+        ttk.Scale(r, from_=0, to=100, variable=self.skintone_var, length=150,
+                  style="Studio.Horizontal.TScale",
+                  command=lambda e: self._on_skintone()).pack(side="right")
 
         self.body_var = tk.BooleanVar(value=True)
         self._check(c, "Live body motion  ·  torso follows you",
