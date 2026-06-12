@@ -167,6 +167,11 @@ class AvatarStudio:
         self._comment_q = queue.Queue(maxsize=80)
         self._event_q = queue.Queue(maxsize=40)   # gifts / follows / shares / like-milestones
         self._next_like_ms = 500                  # next likes milestone to celebrate
+        # SESSION STATS + gift goal (on-screen bar + CTAs)
+        self._sess_likes = 0
+        self._sess_coins = 0
+        self._sess_follows = 0
+        self._coin_goal = int(os.environ.get("AVATAR_COIN_GOAL", "200"))
         self.market = None                   # LIVE gold price feed (Binance PAXG)
         self._thinking = False               # True while the brain is generating
         self.cap = None
@@ -1532,6 +1537,7 @@ class AvatarStudio:
         "React in the moment to gold's latest move like it just printed on your chart.",
         "Drop one quick trading tip about risk, stops, or entries on gold.",
         "Call out a key support or resistance level on gold and what you'd do around it.",
+        "Read the REAL technicals out loud — trend, RSI, the exact support/resistance — like a sharp analyst.",
         "Hype the chat — tell viewers to smash like and post their gold targets.",
         "Give your honest short take on the gold trend today, bullish or bearish, and why.",
         "Tease what could happen next on gold into the session and keep them watching.",
@@ -1566,8 +1572,15 @@ class AvatarStudio:
         move = ""
         if pct is not None:
             move = f", {'up' if pct >= 0 else 'down'} {abs(pct):.2f}% in the last few minutes"
-        return (f" LIVE RIGHT NOW: gold (XAUUSD) is ${price:,.0f}{move}. "
-                f"Talk about THIS exact current price, not an old level.")
+        ta = ""
+        try:
+            import market_ta
+            if md is not None:
+                ta = market_ta.ta_summary(md.snapshot())
+        except Exception:
+            ta = ""
+        return (f" LIVE RIGHT NOW: gold (XAUUSD) is ${price:,.0f}{move}.{ta} "
+                f"Talk about THIS exact current price and the REAL levels, not old ones.")
 
     def _check_market_alert(self):
         """Detect a SIGNIFICANT live gold event (round-level cross or sharp move) and
@@ -1697,12 +1710,18 @@ class AvatarStudio:
     def _on_gift(self, user, gift, count, coins):
         try:
             self._log_msg(f"🎁 {user} sent {count}x {gift} ({coins} coins)")
+            self._sess_coins += max(0, int(coins))
             self._event_q.put_nowait(("gift", user, gift, count, coins))
+            if self._sess_coins >= self._coin_goal:           # gift goal reached!
+                reached = self._coin_goal
+                self._coin_goal += int(os.environ.get("AVATAR_COIN_GOAL", "200"))
+                self._event_q.put_nowait(("goal", reached))
         except Exception:
             pass
 
     def _on_follow(self, user):
         try:
+            self._sess_follows += 1
             self._event_q.put_nowait(("follow", user))
         except Exception:
             pass
@@ -1716,6 +1735,7 @@ class AvatarStudio:
     def _on_like(self, user, total):
         # celebrate only when we CROSS a milestone (likes fire constantly otherwise)
         try:
+            self._sess_likes = max(self._sess_likes, int(total or 0))
             if total and total >= self._next_like_ms:
                 self._event_q.put_nowait(("likes", total))
                 step = 500 if total < 1000 else (1000 if total < 10000 else 5000)
@@ -1734,6 +1754,9 @@ class AvatarStudio:
             reply = None
             if kind == "market":                   # autonomous — no responder needed
                 reply = self._generate(ev[1])      # brain phrases the live alert
+            elif kind == "goal":                   # gift-goal reached celebration
+                reply = (self.responder.react_goal(ev[1]) if self.responder is not None
+                         else f"We just smashed the {ev[1]}-coin goal — thank you all!")
             elif self.responder is not None:
                 if kind == "gift":
                     reply = self.responder.react_gift(ev[1], ev[2], ev[3], ev[4])

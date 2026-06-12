@@ -123,6 +123,15 @@ class CommentResponder:
     def react_share(self, user):
         return f"Thanks for sharing the stream, {user}, that means a lot!"
 
+    def react_goal(self, coins):
+        r = self.brain.quick(
+            f"Your live gold-trading stream just HIT its {coins}-coin gift goal. Give an "
+            "EXCITED one-line thank-you to everyone and tease the next gold signal/analysis "
+            "they unlocked. Max 18 words. No emojis.",
+            system="You are a hyped, grateful live-stream host.", max_tokens=46) if self.brain else None
+        return self._say(r) or (f"We just smashed the {coins}-coin goal — thank you legends, "
+                                "next gold signal coming right up!")
+
     def react_likes(self, total):
         r = self.brain.quick(
             f"Your live gold-trading stream just passed {total} likes. Give a short, hyped "
