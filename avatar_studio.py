@@ -734,6 +734,11 @@ class AvatarStudio:
         self.trader_var = tk.BooleanVar(value=False)
         self._check(c, "Trader scene  ·  chart + avatar PiP (AI trading host)",
                     self.trader_var).pack(fill="x", pady=3)
+        # BROADCAST framing: avatar at natural size on a soft self-blur = SHARP mouth
+        # (the 96px lip-sync isn't stretched across a full-screen face) + cleaner look.
+        self.broadcast_var = tk.BooleanVar(value=True)
+        self._check(c, "Broadcast framing  ·  sharper mouth (no full-screen stretch)",
+                    self.broadcast_var).pack(fill="x", pady=3)
         self.obs_var = tk.BooleanVar(value=False)
         self._check(c, "Also send to OBS virtual camera",
                     self.obs_var).pack(fill="x", pady=3)
