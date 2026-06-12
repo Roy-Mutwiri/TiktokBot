@@ -1963,11 +1963,13 @@ class AvatarStudio:
                 # beats, only glance at the chat occasionally); when it's QUIET, work
                 # the COMMENT SECTION + engagement so there's never dead air.
                 active = self._market_active()
-                self._mix = getattr(self, "_mix", 0) + 1
+                # NOTE: counter name must NOT be self._mix — that's the colour-mixing
+                # method (self._mix(a,b,t)); reusing it threw "function + int" each loop.
+                self._chat_mix = getattr(self, "_chat_mix", 0) + 1
                 if active:
                     pool = self._MARKET_BEATS
                     # still answer the chat, but sparingly (~1 in 4) so market leads
-                    if self._mix % 4 == 0 and self._answer_one_comment():
+                    if self._chat_mix % 4 == 0 and self._answer_one_comment():
                         continue
                 else:
                     pool = self._ENGAGE_BEATS
