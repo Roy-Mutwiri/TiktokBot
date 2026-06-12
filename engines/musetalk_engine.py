@@ -284,13 +284,21 @@ class MuseTalkEngine:
                     up = self._get_upscaler()
                     if up is not None:
                         mouth = up.enhance_crop(mouth, DEBLUR_MOUTH)
-                # LIGHT temporal smoothing — kills frame-to-frame shimmer/jitter without
-                # smearing the lip movement (the bbox is now position-stabilised too).
-                if MOUTH_TEMPORAL > 0:
+                # BAND-PASS the mouth: AMPLIFY the lip movement (so it opens clearly,
+                # not "barely opens") while SMOOTHING the high-freq jitter (flicker).
+                if MOUTH_MOVE_GAIN != 1.0 or MOUTH_TEMPORAL > 0:
+                    mf = mouth.astype(np.float32)
+                    nb = getattr(self, "_neutral", None)
+                    if nb is None or nb.shape != mf.shape:
+                        self._neutral = mf.copy()
+                    else:
+                        self._neutral = 0.93 * nb + 0.07 * mf   # slow resting baseline
+                    if MOUTH_MOVE_GAIN != 1.0:                   # push the open/close
+                        mf = self._neutral + MOUTH_MOVE_GAIN * (mf - self._neutral)
                     pm = getattr(self, "_prev_mouth", None)
-                    if pm is not None and pm.shape == mouth.shape:
-                        mouth = cv2.addWeighted(mouth, 1.0 - MOUTH_TEMPORAL, pm,
-                                                MOUTH_TEMPORAL, 0)
+                    if MOUTH_TEMPORAL > 0 and pm is not None and pm.shape == mf.shape:
+                        mf = (1.0 - MOUTH_TEMPORAL) * mf + MOUTH_TEMPORAL * pm
+                    mouth = np.clip(mf, 0, 255).astype(np.uint8)
                     self._prev_mouth = mouth.copy()
                 return mouth
             return base_crop
