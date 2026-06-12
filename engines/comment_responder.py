@@ -245,6 +245,11 @@ class CommentResponder:
         try:
             if self._rule_skip(text):
                 return None
+            # ALWAYS appreciate a follow/share/gift announced in chat, first thing.
+            appr = self._appreciation_from_comment(user, text)
+            if appr:
+                _commit("greeting")
+                return appr
             lang = self._lang(text)               # answer in the viewer's language
             kind = self._triage(text)
             if kind == "SKIP":
