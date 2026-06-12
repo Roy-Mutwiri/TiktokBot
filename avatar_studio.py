@@ -2439,6 +2439,7 @@ class AvatarStudio:
                 self.comments_var.set(False); return
             if not handle.startswith("@"):
                 handle = "@" + handle
+            self._save_handle(handle)             # remember it for the dropdown
             from comment_responder import CommentResponder
             from tiktok_comments import TikTokComments
             # The reader can run without the brain (it just READS comments); answers
