@@ -1387,6 +1387,7 @@ class AvatarStudio:
                 final = self._stats_overlay(final)         # likes/coins/goal bar (if live)
 
             last_final = final            # remember for the "generating" hold
+            self._last_frame_t = time.monotonic()   # heartbeat for the watchdog
             with self._frame_lock:
                 self._latest = final
             if self.obs_cam is not None:
