@@ -801,18 +801,18 @@ class TTSStreamEngine:
             except Exception:
                 pass
 
-    def _write_temp_wav(self, pcm):
-        """Write float PCM to a temp 16 kHz mono wav for winsound. Returns path."""
+    def _write_temp_wav(self, pcm, rate=SAMPLE_RATE):
+        """Write float PCM to a temp mono wav for winsound (at `rate`). Returns path."""
         try:
             tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
             tmp.close()
             data16 = np.clip(pcm * 32767.0, -32768, 32767).astype(np.int16)
             if sf is not None:
-                sf.write(tmp.name, data16, SAMPLE_RATE, subtype="PCM_16")
+                sf.write(tmp.name, data16, int(rate), subtype="PCM_16")
             else:
                 import wave
                 with wave.open(tmp.name, "wb") as wf:
-                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(SAMPLE_RATE)
+                    wf.setnchannels(1); wf.setsampwidth(2); wf.setframerate(int(rate))
                     wf.writeframes(data16.tobytes())
             return tmp.name
         except Exception:
