@@ -81,7 +81,13 @@ XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "2.0"))  # high =
 XTTS_TOP_K = int(os.environ.get("AVATAR_XTTS_TOP_K", "50"))
 XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.80"))
 XTTS_LEN_PEN = float(os.environ.get("AVATAR_XTTS_LEN_PENALTY", "1.0"))
-XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "1.0"))
+# A calm, natural man speaks measured — XTTS at 1.0 rushes and reads "AI". 0.88 lands
+# a relaxed human pace; dynamic pacing (below) nudges it faster when excited / slower
+# when analysing. Env-tunable.
+XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "0.88"))
+PACE_DYNAMIC = os.environ.get("AVATAR_XTTS_DYNAMIC_PACE", "1") == "1"
+PACE_FAST = float(os.environ.get("AVATAR_XTTS_PACE_FAST", "1.09"))   # excited multiplier
+PACE_SLOW = float(os.environ.get("AVATAR_XTTS_PACE_SLOW", "0.93"))   # calm/analytical multiplier
 # Per-call cap: keep WHOLE SENTENCES together (natural human speech), only split a
 # sentence if it's longer than this (rare). A full sentence is stable in one call;
 # it's MULTI-sentence runs that distort, so we split at sentence boundaries only.
