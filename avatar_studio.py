@@ -1656,6 +1656,7 @@ class AvatarStudio:
                         news = cal.next_alert()
                         if news:
                             self._event_q.put_nowait(("market", news))
+                    self._poll_tick()                    # buy/sell poll lifecycle
             except Exception:
                 pass
             _t.sleep(8)
@@ -1741,11 +1742,36 @@ class AvatarStudio:
                 _t.sleep(2.0)
 
     def _on_comment(self, user, text):
-        """Called from the TikTok reader thread for every live comment — queue it."""
+        """Called from the TikTok reader thread for every live comment — queue it
+        (or count it as a poll vote if a buy/sell poll is running)."""
         try:
+            poll = self._poll
+            if poll is not None:
+                t = (text or "").strip().lower()
+                if t in ("1", "buy", "long", "buy gold", "bull"):
+                    poll["buy"] += 1; return
+                if t in ("2", "sell", "short", "sell gold", "bear"):
+                    poll["sell"] += 1; return
             self._comment_q.put_nowait((user, text))
         except Exception:
             pass        # queue full = drop (we're behind on a comment flood)
+
+    def _poll_tick(self):
+        """Start a buy/sell poll periodically while live; close it + announce the result."""
+        try:
+            now = time.monotonic()
+            if self._poll is None:
+                if (self.tiktok is not None and now - self._poll_last > 300
+                        and getattr(self, "autotalk_var", None) and self.autotalk_var.get()):
+                    self._poll = {"buy": 0, "sell": 0, "end": now + 45}
+                    self._poll_last = now
+                    self._event_q.put_nowait(("poll_start",))
+            elif now >= self._poll["end"]:
+                b, s = self._poll["buy"], self._poll["sell"]
+                self._poll = None
+                self._event_q.put_nowait(("poll_result", b, s))
+        except Exception:
+            pass
 
     # --- LIVE EVENT handlers (gifts / follows / likes / shares) -------------
     def _on_gift(self, user, gift, count, coins):
@@ -1798,6 +1824,18 @@ class AvatarStudio:
             elif kind == "goal":                   # gift-goal reached celebration
                 reply = (self.responder.react_goal(ev[1]) if self.responder is not None
                          else f"We just smashed the {ev[1]}-coin goal — thank you all!")
+            elif kind == "poll_start":
+                reply = ("Quick poll, fam — are you BUYING or SELLING gold right now? "
+                         "Comment 1 for buy, 2 for sell, let's see the chat!")
+            elif kind == "poll_result":
+                b, s = ev[1], ev[2]; tot = b + s
+                if tot == 0:
+                    reply = "Nobody voted that round — next time hit 1 for buy, 2 for sell!"
+                else:
+                    bp = round(b / tot * 100)
+                    lead = "BUYING" if b >= s else "SELLING"
+                    reply = (f"Poll's in — the chat is {lead} gold! Buy {bp}%, sell {100 - bp}%, "
+                             f"{tot} votes. Let's trade it.")
             elif self.responder is not None:
                 if kind == "gift":
                     reply = self.responder.react_gift(ev[1], ev[2], ev[3], ev[4])
