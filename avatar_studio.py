@@ -755,6 +755,11 @@ class AvatarStudio:
                             state="disabled", yscrollcommand=fsb.set)
         self.feed.pack(side="left", fill="both", expand=True)
         fsb.config(command=self.feed.yview)
+        # let the wheel scroll the FEED (and not the right rail) while hovering it
+        def _feed_wheel(e):
+            self.feed.yview_scroll(int(-(e.delta or 0) / 120), "units")
+            return "break"
+        self.feed.bind("<MouseWheel>", _feed_wheel)
         self.feed.tag_config("q", foreground=CYAN)            # viewer comment
         self.feed.tag_config("a", foreground="#27ff9e")       # avatar reply
         self.feed.tag_config("ev", foreground=AMBER)          # gift / follow
