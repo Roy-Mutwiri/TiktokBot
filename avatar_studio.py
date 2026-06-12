@@ -2500,6 +2500,59 @@ class AvatarStudio:
             self._save_handle(h)
             self._log_msg(f"[comments] handle set to {h}")
 
+    def _drain_queue(self, q):
+        """Empty a Queue without raising."""
+        try:
+            while not q.empty():
+                q.get_nowait()
+        except Exception:
+            pass
+
+    def _on_comments_refresh(self):
+        """RECONNECT the live comment reader for the current @handle and force a fresh
+        live check — use it if the feed stalls or you switched handles. Drops stale
+        queued comments so it doesn't replay an old backlog."""
+        try:
+            handle = (self.handle_var.get() or "").strip()
+            self._drain_queue(self._comment_q)        # forget stale comments
+            if self.tiktok is not None:               # drop the old connection
+                try:
+                    self.tiktok.stop()
+                except Exception:
+                    pass
+                self.tiktok = None
+            self._set_live_light("none")              # monitor re-evaluates on next poll
+            if handle and self.comments_var.get():
+                self._on_comments()                   # reconnect right now
+                self._log_msg(f"[comments] refreshed — reconnecting {handle}…")
+            else:
+                self._log_msg("[comments] refreshed — re-checking live status…")
+        except Exception as exc:
+            self._log_msg(f"[comments] refresh failed: {exc}")
+
+    def _on_comments_reset(self):
+        """Clear the comment FEED and every queued comment / reaction (fresh slate).
+        Leaves the connection + your @handle alone — just wipes what's on screen."""
+        try:
+            self._drain_queue(self._comment_q)
+            self._drain_queue(self._event_q)
+            try:
+                self._prio_events.clear()
+                self._pending_follows.clear()
+            except Exception:
+                pass
+            self._clear_answering()
+            try:                                       # we're on the Tk thread here
+                self.feed.configure(state="normal")
+                self.feed.delete("1.0", "end")
+                self.feed.insert("end", "feed cleared — waiting for comments…\n", "sys")
+                self.feed.configure(state="disabled")
+            except Exception:
+                pass
+            self._log_msg("[comments] feed reset.")
+        except Exception as exc:
+            self._log_msg(f"[comments] reset failed: {exc}")
+
     def _on_comments(self):
         """Toggle the live TikTok comment responder on/off."""
         try:
