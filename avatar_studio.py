@@ -177,7 +177,13 @@ class AvatarStudio:
         self._handles = self._load_handles()  # remembered @handles for the dropdown
         self.responder = None                # comment filter + answerer (web research)
         self._comment_q = queue.Queue(maxsize=80)
-        self._event_q = queue.Queue(maxsize=40)   # gifts / follows / shares / like-milestones
+        self._event_q = queue.Queue(maxsize=40)   # market alerts / polls (may use the LLM)
+        import collections as _c
+        # TOP-PRIORITY instant reactions (follows/gifts/shares/likes/goals) — already
+        # built as ready-to-speak text (offline templates, no LLM), spoken the moment
+        # the loop ticks, jumping ahead of filler commentary. Bounded so a gift flood
+        # doesn't pile up (keep the most recent).
+        self._prio_events = _c.deque(maxlen=10)
         self._next_like_ms = 500                  # next likes milestone to celebrate
         # SESSION STATS + gift goal (on-screen bar + CTAs)
         self._sess_likes = 0
