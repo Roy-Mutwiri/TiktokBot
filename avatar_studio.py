@@ -2118,13 +2118,17 @@ class AvatarStudio:
             user, text = None, None
             while not self._comment_q.empty():
                 user, text = self._comment_q.get_nowait()
-            reply = self.responder.respond(user, text)     # filter + research + answer
+            # filter + research + answer; on_answering fires the instant it commits
+            # to a genuine answer, so the NOW-ANSWERING bar shows real ones only.
+            reply = self.responder.respond(user, text, on_answering=self._set_answering)
             if reply:
                 self._log_msg(f"↳ {user}: {text}")
                 self._log_msg(f"avatar→{user}> {reply}")
                 self._feed_msg(f"\U0001f916 → {user}:  {reply}", "a")
-                self.tts.speak(reply)
+                self.tts.speak(reply)         # bar keeps showing the comment until spoken
+                self._clear_answering()
                 return True
+            self._clear_answering()
             return False
         except Exception as exc:
             self._log_msg(f"[comments] {exc}")
