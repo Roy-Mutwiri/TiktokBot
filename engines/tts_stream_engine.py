@@ -478,6 +478,71 @@ class TTSStreamEngine:
                 self.synthesizing = False
                 self._set_speaking(False)
 
+    # Max characters per TTS chunk. XTTS-v2 distorts / rushes on long inputs, so we
+    # keep each synth call to roughly a sentence or two. Tunable.
+    _TTS_CHUNK_CHARS = int(os.environ.get("AVATAR_TTS_CHUNK_CHARS", "190"))
+
+    def _split_for_tts(self, text):
+        """Split a line into sentence-ish chunks no longer than _TTS_CHUNK_CHARS, so
+        the voice model never gets a long paragraph (the cause of long-speech
+        distortion). Short sentences are grouped; an over-long sentence is hard-split
+        on commas/spaces."""
+        text = (text or "").strip()
+        if not text:
+            return []
+        target = max(60, self._TTS_CHUNK_CHARS)
+        parts = re.split(r"(?<=[.!?…])\s+", text)        # keep sentence boundaries
+        chunks, cur = [], ""
+        for p in parts:
+            p = p.strip()
+            if not p:
+                continue
+            while len(p) > target:                       # giant sentence -> hard split
+                cut = p.rfind(",", 0, target)
+                if cut < int(target * 0.5):
+                    cut = p.rfind(" ", 0, target)
+                if cut <= 0:
+                    cut = target
+                chunks.append(p[:cut].strip())
+                p = p[cut:].strip()
+            if not cur:
+                cur = p
+            elif len(cur) + 1 + len(p) <= target:
+                cur += " " + p
+            else:
+                chunks.append(cur)
+                cur = p
+        if cur:
+            chunks.append(cur)
+        return [c for c in chunks if c]
+
+    def _synthesize_blocking(self, text):
+        """SYNCHRONOUS synth for the pipeline executor (so the next chunk can render
+        while the current one plays). Cache-aware; covers the sync backends. Returns
+        None for the async-only path (edge) so the caller falls back to _synthesize."""
+        try:
+            cached = self._cache_load(text)
+            if cached is not None:
+                return cached
+            pcm = None
+            b = self.tts_backend
+            if b == "xtts" and self._get_xtts() is not None:
+                pcm = self._synth_xtts(text)
+            elif b == "multilingual" and self._get_mltts() is not None:
+                pcm = self._synth_mltts(text)
+            elif b == "maya1" and self._get_maya1() is not None:
+                pcm = self._synth_maya1(text)
+            elif b == "chatterbox" and self._get_chatterbox() is not None:
+                pcm = self._synth_chatterbox(text)
+            if (pcm is None or len(pcm) == 0) and self._get_kokoro() is not None:
+                pcm = self._synth_kokoro(text)            # cheap sync fallback
+            if pcm is not None and len(pcm) > 0:
+                self._cache_save(text, pcm)
+                return pcm
+        except Exception as exc:
+            print(f"[TTS] chunk synth failed ({exc}) — async fallback.")
+        return None
+
     async def _synthesize(self, text):
         """Cache-aware synth. Heavy backends (Maya1 ~8s/line, Chatterbox ~3s)
         saturate the GPU and would freeze the live video while generating, so
