@@ -2014,37 +2014,21 @@ class AvatarStudio:
                 # without waiting for the line buffer to drain.
                 if self._react_one_event():
                     continue
-                # pace to the look-ahead — NOT blocked by the voice; the brain just
-                # doesn't run more than LEAD lines ahead of playback.
+                # PRIORITY 2: ANSWER THE CHAT in real time — checked BEFORE the buffer
+                # pace, so a busy voice queue never delays a viewer's reply. If a
+                # comment is waiting, answer it now (the reply jumps the filler queue);
+                # only fall through to commentary when the chat is quiet.
+                if not self._comment_q.empty():
+                    if self._answer_one_comment():
+                        self._last_comment_t = _t.monotonic()
+                        continue
+                # pace COMMENTARY (filler only) to the look-ahead so we don't over-queue.
                 if tts.pending > LEAD:
                     _t.sleep(0.2)
                     continue
-                # HUMAN BALANCE: a real streamer fluidly juggles THREE things —
-                # READING/answering the chat, ANALYSING the market, and ENGAGING the
-                # room. Weight them by whatever's most pressing right now, with
-                # natural randomness so it's never a rigid, predictable pattern (not a
-                # hard mode-switch). Comments waiting pull attention; a moving market
-                # pulls attention; otherwise keep the energy up.
                 import random as _r
-                now = _t.monotonic()
                 active = self._market_active()
-                has_comments = not self._comment_q.empty()
-                waited = now - getattr(self, "_last_comment_t", 0.0)
-                w_comment = 4.0 if has_comments else 0.0
-                if has_comments and waited > 15:      # a viewer is waiting — don't ignore them
-                    w_comment *= 1.8
-                w_market = 3.5 if active else 1.4
-                w_engage = 1.2
-                opts = [(k, v) for k, v in
-                        (("comment", w_comment), ("market", w_market), ("engage", w_engage))
-                        if v > 0]
-                mode = _r.choices([k for k, _ in opts],
-                                  weights=[v for _, v in opts], k=1)[0]
-                if mode == "comment":
-                    if self._answer_one_comment():    # read + respond to a viewer
-                        self._last_comment_t = now
-                        continue
-                    mode = "market" if active else "engage"   # nothing to answer -> talk
+                mode = "market" if (active or _r.random() < 0.4) else "engage"
                 # keep talking with no dead air: instant pre-generated line first
                 line = None
                 if self.brain_pool is not None:
