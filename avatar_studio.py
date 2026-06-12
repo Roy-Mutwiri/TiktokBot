@@ -735,12 +735,12 @@ class AvatarStudio:
         tk.Label(ch, text="@handle", bg=SURFACE, fg=MUTED,
                  font=("Segoe UI", 9)).pack(side="right", padx=(0, 4))
         # scrolling read-only feed
-        fb = tk.Frame(cm, bg=SURFACE); fb.pack(fill="x", padx=10, pady=(0, 9))
+        fb = tk.Frame(cm, bg=SURFACE); fb.pack(fill="both", expand=True, padx=10, pady=(0, 9))
         fsb = tk.Scrollbar(fb); fsb.pack(side="right", fill="y")
         self.feed = tk.Text(fb, height=6, bg=BG, fg=FG, relief="flat", bd=0,
                             font=("Consolas", 9), wrap="word", padx=8, pady=6,
                             state="disabled", yscrollcommand=fsb.set)
-        self.feed.pack(side="left", fill="x", expand=True)
+        self.feed.pack(side="left", fill="both", expand=True)
         fsb.config(command=self.feed.yview)
         self.feed.tag_config("q", foreground=CYAN)            # viewer comment
         self.feed.tag_config("a", foreground="#27ff9e")       # avatar reply
