@@ -1615,14 +1615,25 @@ class AvatarStudio:
         return alert
 
     def _market_monitor(self):
-        """Background: watch the live price, queue an alert when something big happens."""
+        """Background: watch the live price + the economic calendar, queue an alert
+        when something big happens (sharp move / level break / imminent news)."""
         import time as _t
+        cal = None
+        try:
+            from econ_calendar import EconCalendar
+            cal = EconCalendar()
+        except Exception as exc:
+            self._log_msg(f"[econ] calendar unavailable: {exc}")
         while getattr(self, "running", False):
             try:
                 if (getattr(self, "autotalk_var", None) and self.autotalk_var.get()):
                     alert = self._check_market_alert()
                     if alert:
                         self._event_q.put_nowait(("market", alert))
+                    if cal is not None:                  # imminent high-impact news
+                        news = cal.next_alert()
+                        if news:
+                            self._event_q.put_nowait(("market", news))
             except Exception:
                 pass
             _t.sleep(8)
