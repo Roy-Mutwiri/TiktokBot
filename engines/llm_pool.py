@@ -147,17 +147,17 @@ class BrainPool:
                     except Exception:
                         ctx = ""
                 num_gpu, model, lane, busy = self._route()
-                # if the GPU is needed by the renderer and we have no CPU lane,
-                # ease off so we don't steal frames — the buffer covers the gap.
-                if busy and lane == "gpu":
-                    time.sleep(float(os.environ.get("AVATAR_LLM_BUSY_BACKOFF", "1.2")))
-                    if self.ready.qsize() >= 2:        # already have a cushion -> skip
-                        continue
+                # GPU needed by the renderer: only ease off if we ALREADY have a
+                # cushion of ready lines. If the buffer is low, generate anyway (the
+                # 3B is light) so the host never runs dry waiting on a free GPU.
+                if busy and lane == "gpu" and self.ready.qsize() >= 3:
+                    time.sleep(float(os.environ.get("AVATAR_LLM_BUSY_BACKOFF", "0.5")))
+                    continue
                 seed = (n * 1315423911 + k * 2654435761
                         + int(time.monotonic() * 1000)) % 2147483647
                 line = self.brain.generate_line(
                     beat + ctx, persona=self.persona, num_gpu=num_gpu,
-                    model=model, seed=seed)
+                    model=model, seed=seed, max_tokens=self.line_tokens)
                 if not line:
                     time.sleep(0.3)
                     continue
