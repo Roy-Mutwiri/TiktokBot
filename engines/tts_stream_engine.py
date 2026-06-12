@@ -119,7 +119,7 @@ MALE_VOICES = [
 # Default = chatterbox: the male English-in-Arabic-accent cloned voice (it clones
 # voice_refs/arabic_accent.wav). Set AVATAR_TTS=kokoro/edge/maya1/multilingual to
 # change. The studio's voice dropdown also defaults to this.
-TTS_BACKEND = os.environ.get("AVATAR_TTS", "chatterbox").lower()
+TTS_BACKEND = os.environ.get("AVATAR_TTS", "xtts").lower()
 KOKORO_VOICE = os.environ.get("AVATAR_KOKORO_VOICE", "am_michael")  # natural US male
 KOKORO_LANG = os.environ.get("AVATAR_KOKORO_LANG", "a")             # 'a' = American Eng
 KOKORO_SPEED = float(os.environ.get("AVATAR_KOKORO_SPEED", "1.0"))
