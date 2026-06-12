@@ -52,6 +52,22 @@ class CommentResponder:
         self.get_context = get_context
         self._recent = {}          # text -> last time seen (dedupe)
         self._last_greet = 0.0
+        self._last_deep = 0.0      # last time we dug deep into a topic (spacing)
+
+    # topics worth digging into (keeps the live lively when one comes up)
+    _INTERESTING = re.compile(
+        r"\b(why|how|what do you think|think about|your take|explain|opinion|strateg|"
+        r"long.?term|fed|inflation|recession|interest rate|rate cut|dollar|dxy|war|"
+        r"crash|bubble|safe.?haven|invest|portfolio|crypto|bitcoin|btc|silver|stocks?|"
+        r"economy|gold standard|central bank|hedge|halal|riba)\b", re.I)
+    DEEP_COOLDOWN = float(os.environ.get("AVATAR_DEEP_COOLDOWN", "70"))
+
+    def _is_interesting(self, text):
+        """A substantive/topical comment worth a deeper, lively take."""
+        t = (text or "").strip()
+        if len(t) < 18:
+            return False
+        return bool(self._INTERESTING.search(t)) or len(t) > 60
 
     # -- 1) cheap rule filter -------------------------------------------------
     def _rule_skip(self, text):
