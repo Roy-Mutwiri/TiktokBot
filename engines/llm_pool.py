@@ -56,6 +56,9 @@ class BrainPool:
         self.ready = queue.Queue(
             maxsize=int(buffer or os.environ.get("AVATAR_LLM_BUFFER", "6")))
         self._nworkers = int(workers or os.environ.get("AVATAR_LLM_WORKERS", "2"))
+        # cap each prefetched line short (faster to generate = buffer refills quicker
+        # = less chance of going quiet; also fewer/shorter TTS chunks).
+        self.line_tokens = int(os.environ.get("AVATAR_LLM_LINE_TOKENS", "100"))
         # optional SECOND model that lives on the CPU (a different model name so
         # Ollama keeps it loaded alongside the GPU one with no reload thrash). When
         # set, GPU-busy generations route here instead of fighting for the GPU.
