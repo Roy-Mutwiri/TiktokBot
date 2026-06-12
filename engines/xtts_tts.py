@@ -83,6 +83,21 @@ def detect_lang(text):
     return "ar" if _ARABIC.search(text or "") else "en"
 
 
+def codeswitch_segments(text):
+    """Split mixed text into consecutive runs of Arabic-script vs Latin so each
+    run is synthesised in its OWN language (XTTS takes one language per call).
+    Without this, one Arabic word in an English line makes the WHOLE line get
+    spoken as Arabic (garbled). Returns [(segment_text, lang), ...]."""
+    segs = []
+    for tok in (text or "").split():
+        lang = "ar" if _ARABIC.search(tok) else "en"
+        if segs and segs[-1][1] == lang:
+            segs[-1][0].append(tok)
+        else:
+            segs.append(([tok], lang))
+    return [(" ".join(ws), lang) for ws, lang in segs]
+
+
 class XTTSBackend:
     """Resident XTTS-v2. synthesize(text) -> (float32 mono audio, sample_rate)."""
 
