@@ -26,6 +26,11 @@ try:
 except Exception:
     web_research = None
 
+try:
+    import reactions as _reactions          # instant offline appreciation templates
+except Exception:
+    _reactions = None
+
 _EMOJI = re.compile(
     "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF←-⇿⌀-⏿]+")
 _URL = re.compile(r"https?://|www\.|\.com|\.net|t\.me/", re.I)
