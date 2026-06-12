@@ -2056,6 +2056,14 @@ class AvatarStudio:
         """Pop the next live comment; if it's worth answering, speak the answer.
         Returns True if the avatar spoke (so the loop skips its scripted line)."""
         try:
+            # lazily build the responder once the brain finished loading (the reader
+            # may have started before START was pressed).
+            if self.responder is None and self.brain is not None:
+                try:
+                    from comment_responder import CommentResponder
+                    self.responder = CommentResponder(self.brain, get_context=self._live_market_ctx)
+                except Exception:
+                    pass
             if self.responder is None or self._comment_q.empty() or self.tts is None:
                 return False
             # drain a few at once but only answer ONE per cycle (keeps it fresh, not
@@ -2150,18 +2158,21 @@ class AvatarStudio:
             if not handle:
                 self._log_msg("[comments] enter your TikTok @handle first.")
                 self.comments_var.set(False); return
-            if self.brain is None:
-                self._log_msg("[comments] press START first (brain not loaded yet).")
-                self.comments_var.set(False); return
+            if not handle.startswith("@"):
+                handle = "@" + handle
             from comment_responder import CommentResponder
             from tiktok_comments import TikTokComments
-            if self.responder is None:
+            # The reader can run without the brain (it just READS comments); answers
+            # begin as soon as the brain is loaded (responder is created lazily).
+            if self.responder is None and self.brain is not None:
                 self.responder = CommentResponder(self.brain, get_context=self._live_market_ctx)
-            self.tiktok = TikTokComments(handle, self._on_comment,
-                                         on_gift=self._on_gift, on_follow=self._on_follow,
-                                         on_like=self._on_like, on_share=self._on_share)
-            self.tiktok.start()
-            self._log_msg(f"[comments] connecting to {handle} — comments + gifts/follows…")
+            if self.tiktok is None:
+                self.tiktok = TikTokComments(handle, self._on_comment,
+                                             on_gift=self._on_gift, on_follow=self._on_follow,
+                                             on_like=self._on_like, on_share=self._on_share)
+                self.tiktok.start()
+            note = "" if self.brain is not None else " (answers begin after START)"
+            self._log_msg(f"[comments] reading {handle} — comments + gifts/follows{note}")
         except Exception as exc:
             self._log_msg(f"[comments] failed: {exc}")
             self.comments_var.set(False)
