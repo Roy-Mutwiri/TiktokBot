@@ -237,21 +237,56 @@ class BackgroundMusic:
         self._pos = 0
         self._stream = None
         self._alive = True
-        # Shuffle a FRESH random order every launch (was a fixed seed, so every
-        # session opened on the SAME track — that's why it felt like "same music").
-        import random as _random
-        self._order = list(range(1, NUM_SONGS + 1))
-        _random.shuffle(self._order)
-        self._oi = 0
+        # Persistent play history -> pick a track NOT heard in the last ~2 days, so
+        # every session opens on a different song and repeats are spaced far apart.
+        self._hist = self._load_history()
         try:
-            self._cur, self.meta = _make_track(self._order[0])
+            seed = self._pick_seed()
+            self._cur, self.meta = _make_track(seed)
+            self._cur_seed = seed
             self._next = None
+            self._next_seed = None
             self._song_until = None
             self._gen = threading.Thread(target=self._gen_loop, daemon=True)
             self._gen.start()
         except Exception as exc:
             print(f"[MUSIC] track synth failed ({exc}); music disabled.")
             self._cur = None
+
+    # ---- persistent no-repeat history --------------------------------------
+    def _load_history(self):
+        try:
+            with open(HISTORY_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _save_history(self):
+        try:
+            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+                json.dump(self._hist, f)
+        except Exception:
+            pass
+
+    def _pick_seed(self):
+        """Pick a track seed not played in REPEAT_GAP; if all were (heavy use),
+        pick the LEAST-recently played. Marks it played + persists. Thread-safe-ish
+        (called only from __init__ and the generator thread, never the audio cb)."""
+        now = time.time()
+        eligible = [s for s in range(1, NUM_SONGS + 1)
+                    if now - self._hist.get(str(s), 0.0) > REPEAT_GAP]
+        if eligible:
+            seed = random.choice(eligible)
+        else:
+            seed = min(range(1, NUM_SONGS + 1),
+                       key=lambda s: self._hist.get(str(s), 0.0))
+        self._hist[str(seed)] = now
+        # prune ancient entries so the file stays small
+        if len(self._hist) > NUM_SONGS:
+            cutoff = now - REPEAT_GAP * 2
+            self._hist = {k: v for k, v in self._hist.items() if v > cutoff}
+        self._save_history()
+        return seed
 
     def startup_check(self):
         if self._cur is None:
