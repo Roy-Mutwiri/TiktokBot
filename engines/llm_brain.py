@@ -147,10 +147,11 @@ class LLMBrain:
     def _anti_repeat_note(self):
         """A transient instruction listing the openers the host JUST used, so the
         model is actively pushed to phrase the next line a fresh way. None if we
-        have nothing yet."""
-        if not self._recent_openers:
-            return None
-        recent = "; ".join(f'"{o}…"' for o in list(self._recent_openers)[-6:])
+        have nothing yet. Thread-safe (parallel pool workers share the memory)."""
+        with self._opener_lock:
+            if not self._recent_openers:
+                return None
+            recent = "; ".join(f'"{o}…"' for o in list(self._recent_openers)[-7:])
         return ("VARIETY CHECK — your last lines already began: " + recent +
                 ". Do NOT open the same way or reuse those same words, catchphrases, "
                 "or Arabic fillers again now. Start with different first words and a "
@@ -159,13 +160,61 @@ class LLMBrain:
 
     def _record_opener(self, reply):
         """Remember the first few words of a reply so _anti_repeat_note can steer
-        the next one away from it."""
+        the next one away from it. Thread-safe."""
         try:
             opener = " ".join((reply or "").split()[:6]).strip().lower()
             if opener:
-                self._recent_openers.append(opener)
+                with self._opener_lock:
+                    self._recent_openers.append(opener)
         except Exception:
             pass
+
+    def generate_line(self, prompt, persona=None, num_gpu=None, model=None,
+                      seed=None, max_tokens=None, timeout=120):
+        """STATELESS single-line generation for the parallel auto-host pool. No shared
+        conversation history (so many workers can run at once safely), with optional
+        compute placement (num_gpu: 0=CPU, 999=all-GPU), a second model, a seed for
+        variety, plus the same anti-repeat note + penalties. Returns text or None."""
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return None
+        if not self.available:
+            self._check()
+            if not self.available:
+                return None
+        p = persona or self.persona
+        note = self._anti_repeat_note()
+        sys_prompt = p + ("\n\n" + note if note else "")
+        try:
+            if self.provider == "claude":
+                txt = self._clean(self._respond_claude(prompt, sys_prompt) or "") or None
+                if txt:
+                    self._record_opener(txt)
+                return txt
+            opts = {"temperature": TEMPERATURE, "num_predict": max_tokens or MAX_TOKENS,
+                    "top_p": TOP_P, "repeat_penalty": REPEAT_PENALTY,
+                    "repeat_last_n": REPEAT_LAST_N, "frequency_penalty": FREQ_PENALTY,
+                    "presence_penalty": PRESENCE_PENALTY}
+            if num_gpu is not None:
+                opts["num_gpu"] = int(num_gpu)
+            if seed is not None:
+                opts["seed"] = int(seed)
+            nctx = int(os.environ.get("AVATAR_LLM_NUM_CTX", "0"))
+            if nctx > 0:
+                opts["num_ctx"] = nctx
+            payload = {"model": model or self.model, "stream": False,
+                       "keep_alive": KEEP_ALIVE,
+                       "messages": [{"role": "system", "content": sys_prompt},
+                                    {"role": "user", "content": prompt}],
+                       "options": opts}
+            data = self._post("/api/chat", payload, timeout=timeout)
+            txt = self._clean((data.get("message", {}) or {}).get("content", "")) or None
+            if txt:
+                self._record_opener(txt)
+            return txt
+        except Exception as exc:
+            print(f"[BRAIN] generate_line error: {type(exc).__name__}: {str(exc)[:60]}")
+            return None
 
     def _ensure_server(self):
         """If the Ollama server isn't reachable, try to launch it once (the CLI
