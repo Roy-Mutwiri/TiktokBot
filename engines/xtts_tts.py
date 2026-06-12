@@ -157,18 +157,37 @@ class XTTSBackend:
         except Exception:
             pass
 
-    def synthesize(self, text):
-        """Synthesise `text` (auto ar/en) in the cloned voice -> (float32, sr)."""
-        if self._model is None or not (text or "").strip():
-            return None, self.sr
-        lang = detect_lang(text)
+    def _synth_one(self, text, lang):
         out = self._model.inference(
             text, lang, self._gpt_latent, self._spk_emb,
             temperature=XTTS_TEMP, enable_text_splitting=True)
         wav = out["wav"] if isinstance(out, dict) else out
         if hasattr(wav, "detach"):
             wav = wav.detach().float().cpu().numpy()
-        return np.asarray(wav, dtype=np.float32).flatten(), self.sr
+        return np.asarray(wav, dtype=np.float32).flatten()
+
+    def synthesize(self, text):
+        """Synthesise `text` in the cloned voice -> (float32, sr). Code-switches:
+        Arabic-script runs are spoken Arabic, Latin runs English, so the host can
+        drop Arabic words/greetings mid-sentence and each is pronounced right."""
+        if self._model is None or not (text or "").strip():
+            return None, self.sr
+        segs = codeswitch_segments(text)
+        if len(segs) <= 1:
+            lang = segs[0][1] if segs else "en"
+            return self._synth_one(text, lang), self.sr
+        gap = np.zeros(int(0.05 * self.sr), dtype=np.float32)
+        parts = []
+        for seg_text, lang in segs:
+            try:
+                w = self._synth_one(seg_text, lang)
+                if w is not None and len(w):
+                    parts.append(w); parts.append(gap)
+            except Exception:
+                continue
+        if not parts:
+            return None, self.sr
+        return np.concatenate(parts).astype(np.float32), self.sr
 
 
 if __name__ == "__main__":
