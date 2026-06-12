@@ -66,9 +66,15 @@ class TikTokComments:
                 time.sleep(1)
             backoff = min(30, backoff + 5)
 
+    @staticmethod
+    def _name(event):
+        u = getattr(event, "user", None)
+        return str(getattr(u, "nickname", None) or getattr(u, "unique_id", "viewer"))
+
     def _connect_once(self):
         from TikTokLive import TikTokLiveClient
-        from TikTokLive.events import ConnectEvent, DisconnectEvent, CommentEvent
+        from TikTokLive.events import (ConnectEvent, DisconnectEvent, CommentEvent,
+                                       GiftEvent, FollowEvent, LikeEvent, ShareEvent)
         client = TikTokLiveClient(unique_id=self.username)
         self._client = client
         self.status = "connecting"
@@ -77,7 +83,7 @@ class TikTokComments:
         async def _on_connect(event):
             self.connected = True
             self.status = "live"
-            print(f"[TIKTOK] connected to {self.username} — reading comments.")
+            print(f"[TIKTOK] connected to {self.username} — reading comments + gifts.")
 
         @client.on(DisconnectEvent)
         async def _on_disconnect(event):
@@ -87,12 +93,53 @@ class TikTokComments:
         @client.on(CommentEvent)
         async def _on_comment(event):
             try:
-                user = getattr(event.user, "nickname", None) or getattr(event.user, "unique_id", "viewer")
                 text = event.comment or ""
                 if text.strip():
-                    self.on_comment(str(user), str(text))
+                    self.on_comment(self._name(event), str(text))
             except Exception:
                 pass
+
+        if self.on_gift is not None:
+            @client.on(GiftEvent)
+            async def _on_gift(event):
+                try:
+                    gift = getattr(event, "gift", None)
+                    streakable = bool(getattr(gift, "streakable", False))
+                    # for streak gifts, only fire once the streak ENDS (final count)
+                    if streakable and getattr(event, "streaking", False):
+                        return
+                    name = getattr(gift, "name", "a gift")
+                    count = int(getattr(event, "repeat_count", 1) or 1)
+                    coins = int(getattr(gift, "diamond_count", 0) or 0) * count
+                    self.on_gift(self._name(event), str(name), count, coins)
+                except Exception:
+                    pass
+
+        if self.on_follow is not None:
+            @client.on(FollowEvent)
+            async def _on_follow(event):
+                try:
+                    self.on_follow(self._name(event))
+                except Exception:
+                    pass
+
+        if self.on_like is not None:
+            @client.on(LikeEvent)
+            async def _on_like(event):
+                try:
+                    total = int(getattr(event, "total_likes_count", None)
+                                or getattr(event, "total", 0) or 0)
+                    self.on_like(self._name(event), total)
+                except Exception:
+                    pass
+
+        if self.on_share is not None:
+            @client.on(ShareEvent)
+            async def _on_share(event):
+                try:
+                    self.on_share(self._name(event))
+                except Exception:
+                    pass
 
         client.run()      # blocks this thread's loop until disconnected
 
