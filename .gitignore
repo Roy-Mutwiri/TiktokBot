@@ -97,3 +97,15 @@ data_prep/full_videos/
 
 # AI-driven TradingView browser profile
 .tv_profile/
+
+# --- RoyCam camera driver build artifacts (later kernel track) ---
+*.sys
+*.cat
+*.pdb
+*.cer
+driver/**/x64/
+driver/**/ARM64/
+driver/**/Debug/
+driver/**/Release/
+# RoyCam shared-memory ring backing files (also covered by *.bin)
+roycam_ring.bin
