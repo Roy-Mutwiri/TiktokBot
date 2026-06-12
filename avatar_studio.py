@@ -173,6 +173,8 @@ class AvatarStudio:
         self.brain = None                    # Ollama LLM brain (answers in character)
         self.brain_pool = None               # parallel commentary prefetch pool
         self.tiktok = None                   # LIVE TikTok comment reader
+        self._handles_file = os.path.join(PROJECT_DIR, "tiktok_handles.json")
+        self._handles = self._load_handles()  # remembered @handles for the dropdown
         self.responder = None                # comment filter + answerer (web research)
         self._comment_q = queue.Queue(maxsize=80)
         self._event_q = queue.Queue(maxsize=40)   # gifts / follows / shares / like-milestones
@@ -734,9 +736,15 @@ class AvatarStudio:
         self._check(ch, "Answer", self.comments_var,
                     self._on_comments).pack(side="right")
         self.handle_var = tk.StringVar(value=os.environ.get("AVATAR_TIKTOK_USER", ""))
-        tk.Entry(ch, textvariable=self.handle_var, width=14, bg=BG, fg=FG,
-                 insertbackground=CYAN, relief="flat",
-                 font=("Segoe UI", 10)).pack(side="right", padx=(0, 8), ipady=2)
+        # editable DROPDOWN: type a new @handle, or click the arrow to pick one you've
+        # used before (remembered across sessions, each handle listed once).
+        self.handle_combo = ttk.Combobox(ch, textvariable=self.handle_var, width=14,
+                                         values=self._handles, style="Studio.TCombobox",
+                                         font=("Segoe UI", 10))
+        self.handle_combo.pack(side="right", padx=(0, 8), ipady=2)
+        # picking from the dropdown drops it into the blank handle space + re-checks live
+        self.handle_combo.bind("<<ComboboxSelected>>",
+                               lambda e: self._on_handle_pick())
         tk.Label(ch, text="@handle", bg=SURFACE, fg=MUTED,
                  font=("Segoe UI", 9)).pack(side="right", padx=(0, 4))
         # "NOW ANSWERING" — the comment the AI has committed to and is researching
