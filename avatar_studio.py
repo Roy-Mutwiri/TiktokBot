@@ -2148,6 +2148,43 @@ class AvatarStudio:
         except Exception:
             pass
 
+    def _set_answering(self, user, text, mode="answering"):
+        """Show the comment the AI has just committed to answering. Thread-safe."""
+        icon, col = (("\U0001f44b", "#27ff9e") if mode == "greeting"
+                     else ("\U0001f4ad", "#ffd24d"))
+        verb = "welcoming" if mode == "greeting" else "answering"
+        t = (text or "").strip()
+        if len(t) > 90:
+            t = t[:90].rstrip() + "…"
+        msg = f"{icon}  {verb} {user}:  {t}"
+        bg = self._mix(SURFACE, MAG, 0.22)
+
+        def _apply():
+            try:
+                self._answer_bar.configure(bg=bg)
+                self.answering_lbl.configure(text=msg, fg=col, bg=bg)
+            except Exception:
+                pass
+        try:
+            self.root.after(0, _apply)
+        except Exception:
+            pass
+
+    def _clear_answering(self):
+        """Return the NOW-ANSWERING bar to idle. Thread-safe."""
+        bg = self._mix(SURFACE, MAG, 0.22)
+
+        def _apply():
+            try:
+                self.answering_lbl.configure(text="○  idle — waiting for a question",
+                                             fg=MUTED, bg=bg)
+            except Exception:
+                pass
+        try:
+            self.root.after(0, _apply)
+        except Exception:
+            pass
+
     def _set_live_light(self, state):
         """Drive the live-status dot. state: 'live' (green), 'off' (red),
         'none' (grey, no handle). Thread-safe (marshalled onto the Tk thread)."""
