@@ -1680,27 +1680,30 @@ class AvatarStudio:
         threading.Thread(target=_think, daemon=True).start()
 
     # ----- AUTO-TALK: continuous self-generated gold commentary -----------------
-    # Mixed-length beats so the host's pacing is UNPREDICTABLE like a real human —
-    # some are quick one-line snaps, some are long deep-dives / stories.
-    _AUTOTALK_BEATS = [
-        # --- quick / short snaps ---
+    # MARKET-focused beats — used when gold is actually moving (lean into analysis,
+    # levels, reactions). Mixed length so pacing stays unpredictable/human.
+    _MARKET_BEATS = [
         "Snap a quick one-line hyped reaction to gold's latest move. Keep it SHORT, one breath.",
-        "Fire off a punchy short line telling the chat to smash like. One sentence max.",
         "Drop a single quick gut-reaction word or phrase about gold right now, like you just glanced at the chart.",
         "Quick short call: bullish or bearish on gold right now, in one snappy line.",
-        # --- medium ---
         "Give a live update on where gold is trading and what you're watching.",
         "Call out a key support or resistance level on gold and what you'd do around it.",
-        "Push the gift goal — tell viewers to send a rose to unlock the next gold signal.",
-        # --- long / deep / story ---
         "Take your time and go DEEP — read the real technicals out loud (trend, RSI, the exact support and resistance) and walk the chat through your full thinking like a sharp analyst, ramble a bit.",
-        "Tell a little story or tangent about trading gold — a lesson, a past move, something human — then bring it back to today. Let it run long and natural.",
-        "Really hype the room for a while — build the energy up, talk to the chat, react, go on a bit of a passionate rant about why you love this market today.",
-        # --- engagement / no dead air ---
-        "Ask the chat a fun question about gold or their trades, then IMMEDIATELY answer it yourself and keep rolling — never leave a silent pause waiting.",
-        "Welcome the room warmly, call out that you see new people coming in, and tell them to hit follow and smash the like so they catch the next signal.",
-        "Tease that a big gold signal is coming up soon and tell them to send a rose to unlock it — build the anticipation so nobody leaves.",
+        "React in the moment to gold's move and tell the chat exactly what level you're watching next and why.",
+        "Tell a little story or tangent about trading gold — a lesson, a past move — then bring it back to THIS move today.",
     ]
+    # ENGAGEMENT-focused beats — used when the market is quiet (work the chat, CTAs,
+    # questions, hype) so there's never dead air.
+    _ENGAGE_BEATS = [
+        "Fire off a punchy short line telling the chat to smash like. One sentence max.",
+        "Push the gift goal — tell viewers to send a rose to unlock the next gold signal.",
+        "Really hype the room for a while — build the energy up, talk to the chat, react, go on a passionate rant.",
+        "Ask the chat a fun question about gold or their trades, then IMMEDIATELY answer it yourself and keep rolling — never leave a silent pause waiting.",
+        "Welcome the room warmly, call out that you see new people coming in, and tell them to hit follow and smash the like.",
+        "Tease that a big gold signal is coming up soon and tell them to send a rose to unlock it — build anticipation so nobody leaves.",
+        "Banter with the chat — answer the vibe of the room, shout people out, keep it warm and fun.",
+    ]
+    _AUTOTALK_BEATS = _MARKET_BEATS + _ENGAGE_BEATS    # union (compat)
 
     def _live_market_ctx(self):
         """Build a REAL-TIME market context string for the brain — the actual live
