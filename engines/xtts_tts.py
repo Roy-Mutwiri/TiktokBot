@@ -313,7 +313,7 @@ class XTTSBackend:
         speed = pace_for(text)                # calm/fast per line (not a flat robotic pace)
         # a SHORT natural pause between sentences (like a real person breathing/
         # pacing) — small enough that the speech still flows, not choppy.
-        gap = np.zeros(int(0.12 * self.sr), dtype=np.float32)
+        gap = np.zeros(int(XTTS_GAP * self.sr), dtype=np.float32)
         parts = []
         for seg_text, lang in codeswitch_segments(text):
             for chunk in chunk_text(seg_text):
