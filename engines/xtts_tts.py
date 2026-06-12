@@ -108,6 +108,7 @@ def clean_for_tts(text):
     digits and normal punctuation."""
     t = _JUNK.sub(" ", text or "")
     t = _CTRL.sub("", t)
+    t = t.replace("_", " ")                 # handles like "Ahmed_2010" read naturally
     t = _RUN.sub(r"\1\1", t)                # "gooooo" -> "goo", "yaaaa" -> "yaa"
     return re.sub(r"\s+", " ", t).strip()
 

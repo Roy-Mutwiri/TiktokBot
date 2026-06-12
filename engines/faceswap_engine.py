@@ -101,14 +101,17 @@ HAIR_COLORS = {
     "black":  dict(hue=0,  sat=25,  valf=0.32),
     "blonde": dict(hue=23, sat=120, valf=1.18),
     "gray":   dict(hue=0,  sat=8,   valf=0.92),
-    "darkbeard": dict(hue=13, sat=75, valf=0.45),   # consistent dark beard (white-Haddan)
+    # lighter, natural mid-tone beard for a FAIR complexion (was valf 0.45 = near-
+    # black, which read as a black chin shadow on the lightened skin). Tunable.
+    "darkbeard": dict(hue=14, sat=58,
+                      valf=float(os.environ.get("AVATAR_SWAP_BEARD_VALF", "0.68"))),
 }
 HAIR_COLOR = os.environ.get("AVATAR_SWAP_HAIRCOLOR", "brown")
 BEARD_COLOR = os.environ.get("AVATAR_SWAP_BEARDCOLOR", "darkbeard")
 # BEARD DENSITY — deepen + define the beard so the sparse/light gray beard reads as a
 # FULLER, thicker beard (deeper tone + masked unsharp on the beard hairs). CPU-only, so
 # no GPU lag during speech. 0 = off.
-BEARD_DENSITY = float(os.environ.get("AVATAR_BEARD_DENSITY", "0.6"))
+BEARD_DENSITY = float(os.environ.get("AVATAR_BEARD_DENSITY", "0.32"))  # gentler: was 0.6 (over-darkened the chin into a black overlay)
 # EYE COLOUR — recolour the iris (MediaPipe iris landmarks) to a target hue while
 # KEEPING luminance (pupil stays dark, highlights bright, iris shading natural).
 EYE_COLORS = {       # (HSV hue 0-180, saturation)
