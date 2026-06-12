@@ -19,11 +19,12 @@ app = insightface.app.FaceAnalysis(name="buffalo_l", allowed_modules=["detection
 app.prepare(ctx_id=0, det_size=(640, 640))
 
 PROMPT = ("RAW photo, photorealistic headshot of a WHITE caucasian man, fair light "
-          "skin, gray hair, FULL beard on the cheeks and jawline (thick side "
-          "beards), but neatly TRIMMED short around the mouth with a clean tidy "
-          "upper lip so the lips and mouth are clearly VISIBLE, same face shape, "
-          "neutral expression mouth slightly open, looking at camera, soft studio "
-          "light, plain background, ultra detailed realistic skin, 85mm")
+          "skin, gray hair, a FULL THICK DENSE well-groomed salt-and-pepper gray "
+          "beard covering the cheeks, jaw AND chin with rich detailed individual "
+          "beard hairs (a proper full beard, not patchy), the mustache neatly "
+          "trimmed just above the lip so the lips and mouth stay clearly VISIBLE, "
+          "same face shape, looking at camera, soft studio light, plain background, "
+          "ultra detailed realistic beard hair texture and skin pores, 85mm")
 NEG_EXTRA = ", mustache covering lips, hidden mouth, bushy moustache over the lips"
 NEG = ("mustache covering lips, hidden mouth, dark skin, tan, cartoon, anime, cgi, plastic, blurry, deformed, multiple "
        "people, hat, watermark, text")
