@@ -171,6 +171,7 @@ class AvatarStudio:
         except Exception as _mexc:
             print(f"[monitor] resource monitor unavailable ({_mexc})")
         self.brain = None                    # Ollama LLM brain (answers in character)
+        self.brain_pool = None               # parallel commentary prefetch pool
         self.tiktok = None                   # LIVE TikTok comment reader
         self.responder = None                # comment filter + answerer (web research)
         self._comment_q = queue.Queue(maxsize=80)
