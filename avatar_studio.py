@@ -2200,6 +2200,25 @@ class AvatarStudio:
                     self.tts.speak(txt, priority=2)
                     self._last_spoke_t = time.monotonic()
                     return True
+            # 1b) BATCHED follows — thank a burst of follows in one quick line
+            if self._pending_follows:
+                names = []
+                while self._pending_follows and len(names) < 4:
+                    try:
+                        names.append(self._pending_follows.popleft())
+                    except IndexError:
+                        break
+                rx = self._reactions()
+                txt = rx.follow_many(names) if rx is not None else None
+                if txt:
+                    try:
+                        self.tts.clear_pending(below=2)
+                    except Exception:
+                        pass
+                    self._log_msg("avatar> " + txt)
+                    self.tts.speak(txt, priority=2)
+                    self._last_spoke_t = time.monotonic()
+                    return True
             # 2) market alerts / polls (secondary — may phrase via the brain)
             if self._event_q.empty():
                 return False
