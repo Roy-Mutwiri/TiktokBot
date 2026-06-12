@@ -1996,8 +1996,10 @@ class AvatarStudio:
                 if active:
                     pool = self._MARKET_BEATS
                 else:
-                    pool = (self._MARKET_BEATS if (self._chat_mix % 2 == 0)
-                            else self._ENGAGE_BEATS)
+                    # quiet: ~2 of every 3 beats are chart talk (user wants the charts
+                    # to fill the gaps), the other 1/3 are like/follow/gift CTAs.
+                    pool = (self._ENGAGE_BEATS if (self._chat_mix % 3 == 0)
+                            else self._MARKET_BEATS)
                 # BUFFER-AWARE beat choice = the anti-silence mechanism. _generate() is
                 # synchronous and a long DEEP line can take many seconds, so:
                 #   * buffer empty   -> a SHORT line refills it fast (no dead air)
