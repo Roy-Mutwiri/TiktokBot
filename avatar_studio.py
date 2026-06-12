@@ -1307,6 +1307,24 @@ class AvatarStudio:
                 pass
             self._worker = threading.Thread(target=self._loop, daemon=True)
             self._worker.start()
+            # PARALLEL LLM PREFETCH POOL: several worker threads generate commentary
+            # lines AHEAD of time and route each to whatever compute is free (GPU idle
+            # -> GPU; GPU busy with swap/voice -> a CPU-resident model if configured,
+            # else back off) — the same CPU/GPU governor idea applied to the LLM. The
+            # auto-talk loop then PULLS a ready line instantly, so the host never goes
+            # quiet waiting on the model. De-dupes so the buffer never hands a repeat.
+            self.brain_pool = None
+            try:
+                from llm_pool import BrainPool
+                pool_beats = (list(self._MARKET_BEATS) * 2 + list(self._SHORT_BEATS)
+                              + list(self._ENGAGE_BEATS))     # chart-forward weighting
+                self.brain_pool = BrainPool(self.brain, monitor=self.monitor,
+                                            beats=pool_beats,
+                                            get_context=self._live_market_ctx)
+                self.brain_pool.start()
+                self._log_msg("[studio] LLM prefetch pool ON — " + self.brain_pool.status())
+            except Exception as exc:
+                self._log_msg(f"[studio] LLM pool off ({exc}) — inline generation.")
             # AUTO-TALK: the brain writes + speaks gold commentary on its own, PIPELINED
             # (generates the next line while the current one plays — voice gen never
             # pauses the LLM).
