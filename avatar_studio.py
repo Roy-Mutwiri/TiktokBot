@@ -1680,17 +1680,22 @@ class AvatarStudio:
         threading.Thread(target=_think, daemon=True).start()
 
     # ----- AUTO-TALK: continuous self-generated gold commentary -----------------
+    # Mixed-length beats so the host's pacing is UNPREDICTABLE like a real human —
+    # some are quick one-line snaps, some are long deep-dives / stories.
     _AUTOTALK_BEATS = [
-        "Give a short, hyped live update on where gold is trading and what you're watching right now.",
-        "React in the moment to gold's latest move like it just printed on your chart.",
-        "Drop one quick trading tip about risk, stops, or entries on gold.",
+        # --- quick / short snaps ---
+        "Snap a quick one-line hyped reaction to gold's latest move. Keep it SHORT, one breath.",
+        "Fire off a punchy short line telling the chat to smash like. One sentence max.",
+        "Drop a single quick gut-reaction word or phrase about gold right now, like you just glanced at the chart.",
+        "Quick short call: bullish or bearish on gold right now, in one snappy line.",
+        # --- medium ---
+        "Give a live update on where gold is trading and what you're watching.",
         "Call out a key support or resistance level on gold and what you'd do around it.",
-        "Read the REAL technicals out loud — trend, RSI, the exact support/resistance — like a sharp analyst.",
-        "Hype the chat — tell viewers to smash like and post their gold targets.",
-        "Push the gift goal — tell viewers to send a rose or any gift to unlock the next gold signal.",
-        "Tell viewers to drop a follow and smash like if they're catching these gold moves with you.",
-        "Give your honest short take on the gold trend today, bullish or bearish, and why.",
-        "Tease what could happen next on gold into the session and keep them watching.",
+        "Push the gift goal — tell viewers to send a rose to unlock the next gold signal.",
+        # --- long / deep / story ---
+        "Take your time and go DEEP — read the real technicals out loud (trend, RSI, the exact support and resistance) and walk the chat through your full thinking like a sharp analyst, ramble a bit.",
+        "Tell a little story or tangent about trading gold — a lesson, a past move, something human — then bring it back to today. Let it run long and natural.",
+        "Really hype the room for a while — build the energy up, talk to the chat, react, go on a bit of a passionate rant about why you love this market today.",
     ]
 
     def _live_market_ctx(self):

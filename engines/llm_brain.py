@@ -47,8 +47,8 @@ OLLAMA_HOST = os.environ.get("AVATAR_OLLAMA_HOST", "http://localhost:11434")
 # qwen2.5:7b for the stronger brain ONLY if you have spare VRAM.
 MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "llama3.2:3b")
 HISTORY_TURNS = int(os.environ.get("AVATAR_BRAIN_HISTORY", "6"))   # user+assistant pairs kept
-MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "180"))  # natural 4-6 sentences (not clipped, not rambling)
-TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.8"))
+MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "220"))  # headroom for long rambles; persona drives short ones too
+TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.92"))  # higher = more unpredictable, human variety
 # Keep the model RESIDENT in VRAM so it doesn't unload between questions and pay
 # the ~45s cold-load again mid-stream. -1 = never unload; or "30m".
 KEEP_ALIVE = os.environ.get("AVATAR_BRAIN_KEEPALIVE", "30m")
