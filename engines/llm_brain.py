@@ -119,6 +119,7 @@ class LLMBrain:
         self.persona = persona or DEFAULT_PERSONA
         self.host = OLLAMA_HOST.rstrip("/")
         self.history = []            # [{"role":"user"/"assistant","content":...}]
+        self._recent_openers = collections.deque(maxlen=10)  # anti-repetition memory
         self.available = False
         self.last_error = None
         self._check()
