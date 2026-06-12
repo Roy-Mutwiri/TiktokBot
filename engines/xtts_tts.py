@@ -167,7 +167,9 @@ class XTTSBackend:
     def _synth_one(self, text, lang):
         out = self._model.inference(
             text, lang, self._gpt_latent, self._spk_emb,
-            temperature=XTTS_TEMP, enable_text_splitting=True)
+            temperature=XTTS_TEMP, length_penalty=XTTS_LEN_PEN,
+            repetition_penalty=XTTS_REP_PEN, top_k=XTTS_TOP_K, top_p=XTTS_TOP_P,
+            speed=XTTS_SPEED, enable_text_splitting=True)
         wav = out["wav"] if isinstance(out, dict) else out
         if hasattr(wav, "detach"):
             wav = wav.detach().float().cpu().numpy()
