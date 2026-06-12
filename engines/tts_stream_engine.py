@@ -361,7 +361,7 @@ class TTSStreamEngine:
         edge / auto). Returns (ok, message). The heavy model loads lazily on the
         next synth; call warm_backend() first to pay that cost up front."""
         name = (name or "").strip().lower()
-        valid = ("maya1", "chatterbox", "multilingual", "kokoro", "edge", "auto")
+        valid = ("xtts", "maya1", "chatterbox", "multilingual", "kokoro", "edge", "auto")
         if name not in valid:
             return False, f"unknown backend {name!r}"
         self.tts_backend = name
@@ -509,7 +509,7 @@ class TTSStreamEngine:
 
         # Kokoro (fast natural) — default for auto/kokoro, and the fallback for
         # the heavy backends above so a line still gets spoken.
-        if self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox", "multilingual") and \
+        if self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox", "multilingual", "xtts") and \
                 self._get_kokoro() is not None:
             try:
                 pcm = self._synth_kokoro(text)
