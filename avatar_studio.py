@@ -2360,6 +2360,8 @@ class AvatarStudio:
                 self._log_msg(f"[live] {handle} is "
                               + ("LIVE \U0001f7e2 — comments incoming" if live
                                  else "offline \U0001f534"))
+                if live:
+                    self._save_handle(handle)      # confirmed real handle -> remember it
                 last = live
             # auto-connect the comment reader the moment the stream goes live
             if (live and self.comments_var.get() and self.tiktok is None
