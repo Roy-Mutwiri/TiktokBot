@@ -1827,6 +1827,26 @@ class AvatarStudio:
             self._log_msg(f"[comments] failed: {exc}")
             self.comments_var.set(False)
 
+    def _stats_overlay(self, fr):
+        """Top strip: session LIKES / COINS + a gift-goal progress bar. Only shown
+        while connected to a TikTok live (so it doesn't clutter solo use)."""
+        if self.tiktok is None:
+            return fr
+        try:
+            S = FRAME_SIZE
+            likes, coins, goal = self._sess_likes, self._sess_coins, self._coin_goal
+            prog = min(1.0, coins / max(1, goal))
+            ov = fr.copy()
+            cv2.rectangle(ov, (0, 0), (S, 28), (10, 12, 16), -1)
+            fr = cv2.addWeighted(ov, 0.5, fr, 0.5, 0)
+            cv2.putText(fr, f"LIKES {likes:,}    COINS {coins:,}    GOAL {coins}/{goal}",
+                        (10, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (120, 235, 255), 1, cv2.LINE_AA)
+            cv2.rectangle(fr, (10, 25), (S - 10, 27), (40, 48, 60), -1)
+            cv2.rectangle(fr, (10, 25), (10 + int((S - 20) * prog), 27), (0, 215, 255), -1)
+            return fr
+        except Exception:
+            return fr
+
     def _broadcast_frame(self, fr, scale=0.82):
         """BROADCAST framing: render the avatar at a natural size on a soft blur of
         itself. This shows the (96px) lip-sync mouth NEAR 1:1 instead of stretched
