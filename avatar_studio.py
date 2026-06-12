@@ -1313,6 +1313,11 @@ class AvatarStudio:
             # else back off) — the same CPU/GPU governor idea applied to the LLM. The
             # auto-talk loop then PULLS a ready line instantly, so the host never goes
             # quiet waiting on the model. De-dupes so the buffer never hands a repeat.
+            if self.brain_pool is not None:          # STOP->START: kill the old pool
+                try:
+                    self.brain_pool.stop()
+                except Exception:
+                    pass
             self.brain_pool = None
             try:
                 from llm_pool import BrainPool
