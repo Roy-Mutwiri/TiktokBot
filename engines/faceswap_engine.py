@@ -396,14 +396,19 @@ class FaceSwapEngine:
             gw = np.clip((68.0 - sat) / 48.0, 0, 1)            # low saturation = gray hair/beard
             gw *= np.clip((val - 38.0) / 55.0, 0, 1)           # not the deepest shadow
             gw *= person.astype(np.float32)
-            # HEAD band: hair above + beard well below the face box (catch the jaw).
+            # TEXTURE GUARD: beard/hair is TEXTURED (fine hairs = high-freq detail); a
+            # white cloth / collar / shirt is FLAT. Only recolour textured low-sat areas,
+            # so a white cloth on the neck is NOT painted brown.
+            blur_v = cv2.GaussianBlur(val, (0, 0), 2.0)
+            tex = np.clip(np.abs(val - blur_v) / 5.0, 0, 1)    # 0 flat -> 1 textured
+            gw *= (0.2 + 0.8 * tex)
+            # HEAD band: hair above + beard just below the face box (NOT into the neck,
+            # where a cloth lives) — the real beard now comes from the source image.
             x1, y1, x2, y2 = [int(v) for v in bbox]
             fh = max(1, y2 - y1); fw = max(1, x2 - x1)
             band = np.zeros(out.shape[:2], np.float32)
-            # extend the band DOWN (jaw/neck) + a touch WIDER (full cheeks) so more of
-            # the beard area is caught = a fuller beard.
-            band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.95)),
-                 max(0, x1 - int(fw * 0.55)):min(out.shape[1], x2 + int(fw * 0.55))] = 1.0
+            band[max(0, y1 - int(fh * 1.1)):min(out.shape[0], y2 + int(fh * 0.45)),
+                 max(0, x1 - int(fw * 0.5)):min(out.shape[1], x2 + int(fw * 0.5))] = 1.0
             m = cv2.GaussianBlur(gw * band, (0, 0), 3.0)
             # TEMPORAL smoothing of the recolour mask — stops the recoloured region
             # flickering/shifting as you move, so the beard tint STICKS to the beard.
