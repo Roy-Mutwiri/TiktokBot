@@ -2819,6 +2819,14 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _on_skintone(self):
+        """Live-set the fairer-skin tone strength on the face-swap engine (0..1)."""
+        try:
+            if getattr(self, "swap_engine", None) is not None:
+                self.swap_engine.skin_lighten = self.skintone_var.get() / 100.0
+        except Exception:
+            pass
+
     def _on_multiref(self):
         """Live A/B: extended multi-view turning vs safe single-image (capped)."""
         if not self.engines:
