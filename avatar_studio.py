@@ -1281,6 +1281,10 @@ class AvatarStudio:
                     from faceswap_engine import FaceSwapEngine
                     self._log_msg("[studio] loading face-swap (ReSwapper-256 + insightface)...")
                     self.swap_engine = FaceSwapEngine(self._char_path or _character_path())
+                    try:                       # apply the fairer-skin slider at boot
+                        self.swap_engine.skin_lighten = self.skintone_var.get() / 100.0
+                    except Exception:
+                        pass
                     if self.swap_engine.ready:
                         # load the DEFAULT character (from the Character dropdown),
                         # falling back to whichever folder exists.
