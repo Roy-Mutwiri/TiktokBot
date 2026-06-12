@@ -208,6 +208,8 @@ class CommentResponder:
         repeat = s["gifts"] > 0
         s["coins"] += c
         s["gifts"] += int(count or 1)
+        if _reactions is not None:            # INSTANT offline template (no LLM)
+            return _reactions.gift(user, gift, count, c)
         amt = f"{count} {gift}s" if count and count > 1 else f"a {gift}"
         # scale the appreciation to how big the gift is
         if c >= 5000:
@@ -235,6 +237,8 @@ class CommentResponder:
     def react_follow(self, user):
         s = self._support(user)
         s["follow"] = True
+        if _reactions is not None:            # INSTANT offline template (no LLM)
+            return _reactions.follow(user)
         r = self.brain.quick(
             f"{user} just FOLLOWED your live gold stream. Thank them BY NAME for the follow "
             "with a warm, genuine welcome-to-the-family — like you really appreciate them "
@@ -245,6 +249,8 @@ class CommentResponder:
         return r or self._fallback_thanks(user, "follow")
 
     def react_share(self, user):
+        if _reactions is not None:            # INSTANT offline template (no LLM)
+            return _reactions.share(user)
         r = self.brain.quick(
             f"{user} just SHARED your live gold stream with others. Thank them BY NAME warmly "
             f"for spreading the stream — it genuinely helps. {self._vary()}One short spoken "
@@ -274,6 +280,8 @@ class CommentResponder:
         return random.choice(opts).format(u=user, g=gift)
 
     def react_goal(self, coins):
+        if _reactions is not None:            # INSTANT offline template (no LLM)
+            return _reactions.goal(coins)
         r = self.brain.quick(
             f"Your live gold-trading stream just HIT its {coins}-coin gift goal. Give an "
             "EXCITED one-line thank-you to everyone and tease the next gold signal/analysis "
@@ -283,6 +291,8 @@ class CommentResponder:
                                 "next gold signal coming right up!")
 
     def react_likes(self, total):
+        if _reactions is not None:            # INSTANT offline template (no LLM)
+            return _reactions.likes(total)
         r = self.brain.quick(
             f"Your live gold-trading stream just passed {total} likes. Give a short, hyped "
             "one-line thank-you to everyone for the likes. Max 15 words. No emojis.",
