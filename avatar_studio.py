@@ -1890,15 +1890,26 @@ class AvatarStudio:
                 if tts.pending > LEAD:
                     _t.sleep(0.2)
                     continue
-                # PRIORITY 1: react to gifts / follows / shares / like-milestones —
-                # time-sensitive engagement comes first.
+                # PRIORITY 1: react to gifts / follows / shares / like-milestones and
+                # BREAKING market moves (the monitor queues those) — always first.
                 if self._react_one_event():
                     continue
-                # PRIORITY 2: answer a worthwhile LIVE TikTok comment before the next
-                # scripted gold line — viewers come first (filtered for spam already).
-                if self._answer_one_comment():
-                    continue
-                beat = self._AUTOTALK_BEATS[i % len(self._AUTOTALK_BEATS)]; i += 1
+                # ADAPTIVE BALANCE: when gold is MOVING, focus on the market (analysis
+                # beats, only glance at the chat occasionally); when it's QUIET, work
+                # the COMMENT SECTION + engagement so there's never dead air.
+                active = self._market_active()
+                self._mix = getattr(self, "_mix", 0) + 1
+                if active:
+                    pool = self._MARKET_BEATS
+                    # still answer the chat, but sparingly (~1 in 4) so market leads
+                    if self._mix % 4 == 0 and self._answer_one_comment():
+                        continue
+                else:
+                    pool = self._ENGAGE_BEATS
+                    # quiet market -> viewers come first, answer comments eagerly
+                    if self._answer_one_comment():
+                        continue
+                beat = pool[i % len(pool)]; i += 1
                 ctx = self._live_market_ctx()    # REAL gold price + recent move, fetched NOW
                 line = None
                 try:
