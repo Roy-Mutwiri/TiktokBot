@@ -172,6 +172,8 @@ class AvatarStudio:
         self._sess_coins = 0
         self._sess_follows = 0
         self._coin_goal = int(os.environ.get("AVATAR_COIN_GOAL", "200"))
+        self._poll = None                         # active buy/sell poll {buy,sell,end}
+        self._poll_last = 0.0                     # last poll start (monotonic)
         self.market = None                   # LIVE gold price feed (Binance PAXG)
         self._thinking = False               # True while the brain is generating
         self.cap = None
