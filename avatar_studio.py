@@ -667,6 +667,14 @@ class AvatarStudio:
                                     activeforeground=MAG, highlightthickness=1,
                                     highlightbackground=self._mix(MAG, BG, 0.5))
         self.speech_btn.pack(side="right", padx=(0, 10))
+        # LIVE light: GREEN = the entered @handle is LIVE on TikTok, RED = offline,
+        # grey = no handle. Checked continuously by _live_status_loop (always active).
+        self.live_light = tk.Canvas(ph, width=22, height=22, bg=BG, highlightthickness=0)
+        self._live_glow = self.live_light.create_oval(2, 2, 20, 20, fill="", outline="")
+        self._live_dot = self.live_light.create_oval(6, 6, 16, 16, fill="#3a3f4a", outline="")
+        self.live_light.pack(side="right", padx=(0, 2))
+        self._handle_live = False
+        # tooltip-ish label under it via the log; the dot is the at-a-glance signal.
         # auto-config readout: shows a "benchmarking..." loading bar first, then
         # resolves to the chosen LLM brain + GPU benchmark once it completes.
         self.info_lbl = tk.Label(ph, text="⏳ benchmarking GPU…", bg=SURFACE, fg=AMBER,
