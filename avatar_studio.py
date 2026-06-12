@@ -740,6 +740,17 @@ class AvatarStudio:
         self.feed_status = tk.Label(ch, text="no handle", bg=SURFACE, fg=MUTED,
                                     font=("Consolas", 9))
         self.feed_status.pack(side="left", padx=(5, 0))
+        # REFRESH (reconnect the reader + re-check live) and RESET (clear the feed)
+        tk.Button(ch, text="↻ Refresh", command=self._on_comments_refresh,
+                  bg=SURFACE2, fg=CYAN, font=("Consolas", 8, "bold"), relief="flat",
+                  bd=0, padx=8, cursor="hand2", highlightthickness=1,
+                  activebackground=self._mix(SURFACE2, CYAN, 0.25), activeforeground=CYAN,
+                  highlightbackground=self._mix(CYAN, BG, 0.5)).pack(side="left", padx=(12, 0))
+        tk.Button(ch, text="⟲ Reset", command=self._on_comments_reset,
+                  bg=SURFACE2, fg=AMBER, font=("Consolas", 8, "bold"), relief="flat",
+                  bd=0, padx=8, cursor="hand2", highlightthickness=1,
+                  activebackground=self._mix(SURFACE2, AMBER, 0.25), activeforeground=AMBER,
+                  highlightbackground=self._mix(AMBER, BG, 0.5)).pack(side="left", padx=(6, 0))
         # @handle entry + Answer toggle on the right
         self.comments_var = tk.BooleanVar(value=False)
         self._check(ch, "Answer", self.comments_var,
