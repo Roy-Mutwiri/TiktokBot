@@ -2222,7 +2222,11 @@ class AvatarStudio:
             if not reply:
                 return False
             self._log_msg(f"avatar→{kind}> {reply}")
-            self.tts.speak(reply)
+            try:
+                self.tts.clear_pending(below=1)     # announcements clear filler, keep replies
+            except Exception:
+                pass
+            self.tts.speak(reply, priority=1)
             self._last_spoke_t = time.monotonic()
             return True
         except Exception as exc:
@@ -2255,14 +2259,13 @@ class AvatarStudio:
                 self._log_msg(f"↳ {user}: {text}")
                 self._log_msg(f"avatar→{user}> {reply}")
                 self._feed_msg(f"\U0001f916 → {user}:  {reply}", "a")
-                # drop any QUEUED filler commentary so the viewer's reply plays right
-                # after the current line (keeps answers in real time, not behind a
-                # backlog). The currently-playing line is left to finish cleanly.
+                # priority 1 = comment: clear only FILLER (below=1) so the reply plays
+                # promptly, but NEVER drop a queued follow/gift thank-you (priority 2).
                 try:
-                    self.tts.clear_pending()
+                    self.tts.clear_pending(below=1)
                 except Exception:
                     pass
-                self.tts.speak(reply)         # bar keeps showing the comment until spoken
+                self.tts.speak(reply, priority=1)   # bar shows the comment until spoken
                 self._clear_answering()
                 return True
             self._clear_answering()
