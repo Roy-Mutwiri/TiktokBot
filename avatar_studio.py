@@ -1846,6 +1846,22 @@ class AvatarStudio:
             except Exception:
                 pass
 
+    def _market_active(self):
+        """Is gold MOVING right now? True if the recent price range is a meaningful
+        % of price (so the host leans into market talk; otherwise it works the chat).
+        Uses the price history the market monitor keeps. Tunable threshold."""
+        try:
+            hist = getattr(self, "_ma_hist", None)
+            if hist and len(hist) >= 4:
+                recent = [p for (_, p) in list(hist)[-6:]]
+                avg = sum(recent) / len(recent)
+                rng = (max(recent) - min(recent)) / avg if avg else 0.0
+                thr = float(os.environ.get("AVATAR_MARKET_ACTIVE_PCT", "0.0012"))
+                return rng >= thr
+        except Exception:
+            pass
+        return False
+
     def _autotalk_loop(self):
         """Background host: the brain writes gold commentary and the Arabic-accent TTS
         speaks it (mouth lip-syncs). PIPELINED — the brain generates the NEXT line
