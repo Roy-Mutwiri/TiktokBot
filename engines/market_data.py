@@ -40,10 +40,45 @@ class MarketData:
         self.host = None
         self.live = False                 # True once real data has loaded
         self._ohlc = None                 # np.array [N,6]
+        self._tick = {}                   # latest real-time 24h ticker (last price + stats)
+        self._tick_t = 0.0
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
         self._load_initial()
+
+    # ---- real-time ticker (instant last-traded price + true 24h stats) ------
+    def live_ticker(self, max_age=2.0):
+        """Binance 24h ticker: the EXACT last-traded price + real 24h change/high/
+        low/volume, refreshed at most every `max_age` seconds. This is the most
+        real-time price (vs the forming candle's close)."""
+        now = time.time()
+        if self._tick and now - self._tick_t < max_age:
+            return self._tick
+        if requests is None:
+            return self._tick
+        hosts = ([self.host] if self.host else []) + [h for h in _HOSTS if h != self.host]
+        for h in hosts:
+            try:
+                r = requests.get(f"https://{h}/api/v3/ticker/24hr",
+                                 params={"symbol": self.symbol}, timeout=6)
+                if r.status_code == 200:
+                    d = r.json()
+                    self._tick = {
+                        "price": float(d["lastPrice"]),
+                        "change_pct": float(d["priceChangePercent"]),
+                        "high": float(d["highPrice"]),
+                        "low": float(d["lowPrice"]),
+                        "open": float(d["openPrice"]),
+                        "volume": float(d["volume"]),
+                    }
+                    self._tick_t = now
+                    self.host = h
+                    self.live = True
+                    return self._tick
+            except Exception:
+                continue
+        return self._tick
 
     # -------------------------------------------------------------------------
     def _get(self, params):
@@ -169,6 +204,9 @@ class MarketData:
 
     @property
     def price(self):
+        # prefer the REAL-TIME last-traded price; fall back to the forming candle
+        if self._tick and time.time() - self._tick_t < 6.0:
+            return self._tick["price"]
         with self._lock:
             return float(self._ohlc[-1, 4]) if self._ohlc is not None and len(self._ohlc) else 0.0
 
