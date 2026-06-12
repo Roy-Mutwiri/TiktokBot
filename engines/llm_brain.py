@@ -200,6 +200,30 @@ class LLMBrain:
             print(f"[BRAIN] respond error: {self.last_error}")
             return None
 
+    def quick(self, prompt, system="You are a concise assistant.", max_tokens=90, timeout=30):
+        """One-shot generation with NO conversation history (classification, comment
+        answers) so it never pollutes the auto-talk context. Returns text or None."""
+        prompt = (prompt or "").strip()
+        if not prompt:
+            return None
+        if not self.available:
+            self._check()
+            if not self.available:
+                return None
+        try:
+            if self.provider == "claude":
+                return self._clean(self._respond_claude(prompt, system) or "") or None
+            payload = {"model": self.model, "stream": False, "keep_alive": KEEP_ALIVE,
+                       "messages": [{"role": "system", "content": system},
+                                    {"role": "user", "content": prompt}],
+                       "options": {"temperature": 0.4, "num_predict": max_tokens}}
+            data = self._post("/api/chat", payload, timeout=timeout)
+            txt = (data.get("message", {}) or {}).get("content", "")
+            return self._clean(txt) or None
+        except Exception as exc:
+            print(f"[BRAIN] quick error: {exc}")
+            return None
+
     def _respond_hybrid(self, user_text, persona):
         """Local Ollama first; if it's slow (OLLAMA_TIMEOUT) or errors, fall back
         to Fable 5 — but only if an API key is present."""
