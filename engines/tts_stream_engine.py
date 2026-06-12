@@ -165,6 +165,8 @@ class TTSStreamEngine:
         self._mltts_tried = False
         self._xtts = None                # Coqui XTTS-v2 (Arabic + English clone)
         self._xtts_tried = False
+        self._eleven = None              # ElevenLabs cloud voice (high quality)
+        self._eleven_tried = False
         self._hifi = {}                  # feed-pcm hash -> (hi-fi 24k pcm, sr) for playback
         self.backend = "edge-tts"
         # Active backend (switchable at runtime via set_backend) — starts from
