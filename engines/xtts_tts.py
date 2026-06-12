@@ -72,7 +72,14 @@ def _default_refs():
 _env_ref = os.environ.get("AVATAR_XTTS_REF", "").strip()
 XTTS_REFS = [p.strip() for p in _env_ref.split(",") if p.strip()] or _default_refs()
 XTTS_REF = XTTS_REFS[0]
-XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.7"))
+# Expressive sampling — higher temperature + sampling = livelier, more emotional,
+# less monotone delivery (laughs/excitement land better). All env-tunable.
+XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.85"))
+XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "4.0"))
+XTTS_TOP_K = int(os.environ.get("AVATAR_XTTS_TOP_K", "50"))
+XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.88"))
+XTTS_LEN_PEN = float(os.environ.get("AVATAR_XTTS_LEN_PENALTY", "1.0"))
+XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "1.0"))
 MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
 
 _ARABIC = re.compile(r"[؀-ۿݐ-ݿࢠ-ࣿﭐ-﷿ﹰ-﻿]")
