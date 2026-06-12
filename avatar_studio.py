@@ -1382,9 +1382,16 @@ class AvatarStudio:
                     # FACE-SWAP streamer look: force FULL enhance so the person is
                     # cut from their room and composited onto the trading studio
                     # background, with the lighting grade + ticker + LIVE badge.
+                    # ADAPTIVE: the monitor picks the enhance level (drop to 'light' if
+                    # CPU+GPU are both saturated = never stutter) and the device the
+                    # movable filter work runs on (whichever is freer).
+                    _dev, _lvl = "cpu", "full"
+                    if self.monitor is not None:
+                        _dev = self.monitor.route_filters()
+                        _lvl = self.monitor.quality()
                     if did_swap:
-                        enh.set_level("full")
-                    final = enh.enhance_frame(ai, is_speaking=self._speaking)
+                        enh.set_level(_lvl)
+                    final = enh.enhance_frame(ai, is_speaking=self._speaking, device=_dev)
                 except Exception:
                     final = ai
                 t_enh += time.perf_counter() - _t
