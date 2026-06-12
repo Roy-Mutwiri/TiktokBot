@@ -48,9 +48,27 @@ def _sf_load(path, *args, **kwargs):
 _ta.load = _sf_load     # XTTS's load_audio() calls torchaudio.load internally
 # ----------------------------------------------------------------------------
 
+import glob as _glob
 _PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_DEFAULT_REF = os.path.join(_PROJECT, "voice_refs", "arabic_accent.wav")
-XTTS_REF = os.environ.get("AVATAR_XTTS_REF", "").strip() or _DEFAULT_REF
+_REFDIR = os.path.join(_PROJECT, "voice_refs")
+
+
+def _default_refs():
+    """Prefer the clips extracted from the user's training videos (all of them,
+    for richer speaker latents); else the old accent sample."""
+    trained = sorted(_glob.glob(os.path.join(_REFDIR, "arabic_trained_*.wav")))
+    if trained:
+        return trained
+    one = os.path.join(_REFDIR, "arabic_trained.wav")
+    if os.path.exists(one):
+        return [one]
+    return [os.path.join(_REFDIR, "arabic_accent.wav")]
+
+
+# AVATAR_XTTS_REF may be a single path or comma-separated list; else auto.
+_env_ref = os.environ.get("AVATAR_XTTS_REF", "").strip()
+XTTS_REFS = [p.strip() for p in _env_ref.split(",") if p.strip()] or _default_refs()
+XTTS_REF = XTTS_REFS[0]
 XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.7"))
 MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
 
