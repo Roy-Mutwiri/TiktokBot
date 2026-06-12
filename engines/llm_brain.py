@@ -141,6 +141,30 @@ class LLMBrain:
     def ok(self):
         return self.available
 
+    # -- anti-repetition ------------------------------------------------------
+    def _anti_repeat_note(self):
+        """A transient instruction listing the openers the host JUST used, so the
+        model is actively pushed to phrase the next line a fresh way. None if we
+        have nothing yet."""
+        if not self._recent_openers:
+            return None
+        recent = "; ".join(f'"{o}…"' for o in list(self._recent_openers)[-6:])
+        return ("VARIETY CHECK — your last lines already began: " + recent +
+                ". Do NOT open the same way or reuse those same words, catchphrases, "
+                "or Arabic fillers again now. Start with different first words and a "
+                "different rhythm — phrase it completely fresh even if the topic or "
+                "the price level is the same. A real human never repeats themselves.")
+
+    def _record_opener(self, reply):
+        """Remember the first few words of a reply so _anti_repeat_note can steer
+        the next one away from it."""
+        try:
+            opener = " ".join((reply or "").split()[:6]).strip().lower()
+            if opener:
+                self._recent_openers.append(opener)
+        except Exception:
+            pass
+
     def _ensure_server(self):
         """If the Ollama server isn't reachable, try to launch it once (the CLI
         daemon). Best-effort; returns True if reachable afterward."""
@@ -242,6 +266,7 @@ class LLMBrain:
             self.history.append({"role": "user", "content": user_text})
             self.history.append({"role": "assistant", "content": reply})
             self.history = self.history[-(HISTORY_TURNS * 2):]
+            self._record_opener(reply)        # feed the anti-repetition memory
             return reply
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"
@@ -289,10 +314,17 @@ class LLMBrain:
     def _respond_ollama(self, user_text, persona, timeout=120):
         messages = [{"role": "system", "content": persona}]
         messages.extend(self.history[-(HISTORY_TURNS * 2):])
+        note = self._anti_repeat_note()          # steer away from recent openers
+        if note:
+            messages.append({"role": "system", "content": note})
         messages.append({"role": "user", "content": user_text})
         payload = {"model": self.model, "messages": messages, "stream": False,
                    "keep_alive": KEEP_ALIVE,
-                   "options": {"temperature": TEMPERATURE, "num_predict": MAX_TOKENS}}
+                   "options": {"temperature": TEMPERATURE, "num_predict": MAX_TOKENS,
+                               "top_p": TOP_P, "repeat_penalty": REPEAT_PENALTY,
+                               "repeat_last_n": REPEAT_LAST_N,
+                               "frequency_penalty": FREQ_PENALTY,
+                               "presence_penalty": PRESENCE_PENALTY}}
         data = self._post("/api/chat", payload, timeout=timeout)
         return (data.get("message", {}) or {}).get("content", "")
 
