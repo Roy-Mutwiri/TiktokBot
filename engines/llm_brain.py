@@ -289,7 +289,11 @@ class LLMBrain:
             payload = {"model": self.model, "stream": False, "keep_alive": KEEP_ALIVE,
                        "messages": [{"role": "system", "content": system},
                                     {"role": "user", "content": prompt}],
-                       "options": {"temperature": 0.4, "num_predict": max_tokens}}
+                       "options": {"temperature": 0.55, "num_predict": max_tokens,
+                                   "top_p": TOP_P, "repeat_penalty": REPEAT_PENALTY,
+                                   "repeat_last_n": REPEAT_LAST_N,
+                                   "frequency_penalty": FREQ_PENALTY,
+                                   "presence_penalty": PRESENCE_PENALTY}}
             data = self._post("/api/chat", payload, timeout=timeout)
             txt = (data.get("message", {}) or {}).get("content", "")
             return self._clean(txt) or None
