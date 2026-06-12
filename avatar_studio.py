@@ -1585,6 +1585,26 @@ class AvatarStudio:
                 self._log_msg(f"[autotalk] {exc}")
                 _t.sleep(2.0)
 
+    def _broadcast_frame(self, fr, scale=0.82):
+        """BROADCAST framing: render the avatar at a natural size on a soft blur of
+        itself. This shows the (96px) lip-sync mouth NEAR 1:1 instead of stretched
+        across a full-screen face — so the talking mouth reads SHARP, with no GPU lag.
+        Also a cleaner streaming look."""
+        try:
+            S = FRAME_SIZE
+            small = cv2.resize(fr, (96, 96))
+            small = cv2.GaussianBlur(small, (0, 0), 5)
+            bg = cv2.resize(small, (S, S))
+            bg = (bg.astype(np.float32) * 0.5).astype(np.uint8)   # darken the backdrop
+            w = max(64, min(S, int(S * scale)))
+            av = cv2.resize(fr, (w, w))
+            x = (S - w) // 2
+            y = min(S - w, int(S * 0.05))
+            bg[y:y + w, x:x + w] = av
+            return bg
+        except Exception:
+            return fr
+
     def _trader_scene(self, avatar, chart, speaking):
         """Merged trading stream: the live CHART fills the frame and the avatar host
         sits in a picture-in-picture corner narrating the market (folds the ai_trader
