@@ -1455,25 +1455,8 @@ class AvatarStudio:
                 in_chart = False
                 self._log_msg("[studio] face back — avatar resumed.")
 
-            # PRO: governor-gated CodeFormer HD restore of the FACE (skin/eyes), BEFORE
-            # the mouth overlay (so the moving mouth isn't restored = no cache-ghost).
-            # Runs every frame for smooth motion; the governor drops it the moment the
-            # CPU+GPU are saturated (hysteresis) so it never lags.
-            if (did_swap and getattr(self, "hd_var", None) and self.hd_var.get()
-                    and (self.monitor is None or (not self.monitor.saturated()
-                                                  and self.monitor.vram < 86))):
-                try:
-                    if self.face_restore is None:
-                        os.environ.setdefault("AVATAR_RESTORE_INTERVAL", "1")  # no cache = smooth
-                        from face_restore_engine import FaceRestoreEngine
-                        self.face_restore = FaceRestoreEngine()
-                        self._log_msg("[pro] CodeFormer HD face restore loaded.")
-                    if self.face_restore.ok:
-                        ai = self.face_restore.restore(ai); cached_face = ai
-                except Exception as exc:
-                    self._log_msg(f"[pro] HD restore: {exc}")
             # let the mouth de-blur run only when the GPU has room (skips during the
-            # voice-synthesis GPU spike = no speech lag).
+            # voice-synthesis GPU spike = sharp mouth with NO speech lag).
             if mt is not None:
                 mt.allow_deblur = (self.monitor is None or self.monitor.gpu_free(78))
 
