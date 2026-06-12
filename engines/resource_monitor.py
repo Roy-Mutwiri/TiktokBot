@@ -98,6 +98,14 @@ class ResourceMonitor:
     def saturated(self):
         return self.quality() == "light"
 
+    def gpu_free(self, threshold=72):
+        """True if the GPU has spare capacity for an OPTIONAL quality pass (de-blur,
+        HD restore) right now — and VRAM has headroom (so we never OOM). Used to run
+        the heavy 'pro' passes only when they won't cause a stutter."""
+        if not self.ready:
+            return True                 # before the first sample, allow (boot)
+        return self.gpu < threshold and self.vram < 86
+
     def summary(self):
         return f"CPU {self.cpu:.0f}  GPU {self.gpu:.0f}  VRAM {self.vram:.0f}"
 

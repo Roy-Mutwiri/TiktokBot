@@ -758,6 +758,10 @@ class AvatarStudio:
         self.broadcast_var = tk.BooleanVar(value=True)
         self._check(c, "Broadcast framing  ·  sharper mouth (no full-screen stretch)",
                     self.broadcast_var).pack(fill="x", pady=3)
+        # Live CPU/GPU/VRAM readout (resource governor) — corner overlay.
+        self.perf_var = tk.BooleanVar(value=True)
+        self._check(c, "Show CPU/GPU monitor  ·  live load + auto-balancing",
+                    self.perf_var).pack(fill="x", pady=3)
         self.obs_var = tk.BooleanVar(value=False)
         self._check(c, "Also send to OBS virtual camera",
                     self.obs_var).pack(fill="x", pady=3)
