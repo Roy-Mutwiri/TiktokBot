@@ -76,10 +76,10 @@ XTTS_REF = XTTS_REFS[0]
 # on longer speech, so keep it lively-yet-stable (0.75) and rely on per-sentence
 # chunking (below) to keep every generation short. repetition_penalty prevents the
 # autoregressive repeat/garble loop. All env-tunable.
-XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.75"))
-XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "5.0"))
+XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.65"))      # stable sweet spot
+XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "2.0"))  # high = artifacts
 XTTS_TOP_K = int(os.environ.get("AVATAR_XTTS_TOP_K", "50"))
-XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.85"))
+XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.80"))
 XTTS_LEN_PEN = float(os.environ.get("AVATAR_XTTS_LEN_PENALTY", "1.0"))
 XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "1.0"))
 # Per-call cap: keep WHOLE SENTENCES together (natural human speech), only split a
