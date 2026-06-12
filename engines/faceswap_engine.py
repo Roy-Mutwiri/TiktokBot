@@ -124,7 +124,7 @@ EYE_COLOR = os.environ.get("AVATAR_SWAP_EYECOLOR", "off")
 EYE_STRENGTH = float(os.environ.get("AVATAR_SWAP_EYESTR", "0.7"))
 CUSTOM_PASTE = os.environ.get("AVATAR_SWAP_CUSTOMPASTE", "0") == "1"    # custom forehead mask (off)
 # Lighten the face skin toward a Caucasian tone (0 = off, ~0.6 = clearly lighter).
-SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0"))  # OFF: white-man SOURCE handles skin, no color hacks
+SKIN_LIGHTEN = float(os.environ.get("AVATAR_SWAP_SKINLIGHTEN", "0.5"))  # 0..1 fairer-skin strength (live-tunable via self.skin_lighten / the studio slider)
 # PREDICTIVE TRACKING: extrapolate face keypoints this many frames forward to
 # cancel pipeline latency (the turn lag). ~1 frame; 0 = off. Too high overshoots.
 PREDICT_LEAD = float(os.environ.get("AVATAR_SWAP_PREDICT", "1.25"))
@@ -567,7 +567,7 @@ class FaceSwapEngine:
             if getattr(self, "_skin_prev", None) is not None and self._skin_prev.shape == skin.shape:
                 skin = 0.5 * skin + 0.5 * self._skin_prev
             self._skin_prev = skin
-            skin = skin[:, :, None] * SKIN_LIGHTEN
+            skin = skin[:, :, None] * float(getattr(self, "skin_lighten", SKIN_LIGHTEN))
             # LAB tone shift toward a natural LIGHT-Caucasian skin (peachy, NOT the
             # gray/blue cast the old de-warm gave): strong lift of L, pull a/b toward
             # a light warm-pink target. Keeps texture; consistent face/neck/hands.
@@ -797,8 +797,9 @@ class FaceSwapEngine:
                     if 5 < mean < FACE_LIGHT:
                         gain = min(1.6, FACE_LIGHT / mean)
                         out = np.clip(out.astype(np.float32) * gain, 0, 255).astype(np.uint8)
-            # lighten ALL skin (face, neck, hands) toward a Caucasian tone
-            if SKIN_LIGHTEN > 0.0:
+            # lighten ALL skin (face, neck, hands) toward a fairer Caucasian tone.
+            # Strength is live-tunable (self.skin_lighten, set by the studio slider).
+            if float(getattr(self, "skin_lighten", SKIN_LIGHTEN)) > 0.0:
                 out = self._lighten_skin(out)
             # CodeFormer HD enhancement IN-SWAP (cached every 2 frames = ~9fps, no
             # whole-face stutter since the composite is fresh each frame). The mouth
