@@ -54,11 +54,14 @@ _REFDIR = os.path.join(_PROJECT, "voice_refs")
 
 
 def _default_refs():
-    """Prefer the clips extracted from the user's training videos (all of them,
-    for richer speaker latents); else the old accent sample."""
-    trained = sorted(_glob.glob(os.path.join(_REFDIR, "arabic_trained_*.wav")))
-    if trained:
-        return trained
+    """Reference clips for cloning, best-first:
+      1. arabic_master_*.wav  — curated best clips from the training videos
+      2. arabic_trained_*.wav — the 45s windows
+      3. arabic_accent.wav    — original fallback sample."""
+    for pat in ("arabic_master_*.wav", "arabic_trained_*.wav"):
+        hits = sorted(_glob.glob(os.path.join(_REFDIR, pat)))
+        if hits:
+            return hits
     one = os.path.join(_REFDIR, "arabic_trained.wav")
     if os.path.exists(one):
         return [one]
