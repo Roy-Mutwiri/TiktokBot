@@ -1617,6 +1617,63 @@ class AvatarStudio:
         except Exception:
             pass        # queue full = drop (we're behind on a comment flood)
 
+    # --- LIVE EVENT handlers (gifts / follows / likes / shares) -------------
+    def _on_gift(self, user, gift, count, coins):
+        try:
+            self._log_msg(f"🎁 {user} sent {count}x {gift} ({coins} coins)")
+            self._event_q.put_nowait(("gift", user, gift, count, coins))
+        except Exception:
+            pass
+
+    def _on_follow(self, user):
+        try:
+            self._event_q.put_nowait(("follow", user))
+        except Exception:
+            pass
+
+    def _on_share(self, user):
+        try:
+            self._event_q.put_nowait(("share", user))
+        except Exception:
+            pass
+
+    def _on_like(self, user, total):
+        # celebrate only when we CROSS a milestone (likes fire constantly otherwise)
+        try:
+            if total and total >= self._next_like_ms:
+                self._event_q.put_nowait(("likes", total))
+                step = 500 if total < 1000 else (1000 if total < 10000 else 5000)
+                self._next_like_ms = ((total // step) + 1) * step
+        except Exception:
+            pass
+
+    def _react_one_event(self):
+        """Speak the next live-event reaction (gift/follow/share/likes). Gifts come
+        first. Returns True if the avatar spoke (loop skips its scripted line)."""
+        try:
+            if self.responder is None or self._event_q.empty() or self.tts is None:
+                return False
+            ev = self._event_q.get_nowait()
+            kind = ev[0]
+            if kind == "gift":
+                reply = self.responder.react_gift(ev[1], ev[2], ev[3], ev[4])
+            elif kind == "follow":
+                reply = self.responder.react_follow(ev[1])
+            elif kind == "share":
+                reply = self.responder.react_share(ev[1])
+            elif kind == "likes":
+                reply = self.responder.react_likes(ev[1])
+            else:
+                return False
+            if reply:
+                self._log_msg(f"avatar→{kind}> {reply}")
+                self.tts.speak(reply)
+                return True
+            return False
+        except Exception as exc:
+            self._log_msg(f"[events] {exc}")
+            return False
+
     def _answer_one_comment(self):
         """Pop the next live comment; if it's worth answering, speak the answer.
         Returns True if the avatar spoke (so the loop skips its scripted line)."""
