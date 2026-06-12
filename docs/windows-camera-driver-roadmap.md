@@ -42,7 +42,7 @@ shipped to users without Microsoft-signed packages.
 | 1 | User-mode frame pipeline (30fps, formats, ring, fallback) | **~80% exists** (`avatar_sharedframe.py`, BGR producers) — needs format converter + ring + telemetry |
 | 2 | IPC / shared-memory design | **Single-frame exists** — needs v2 header + triple buffer → `ipc-frame-transport.md` |
 | 3 | Windows service bridge | **Not started** (logic is today inline in `vcam_host`/app) |
-| 4 | AVStream driver skeleton (simulated camera, our name) | **Not started; WDK not installed** |
+| 4 | AVStream driver skeleton (simulated camera, our name) | **Not started.** WDK 10.0.26100 now **installed** (km headers + ks.h/ksmedia.h + WDK MSBuild targets + stampinf/inf2cat/signtool). Gated only on test-signing + explicit go. |
 | 5 | Driver frame-source integration | Not started |
 | 6 | App UI (Camera Output tab) | Not started (Studio UI exists to extend) |
 | 7 | Installer + admin flow | **Dev scripts exist** for MF/DShow; service+driver installer not started |
@@ -177,8 +177,8 @@ Nothing destructive; everything is **additive**. Concretely:
    `*.cat`, `/service/**/bin/`) so kernel/service builds don't get auto-committed
    (the repo already had a large-file incident; keep binaries out — see memory note
    on `git-large-file-push-block`).
-5. **Install the WDK** on the dev machine (prerequisite for any kernel work). This is
-   an environment change, not a repo change, but it gates Phase 4+.
+5. **WDK installed** (2026-06-12, `Microsoft.WindowsWDK.10.0.26100`) — the kernel
+   toolchain prerequisite for Phase 4+ is now met (env change, not a repo change).
 6. **Do not** add admin-at-startup, driver auto-load tricks, or anything that runs
    without explicit user action. Camera output is user-initiated and visibly
    indicated (see `security-and-safety.md`).
