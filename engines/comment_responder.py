@@ -64,6 +64,39 @@ class CommentResponder:
     def _support(self, user):
         return self._supporters.setdefault(user, {"coins": 0, "gifts": 0, "follow": False})
 
+    # viewers often ANNOUNCE a follow/share/gift in chat (TikTok's structured
+    # follow/share events are flaky) — catch those so we ALWAYS appreciate them.
+    _FOLLOWED = re.compile(
+        r"\b(just followed|i followed|followed you|followed the|now following|new follower|"
+        r"i'?m following|gave you a follow|dropped a follow|hit follow|smashed follow|"
+        r"followed bro|done follow|followed ya)\b", re.I)
+    _SHARED = re.compile(
+        r"\b(i shared|just shared|shared your|shared the (live|stream|video)|sharing your|"
+        r"shared bro|shared it|i'?ll share|sharing the)\b", re.I)
+    _GIFTED = re.compile(
+        r"\b(sent you a|sent a gift|gifted you|here'?s a gift|gift for you|sent roses?|"
+        r"take my (rose|gift|coins))\b", re.I)
+
+    def _appreciation_from_comment(self, user, text):
+        """If a chat comment announces a follow/share/gift, return a warm by-name
+        thank-you (so appreciation fires even when TikTok's events don't)."""
+        t = text or ""
+        if self._FOLLOWED.search(t):
+            s = self._support(user)
+            if s["follow"]:                  # already thanked this session
+                return None
+            return self.react_follow(user)
+        if self._SHARED.search(t):
+            return self.react_share(user)
+        if self._GIFTED.search(t):
+            r = self.brain.quick(
+                f"A viewer named {user} mentioned in chat that they sent you a gift on your "
+                "live gold stream. Thank them BY NAME warmly and genuinely for the support. "
+                "One short spoken sentence. No emojis.",
+                system=self._ARAB_HOST_SYS, max_tokens=40) if self.brain else None
+            return self._say(r) or f"Wallahi thank you for the gift {user}, I appreciate you habibi!"
+        return None
+
     # topics worth digging into (keeps the live lively when one comes up)
     _INTERESTING = re.compile(
         r"\b(why|how|what do you think|think about|your take|explain|opinion|strateg|"
