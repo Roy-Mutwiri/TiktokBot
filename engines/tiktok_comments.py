@@ -146,8 +146,20 @@ class TikTokComments:
     def stop(self):
         self._stop = True
         self.connected = False
+        self.status = "stopped"
+        client = self._client
+        if client is None:
+            return
+        # disconnect() is a COROUTINE running on the client's OWN event loop (the
+        # one client.run() spun up on the reader thread). Calling it bare just
+        # creates an un-awaited coroutine that never runs (the connection stays
+        # open). Schedule it ONTO that loop, thread-safely, so it actually closes.
+        loop = (getattr(client, "_asyncio_loop", None)
+                or getattr(client, "_loop", None))
         try:
-            if self._client is not None:
-                self._client.disconnect()
+            if loop is not None and loop.is_running():
+                asyncio.run_coroutine_threadsafe(client.disconnect(), loop)
+            else:
+                asyncio.run(client.disconnect())
         except Exception:
             pass
