@@ -115,7 +115,7 @@ class CommentResponder:
                     "stream. Give a SHORT, warm one-line welcome/acknowledgement by name, "
                     "like a friendly human host. Max 14 words. No emojis.",
                     system="You are a warm, natural live-stream host.", max_tokens=40)
-                return reply
+                return self._say(reply)
 
             # QUESTION -> research + answer as the host
             ctx = ""
@@ -138,7 +138,7 @@ class CommentResponder:
                 "research if relevant; if unsure, be honest and brief. No emojis, no lists.",
                 system="You are a friendly, knowledgeable live trading-stream host. Speak "
                        "naturally as if talking out loud.", max_tokens=110, timeout=40)
-            return reply
+            return self._say(reply)
         except Exception as exc:
             print(f"[COMMENTS] respond error: {exc}")
             return None
