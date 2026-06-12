@@ -184,6 +184,9 @@ class AvatarStudio:
         # the loop ticks, jumping ahead of filler commentary. Bounded so a gift flood
         # doesn't pile up (keep the most recent).
         self._prio_events = _c.deque(maxlen=10)
+        # follows arrive in BURSTS — buffer the names and thank them in one batched
+        # line (so a burst is one quick shout-out, not 8 slow separate ones).
+        self._pending_follows = _c.deque(maxlen=20)
         self._next_like_ms = 500                  # next likes milestone to celebrate
         # SESSION STATS + gift goal (on-screen bar + CTAs)
         self._sess_likes = 0
@@ -2144,9 +2147,8 @@ class AvatarStudio:
         try:
             self._sess_follows += 1
             self._feed_msg(f"➕ {user} followed", "ev")
-            rx = self._reactions()
-            if rx is not None:                    # follows to the FRONT (lead priority)
-                self._prio_events.appendleft(rx.follow(user))
+            # buffer the name; _react_one_event batches a burst into ONE thank-you
+            self._pending_follows.append(str(user))
         except Exception:
             pass
 

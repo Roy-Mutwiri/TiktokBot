@@ -84,6 +84,20 @@ def follow(user):
     return _pick("follow", user=str(user))
 
 
+def follow_many(names):
+    """Batch several follows that arrived together into ONE natural line (so a burst
+    of follows is thanked instantly, not as 8 separate slow shout-outs)."""
+    names = [str(n).strip() for n in (names or []) if str(n).strip()]
+    if not names:
+        return None
+    if len(names) == 1:
+        return follow(names[0])
+    names = names[:4]                       # name at most 4 so the line stays short
+    joined = (f"{names[0]} and {names[1]}" if len(names) == 2
+              else ", ".join(names[:-1]) + f" and {names[-1]}")
+    return _pick("follow_batch", names=joined)
+
+
 def share(user):
     return _pick("share", user=str(user))
 
