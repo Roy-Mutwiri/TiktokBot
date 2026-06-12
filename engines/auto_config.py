@@ -30,8 +30,10 @@ try:
 except Exception:
     pass
 
-# VRAM cost estimates (GB) used to fit models into the free budget.
-VOICE_VRAM = [("chatterbox", 3.5), ("kokoro", 0.4), ("edge", 0.0)]   # preference order
+# VRAM cost estimates (GB) used to fit models into the free budget. The bot is
+# Arabic+English ONLY via XTTS-v2 (~2.3GB), so XTTS is the preferred voice; the
+# others remain as lighter fallbacks if VRAM is too tight for XTTS + a brain.
+VOICE_VRAM = [("xtts", 2.3), ("kokoro", 0.4), ("edge", 0.0)]   # preference order
 BRAIN_VRAM = [("qwen2.5:14b", 9.0), ("qwen2.5:7b", 4.7),
               ("llama3.1:8b", 5.0), ("llama3.2:3b", 2.0)]            # best -> smallest
 # GB held back for the FULL video pipeline (swap + LP + Wav2Lip + restore + Real-ESRGAN

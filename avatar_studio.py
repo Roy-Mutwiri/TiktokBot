@@ -103,12 +103,10 @@ QUICK_PHRASES = [
 #   Chatterbox ~3s clones a real human voice — best expressive option for live
 #   Maya1  ~10s + 25s load — laughs/emotion tags, but too slow for smooth live;
 #          best for pre-rendering / repeated (cached) lines
+# The bot speaks ARABIC + ENGLISH ONLY, via the Coqui XTTS-v2 cloned voice — one
+# Arabic male who code-switches cleanly. No other voice options by request.
 VOICE_MODES = [
-    ("English · Arabic accent ~3s (Chatterbox)", "chatterbox"),   # DEFAULT
-    ("Fast — instant (Kokoro)",            "kokoro"),
-    ("Arabic + English (Multilingual)",    "multilingual"),
-    ("Laughs/emotion — SLOW ~10s (Maya1)", "maya1"),
-    ("Cloud (edge)",                       "edge"),
+    ("Arabic + English · XTTS-v2 (cloned)", "xtts"),
 ]
 VOICE_MODE_LABELS = [m[0] for m in VOICE_MODES]
 VOICE_MODE_KEY = dict(VOICE_MODES)
