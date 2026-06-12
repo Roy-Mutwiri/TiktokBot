@@ -215,8 +215,12 @@ class AvatarStudio:
         root.title("AVATAR STUDIO ◆ neural pipeline")
         root.configure(bg=BG)
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        _wx = max(0, (sw - 1240) // 2); _wy = max(0, (sh - 900) // 3)
-        root.geometry(f"1240x900+{_wx}+{_wy}")
+        # tall by default so the comment feed below the avatar has lots of room to
+        # scroll. The avatar panel keeps its natural height; the extra height all
+        # flows into the comments panel (it's the expand=True slave of the column).
+        win_h = min(1400, max(900, sh - 90))
+        _wx = max(0, (sw - 1240) // 2); _wy = max(0, (sh - win_h) // 2)
+        root.geometry(f"1240x{win_h}+{_wx}+{_wy}")
         root.minsize(1040, 660)
         # frameless window -> our own futuristic title bar with custom controls
         self._drag = None
