@@ -150,8 +150,8 @@ class CommentResponder:
                 reply = self.brain.quick(
                     f"A viewer named {user} said \"{text}\" on your live gold-trading "
                     "stream. Give a SHORT, warm one-line welcome/acknowledgement by name, "
-                    "like a friendly human host. Max 14 words. No emojis.",
-                    system="You are a warm, natural live-stream host.", max_tokens=40)
+                    f"like a friendly human host. Max 14 words. No emojis. Reply in {lang}.",
+                    system="You are a warm, natural live-stream host.", max_tokens=60)
                 return self._say(reply)
 
             # QUESTION -> research + answer as the host
@@ -172,7 +172,8 @@ class CommentResponder:
                 f"named {user} asked: \"{text}\".{grounding}\n\n"
                 "Answer them directly as a real person on the mic — natural, confident, "
                 "helpful, 1-2 short sentences, address them by name once. Use the context/"
-                "research if relevant; if unsure, be honest and brief. No emojis, no lists.",
+                "research if relevant; if unsure, be honest and brief. No emojis, no lists. "
+                f"Reply ENTIRELY in {lang} (the viewer's own language).",
                 system="You are a friendly, knowledgeable live trading-stream host. Speak "
                        "naturally as if talking out loud.", max_tokens=110, timeout=40)
             return self._say(reply)
