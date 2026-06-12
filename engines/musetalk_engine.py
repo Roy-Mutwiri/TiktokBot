@@ -64,6 +64,9 @@ MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "0.0"))
 # INTERIOR: lift the very-dark open-mouth interior toward a natural dark-red so the
 # open mouth doesn't render as black holes/"spots" (Wav2Lip's dark interior). 0 = off.
 MOUTH_INTERIOR = float(os.environ.get("AVATAR_MOUTH_INTERIOR", "1.0"))
+# TEMPORAL: blend this much of the PREVIOUS mouth into the current one to kill
+# frame-to-frame shimmer/jitter. Kept LOW so the lips still open crisply (high = smear).
+MOUTH_TEMPORAL = float(os.environ.get("AVATAR_MOUTH_TEMPORAL", "0.25"))
 # DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
 # adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
 DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0"))  # OFF: redundant (CPU crisp already = same sharpness) + GPU op = lag risk
