@@ -221,9 +221,11 @@ class CommentResponder:
         r = self.brain.quick(
             f"A viewer named {user} just sent you {amt} ({c} coins) on your live gold stream. "
             f"That is {tier}. Thank them BY NAME, genuinely and with real energy.{extra} "
-            "1-2 short spoken sentences. No emojis.",
+            f"{self._vary()}1-2 short spoken sentences. No emojis.",
             system=self._ARAB_HOST_SYS, max_tokens=70) if self.brain else None
-        return self._say(r) or f"Wallahi thank you so much {user} for the {gift}, I appreciate you habibi!"
+        r = self._say(r)
+        self._remember_opener(r)
+        return r or self._fallback_thanks(user, "gift", gift)
 
     def react_follow(self, user):
         s = self._support(user)
@@ -231,16 +233,40 @@ class CommentResponder:
         r = self.brain.quick(
             f"{user} just FOLLOWED your live gold stream. Thank them BY NAME for the follow "
             "with a warm, genuine welcome-to-the-family — like you really appreciate them "
-            "joining the community. One short spoken sentence. No emojis.",
-            system=self._ARAB_HOST_SYS, max_tokens=40) if self.brain else None
-        return self._say(r) or f"Welcome to the family {user}, wallahi thank you for the follow habibi!"
+            f"joining. {self._vary()}One short spoken sentence. No emojis.",
+            system=self._ARAB_HOST_SYS, max_tokens=44) if self.brain else None
+        r = self._say(r)
+        self._remember_opener(r)
+        return r or self._fallback_thanks(user, "follow")
 
     def react_share(self, user):
         r = self.brain.quick(
             f"{user} just SHARED your live gold stream with others. Thank them BY NAME warmly "
-            "for spreading the stream — it genuinely helps. One short spoken sentence. No emojis.",
-            system=self._ARAB_HOST_SYS, max_tokens=38) if self.brain else None
-        return self._say(r) or f"Ya salam, thank you for sharing the stream {user}, that means a lot habibi!"
+            f"for spreading the stream — it genuinely helps. {self._vary()}One short spoken "
+            "sentence. No emojis.",
+            system=self._ARAB_HOST_SYS, max_tokens=42) if self.brain else None
+        r = self._say(r)
+        self._remember_opener(r)
+        return r or self._fallback_thanks(user, "share")
+
+    # varied canned fallbacks (so even with no brain it's never the same line)
+    _FB = {
+        "follow": ["Welcome to the family {u}, wallahi thank you for the follow habibi!",
+                   "Ya salam {u} just followed — mashallah welcome aboard, akhi!",
+                   "{u} I see you followed, habibi thank you, you're one of us now!",
+                   "Big love {u}, thanks for the follow — welcome to the squad!"],
+        "share": ["Ya salam, thank you for sharing the stream {u}, that means a lot habibi!",
+                  "Mashallah {u} shared the live — wallahi I appreciate you akhi!",
+                  "{u} thank you for spreading the word habibi, you're a real one!"],
+        "gift": ["Wallahi thank you so much {u} for the {g}, I appreciate you habibi!",
+                 "Ya salam {u}, mashallah thank you for the {g}, you're too kind akhi!",
+                 "{u} habibi the {g} — wallahi I'm grateful, thank you so much!"],
+    }
+
+    def _fallback_thanks(self, user, kind, gift="gift"):
+        import random
+        opts = self._FB.get(kind, self._FB["follow"])
+        return random.choice(opts).format(u=user, g=gift)
 
     def react_goal(self, coins):
         r = self.brain.quick(
