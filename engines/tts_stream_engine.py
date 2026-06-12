@@ -438,18 +438,41 @@ class TTSStreamEngine:
 
     # -------------------------------------------------------------------------
     async def _stream_worker(self):
-        """Pull text, synthesize the full line, then play + feed in lockstep."""
+        """Pull a line, split it into short sentence chunks, and play them back to
+        back — synthesizing the NEXT chunk while the CURRENT one plays. This (a)
+        keeps XTTS off long paragraphs (which distort) and (b) starts speech after
+        the FIRST short chunk (~1s) instead of after the whole line, so the avatar
+        isn't silent while a long line synthesizes."""
+        loop = asyncio.get_event_loop()
         while self._running:
             text = await self.speech_queue.get()
             if text is None or not self._running:        # shutdown sentinel
                 break
             try:
-                self.synthesizing = True
-                pcm = await self._synthesize(text)        # FULL line first
-                self.synthesizing = False
-                if pcm is None or len(pcm) == 0:
+                chunks = self._split_for_tts(text)
+                if not chunks:
                     continue
-                await self._play_and_feed(pcm)            # then play + feed together
+                self.synthesizing = True
+                # synth chunk 0, then pipeline: synth i+1 in a thread while i plays
+                pcm = await loop.run_in_executor(None, self._synthesize_blocking, chunks[0])
+                if pcm is None:                          # backend needs the async path
+                    pcm = await self._synthesize(chunks[0])
+                for idx in range(len(chunks)):
+                    nxt = None
+                    if idx + 1 < len(chunks) and self._running:
+                        nxt = loop.run_in_executor(
+                            None, self._synthesize_blocking, chunks[idx + 1])
+                    if pcm is not None and len(pcm) > 0:
+                        self.synthesizing = False
+                        await self._play_and_feed(pcm)   # plays + feeds the mouth
+                    if nxt is not None:
+                        self.synthesizing = True
+                        pcm = await nxt
+                        if pcm is None:
+                            pcm = await self._synthesize(chunks[idx + 1])
+                    else:
+                        pcm = None
+                self.synthesizing = False
             except Exception as exc:
                 print(f"[TTS] speak error: {exc}")
                 self.synthesizing = False
