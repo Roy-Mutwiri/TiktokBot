@@ -89,6 +89,10 @@ PACE_DYNAMIC = os.environ.get("AVATAR_XTTS_DYNAMIC_PACE", "1") == "1"
 PACE_FAST = float(os.environ.get("AVATAR_XTTS_PACE_FAST", "1.10"))   # excited multiplier
 PACE_SLOW = float(os.environ.get("AVATAR_XTTS_PACE_SLOW", "0.95"))   # calm/analytical multiplier
 XTTS_GAP = float(os.environ.get("AVATAR_XTTS_GAP", "0.09"))          # pause between segments (s)
+# Converting transliterated Arabic to Arabic SCRIPT mid-line forces XTTS to code-
+# switch — one line becomes many tiny separate clips (gaps + slow Arabic) = choppy,
+# laggy, unintelligible. OFF by default: the line stays ONE smooth English synthesis.
+ARABICIZE = os.environ.get("AVATAR_XTTS_ARABICIZE", "0") == "1"
 # Per-call cap: keep WHOLE SENTENCES together (natural human speech), only split a
 # sentence if it's longer than this (rare). A full sentence is stable in one call;
 # it's MULTI-sentence runs that distort, so we split at sentence boundaries only.
