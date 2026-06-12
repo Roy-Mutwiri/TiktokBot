@@ -254,7 +254,7 @@ class AvatarStudio:
         # checking whether the entered @handle is LIVE on TikTok and drives the
         # green/red light by the SPEECH button. No START needed, never sleeps long.
         self._live_stop = False
-        threading.Thread(target=self._live_status_loop, daemon=True).start()
+        self._safe_thread("_live_status_loop")
         # ASYNC auto-config: benchmark the GPU AFTER the window paints, with a
         # loading bar; START stays disabled until the chosen model is known (its
         # env must be set before the engines load).
