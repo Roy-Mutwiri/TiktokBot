@@ -1406,6 +1406,7 @@ class AvatarStudio:
                 elif getattr(self, "broadcast_var", None) and self.broadcast_var.get():
                     final = self._broadcast_frame(final)   # sharper mouth, no stretch
                 final = self._stats_overlay(final)         # likes/coins/goal bar (if live)
+                final = self._perf_overlay(final)          # live CPU/GPU/VRAM readout
 
             last_final = final            # remember for the "generating" hold
             self._last_frame_t = time.monotonic()   # heartbeat for the watchdog
@@ -1425,8 +1426,13 @@ class AvatarStudio:
                 fps_t = now
                 rd, lpm, gf, bd, en = (x / 15 * 1000 for x in
                                        (t_read, t_lp, t_gfp, t_body, t_enh))
+                _res = ""
+                if self.monitor is not None:
+                    _res = (f" | {self.monitor.summary()}"
+                            f" | fx:{self.monitor.route_filters()}"
+                            + ("  [LIGHT]" if self.monitor.saturated() else ""))
                 self._diag = (f"{self._fps:.1f}fps | read {rd:.0f} | LP {lpm:.0f} | "
-                              f"gfpgan {gf:.0f} | body {bd:.0f} | enh {en:.0f} ms")
+                              f"gfpgan {gf:.0f} | body {bd:.0f} | enh {en:.0f} ms" + _res)
                 print("[DIAG] " + self._diag)
                 t_read = t_lp = t_body = t_enh = t_gfp = 0.0
 
@@ -1938,6 +1944,39 @@ class AvatarStudio:
                         (10, 19), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (120, 235, 255), 1, cv2.LINE_AA)
             cv2.rectangle(fr, (10, 25), (S - 10, 27), (40, 48, 60), -1)
             cv2.rectangle(fr, (10, 25), (10 + int((S - 20) * prog), 27), (0, 215, 255), -1)
+            return fr
+        except Exception:
+            return fr
+
+    def _perf_overlay(self, fr):
+        """Small top-right CPU / GPU / VRAM readout (live load), colour-coded green→
+        amber→red. Lets you watch the resource governor working on stream."""
+        if self.monitor is None or not getattr(self, "perf_var", None) or not self.perf_var.get():
+            return fr
+        try:
+            S = FRAME_SIZE
+            rows = [("CPU", self.monitor.cpu), ("GPU", self.monitor.gpu),
+                    ("VRAM", self.monitor.vram)]
+
+            def col(v):
+                return (110, 240, 130) if v < 70 else ((60, 200, 255) if v < 88 else (80, 80, 255))
+            x = S - 132
+            ov = fr.copy()
+            cv2.rectangle(ov, (x - 8, 6), (S - 4, 58), (10, 12, 16), -1)
+            fr = cv2.addWeighted(ov, 0.55, fr, 0.45, 0)
+            for i, (lbl, v) in enumerate(rows):
+                yy = 20 + i * 14
+                c = col(v)
+                cv2.putText(fr, f"{lbl:4}", (x, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                            (170, 190, 210), 1, cv2.LINE_AA)
+                bx = x + 36
+                cv2.rectangle(fr, (bx, yy - 8), (bx + 56, yy - 2), (40, 44, 54), -1)
+                cv2.rectangle(fr, (bx, yy - 8), (bx + int(56 * min(1.0, v / 100.0)), yy - 2), c, -1)
+                cv2.putText(fr, f"{v:3.0f}%", (bx + 60, yy), cv2.FONT_HERSHEY_SIMPLEX, 0.4,
+                            c, 1, cv2.LINE_AA)
+            if self.monitor.saturated():
+                cv2.putText(fr, "BALANCING", (x, 56), cv2.FONT_HERSHEY_SIMPLEX, 0.34,
+                            (60, 200, 255), 1, cv2.LINE_AA)
             return fr
         except Exception:
             return fr

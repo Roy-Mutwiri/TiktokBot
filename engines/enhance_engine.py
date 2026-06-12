@@ -402,11 +402,13 @@ def set_level(level):
     ENHANCE_LEVEL = level if level in ("full", "light") else "full"
 
 
-def enhance_frame(frame, is_speaking=False):
+def enhance_frame(frame, is_speaking=False, device="cpu"):
     """Run the polish pipeline. Never raises — returns a frame regardless.
 
     'light' level skips background segmentation + grain/soften (the ~20ms CPU
     cost) for higher fps, keeping the cheap overlays and grade.
+    device='gpu' runs the heavy bilateral+CLAHE+clarity on the GPU (kornia) instead
+    of the CPU (cv2) — the resource monitor picks whichever device is freer.
     """
     try:
         _ensure_assets()
@@ -416,10 +418,19 @@ def enhance_frame(frame, is_speaking=False):
         if full:
             if BG_ON:                             # trading-studio background (off for now)
                 frame = background_composite(frame)
-            if POLISH_DENOISE > 0:                # POLISH: edge-preserving denoise cleans
-                frame = cv2.bilateralFilter(frame, 5,  # the skin grain/blotch WITHOUT
-                                            28 * POLISH_DENOISE, 5)  # softening the beard edges
-            frame = apply_clarity(frame)          # skin micro-texture (real lens look)
+            g = None
+            if device == "gpu":                   # GPU path (kornia) — offload from CPU
+                try:
+                    import gpu_fx
+                    g = gpu_fx.enhance(frame)
+                except Exception:
+                    g = None
+            if g is not None:
+                frame = g                         # denoise+CLAHE+clarity done on GPU
+            else:                                 # CPU path (cv2)
+                if POLISH_DENOISE > 0:            # edge-preserving denoise cleans skin
+                    frame = cv2.bilateralFilter(frame, 5, 28 * POLISH_DENOISE, 5)
+                frame = apply_clarity(frame)      # skin micro-texture (real lens look)
         frame = apply_color_grade(frame)
         frame = apply_vignette(frame)
         frame = apply_camera_shake(frame)
