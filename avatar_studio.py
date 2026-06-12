@@ -705,6 +705,49 @@ class AvatarStudio:
 
         self._show_placeholder()
 
+        # ===== LIVE TIKTOK COMMENTS — docked BELOW the avatar ================
+        # Moved here from the right rail so the comment feed sits right under the
+        # face, like a real TikTok live: @handle + toggle + a scrolling feed of
+        # incoming comments and the avatar's spoken replies.
+        cm = tk.Frame(left, bg=SURFACE, highlightthickness=1,
+                      highlightbackground=self._mix(MAG, BG, 0.5))
+        cm.pack(side="bottom", fill="x", pady=(10, 0))
+        ch = tk.Frame(cm, bg=SURFACE); ch.pack(fill="x", padx=10, pady=(8, 4))
+        tk.Label(ch, text="\U0001f4ac LIVE TIKTOK COMMENTS", bg=SURFACE, fg=MAG,
+                 font=("Consolas", 10, "bold")).pack(side="left")
+        # green/red live dot + word, mirrored from the one by the SPEECH button
+        self.feed_light = tk.Canvas(ch, width=16, height=16, bg=SURFACE,
+                                    highlightthickness=0)
+        self._feed_dot = self.feed_light.create_oval(3, 3, 13, 13,
+                                                     fill="#3a3f4a", outline="")
+        self.feed_light.pack(side="left", padx=(10, 0))
+        self.feed_status = tk.Label(ch, text="no handle", bg=SURFACE, fg=MUTED,
+                                    font=("Consolas", 9))
+        self.feed_status.pack(side="left", padx=(5, 0))
+        # @handle entry + Answer toggle on the right
+        self.comments_var = tk.BooleanVar(value=False)
+        self._check(ch, "Answer", self.comments_var,
+                    self._on_comments).pack(side="right")
+        self.handle_var = tk.StringVar(value=os.environ.get("AVATAR_TIKTOK_USER", ""))
+        tk.Entry(ch, textvariable=self.handle_var, width=14, bg=BG, fg=FG,
+                 insertbackground=CYAN, relief="flat",
+                 font=("Segoe UI", 10)).pack(side="right", padx=(0, 8), ipady=2)
+        tk.Label(ch, text="@handle", bg=SURFACE, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(side="right", padx=(0, 4))
+        # scrolling read-only feed
+        fb = tk.Frame(cm, bg=SURFACE); fb.pack(fill="x", padx=10, pady=(0, 9))
+        fsb = tk.Scrollbar(fb); fsb.pack(side="right", fill="y")
+        self.feed = tk.Text(fb, height=6, bg=BG, fg=FG, relief="flat", bd=0,
+                            font=("Consolas", 9), wrap="word", padx=8, pady=6,
+                            state="disabled", yscrollcommand=fsb.set)
+        self.feed.pack(side="left", fill="x", expand=True)
+        fsb.config(command=self.feed.yview)
+        self.feed.tag_config("q", foreground=CYAN)            # viewer comment
+        self.feed.tag_config("a", foreground="#27ff9e")       # avatar reply
+        self.feed.tag_config("ev", foreground=AMBER)          # gift / follow
+        self.feed.tag_config("sys", foreground=MUTED)         # system note
+        self._feed_msg("enter your @handle and go live — comments appear here.", "sys")
+
         # ---- RIGHT: scrollable control rail --------------------------------
         right_outer = tk.Frame(bodyf, bg=BG, width=412)
         right_outer.pack(side="right", fill="y", padx=(9, 12), pady=16)
@@ -889,16 +932,7 @@ class AvatarStudio:
         self._check(c, "Also send to OBS virtual camera",
                     self.obs_var).pack(fill="x", pady=3)
 
-        # ---- LIVE TIKTOK COMMENTS -----------------------------------------
-        c = self._card(right, "LIVE TIKTOK COMMENTS")
-        r = self._row(c, "Your @handle")
-        self.handle_var = tk.StringVar(value=os.environ.get("AVATAR_TIKTOK_USER", ""))
-        tk.Entry(r, textvariable=self.handle_var, width=16, bg=BG, fg=FG,
-                 insertbackground=CYAN, relief="flat",
-                 font=("Segoe UI", 10)).pack(side="right", ipady=2)
-        self.comments_var = tk.BooleanVar(value=False)
-        self._check(c, "Answer live comments  ·  filter spam, reply as a human",
-                    self.comments_var, self._on_comments).pack(fill="x", pady=3)
+        # (LIVE TIKTOK COMMENTS moved to the docked panel below the avatar.)
 
         # ---- VOICE ---------------------------------------------------------
         c = self._card(right, "VOICE")
