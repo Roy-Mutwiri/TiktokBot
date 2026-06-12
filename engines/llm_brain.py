@@ -18,6 +18,7 @@
 import os
 import sys
 import json
+import collections
 import urllib.request
 import urllib.error
 
@@ -49,6 +50,13 @@ MODEL = os.environ.get("AVATAR_BRAIN_MODEL", "llama3.2:3b")
 HISTORY_TURNS = int(os.environ.get("AVATAR_BRAIN_HISTORY", "6"))   # user+assistant pairs kept
 MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "220"))  # headroom for long rambles; persona drives short ones too
 TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.92"))  # higher = more unpredictable, human variety
+# ANTI-REPETITION — small models lean on the same openers/catchphrases. These
+# token-level penalties push the model OFF words it just used so it doesn't loop.
+REPEAT_PENALTY = float(os.environ.get("AVATAR_BRAIN_REPEAT_PENALTY", "1.35"))
+REPEAT_LAST_N = int(os.environ.get("AVATAR_BRAIN_REPEAT_LASTN", "320"))
+FREQ_PENALTY = float(os.environ.get("AVATAR_BRAIN_FREQ_PENALTY", "0.7"))
+PRESENCE_PENALTY = float(os.environ.get("AVATAR_BRAIN_PRESENCE_PENALTY", "0.6"))
+TOP_P = float(os.environ.get("AVATAR_BRAIN_TOP_P", "0.95"))
 # Keep the model RESIDENT in VRAM so it doesn't unload between questions and pay
 # the ~45s cold-load again mid-stream. -1 = never unload; or "30m".
 KEEP_ALIVE = os.environ.get("AVATAR_BRAIN_KEEPALIVE", "30m")
@@ -67,9 +75,11 @@ DEFAULT_PERSONA = os.environ.get("AVATAR_BRAIN_PERSONA", (
     "it. Real humans ramble, pause, trail off, snap back short, go on tangents, "
     "interrupt themselves — talk like that, not in even, equal-sized chunks. "
     "VERY IMPORTANT — you are proudly Arab, so naturally sprinkle common Arabic "
-    "words and expressions into your English the way Arabs do when they talk: use "
-    "at least one or two in EVERY reply, e.g. wallahi, yalla, habibi, akhi, "
-    "mashallah, inshallah, alhamdulillah, khalas, yani, sahbi. Greet people with "
+    "words and expressions into your English the way Arabs do when they talk, but "
+    "KEEP VARYING which ones and don't lean on the same one — rotate through wallahi, "
+    "yalla, habibi, akhi, mashallah, inshallah, alhamdulillah, khalas, yani, sahbi, "
+    "ya salam, sahbi, and others, never the same word two lines in a row, and it's "
+    "fine to skip them entirely on some lines. Greet people with "
     "Arabic greetings like 'As-salamu alaykum' or 'Salam habibi, welcome back'. "
     "Write these Arabic words in LATIN letters (transliterated), never in Arabic "
     "script, so they're pronounced naturally. Don't overdo it to the point of "
@@ -92,7 +102,12 @@ DEFAULT_PERSONA = os.environ.get("AVATAR_BRAIN_PERSONA", (
     "viewer feel seen and part of the room. Keep them watching for what's next. "
     "Never use markdown, bullet points, emojis, stage directions, or asterisks. "
     "Don't give financial advice as if it's guaranteed; talk about levels, setups, "
-    "and risk like a streamer would. Stay in character as the Arab host at all times."))
+    "and risk like a streamer would. Stay in character as the Arab host at all times. "
+    "NEVER REPEAT YOURSELF — a real person never says the same line, opener, or "
+    "catchphrase twice. Even for the exact same question or the same price level, "
+    "twist it and phrase it a totally fresh way every single time: different first "
+    "words, different rhythm, different angle. If you catch yourself about to start "
+    "a sentence the way you did before, change it."))
 
 
 class LLMBrain:
