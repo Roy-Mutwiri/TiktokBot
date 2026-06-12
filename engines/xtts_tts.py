@@ -278,11 +278,46 @@ class XTTSBackend:
         # compute the speaker latents ONCE from ALL refs -> richer, fast per-line
         self._gpt_latent, self._spk_emb = self._model.get_conditioning_latents(
             audio_path=refs, gpt_cond_len=30, max_ref_length=60)
+        self._laugh_wav = self._load_clip(os.path.join(_REFDIR, "laugh.wav"))
+        self._breath_wav = self._load_clip(os.path.join(_REFDIR, "breath.wav"))
         self._warmup()
         self.ready = True
         if self.device == "cuda":
             print(f"[XTTS] GPU memory: {_torch.cuda.memory_allocated()/1e9:.1f} GB")
-        print("[XTTS] Ready — Arabic + English voice clone enabled.")
+        n = ("real laugh" if self._laugh_wav is not None else "synth laugh")
+        print(f"[XTTS] Ready — Arabic + English voice clone enabled ({n}).")
+
+    def _load_clip(self, path):
+        """Load a short non-speech clip (laugh/breath) at the model's rate, or None."""
+        try:
+            if not os.path.exists(path):
+                return None
+            a, sr = _sf.read(path, dtype="float32", always_2d=False)
+            if getattr(a, "ndim", 1) > 1:
+                a = a.mean(axis=1)
+            if sr != self.sr:                    # resample to XTTS rate
+                n = int(round(len(a) * self.sr / sr))
+                a = np.interp(np.linspace(0, len(a) - 1, n), np.arange(len(a)), a)
+            a = a - np.mean(a)
+            pk = float(np.max(np.abs(a))) or 1.0
+            return (a / pk * 0.92).astype(np.float32)
+        except Exception:
+            return None
+
+    # written laughter the brain emits ("haha", "hahaha", "ahaha", "hehe")
+    _LAUGH = re.compile(r"\b(a?h+a+(h+a*)+|he(he)+)\b", re.I)
+
+    def _split_laughs(self, text):
+        """Split text into [(segment, is_laugh)] so written laughter can be replaced
+        with the speaker's REAL laugh (if available)."""
+        out = []; last = 0
+        for m in self._LAUGH.finditer(text or ""):
+            if m.start() > last:
+                out.append((text[last:m.start()], False))
+            out.append((m.group(), True)); last = m.end()
+        if last < len(text or ""):
+            out.append((text[last:], False))
+        return out or [(text, False)]
 
     def _warmup(self):
         try:
