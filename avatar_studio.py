@@ -734,6 +734,15 @@ class AvatarStudio:
                  font=("Segoe UI", 10)).pack(side="right", padx=(0, 8), ipady=2)
         tk.Label(ch, text="@handle", bg=SURFACE, fg=MUTED,
                  font=("Segoe UI", 9)).pack(side="right", padx=(0, 4))
+        # "NOW ANSWERING" — the comment the AI has committed to and is researching
+        # / answering right now (genuine answers only, not filtered spam).
+        anbg = self._mix(SURFACE, MAG, 0.22)
+        self._answer_bar = tk.Frame(cm, bg=anbg)
+        self._answer_bar.pack(fill="x", padx=10, pady=(0, 5))
+        self.answering_lbl = tk.Label(self._answer_bar, text="○  idle — waiting for a question",
+                                      bg=anbg, fg=MUTED, font=("Consolas", 9),
+                                      anchor="w", justify="left", wraplength=560)
+        self.answering_lbl.pack(fill="x", padx=9, pady=5)
         # scrolling read-only feed
         fb = tk.Frame(cm, bg=SURFACE); fb.pack(fill="both", expand=True, padx=10, pady=(0, 9))
         fsb = tk.Scrollbar(fb); fsb.pack(side="right", fill="y")
