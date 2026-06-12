@@ -108,7 +108,7 @@ BEARD_COLOR = os.environ.get("AVATAR_SWAP_BEARDCOLOR", "darkbeard")
 # BEARD DENSITY — deepen + define the beard so the sparse/light gray beard reads as a
 # FULLER, thicker beard (deeper tone + masked unsharp on the beard hairs). CPU-only, so
 # no GPU lag during speech. 0 = off.
-BEARD_DENSITY = float(os.environ.get("AVATAR_BEARD_DENSITY", "1.5"))
+BEARD_DENSITY = float(os.environ.get("AVATAR_BEARD_DENSITY", "1.2"))
 # EYE COLOUR — recolour the iris (MediaPipe iris landmarks) to a target hue while
 # KEEPING luminance (pupil stays dark, highlights bright, iris shading natural).
 EYE_COLORS = {       # (HSV hue 0-180, saturation)
