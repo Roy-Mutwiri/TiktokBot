@@ -19,6 +19,7 @@ import os
 import sys
 import json
 import collections
+import threading
 import urllib.request
 import urllib.error
 
@@ -119,7 +120,8 @@ class LLMBrain:
         self.persona = persona or DEFAULT_PERSONA
         self.host = OLLAMA_HOST.rstrip("/")
         self.history = []            # [{"role":"user"/"assistant","content":...}]
-        self._recent_openers = collections.deque(maxlen=10)  # anti-repetition memory
+        self._recent_openers = collections.deque(maxlen=14)  # anti-repetition memory
+        self._opener_lock = threading.Lock()   # shared by parallel pool workers
         self.available = False
         self.last_error = None
         self._check()
