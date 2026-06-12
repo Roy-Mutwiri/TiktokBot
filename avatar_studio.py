@@ -1696,6 +1696,10 @@ class AvatarStudio:
         "Take your time and go DEEP — read the real technicals out loud (trend, RSI, the exact support and resistance) and walk the chat through your full thinking like a sharp analyst, ramble a bit.",
         "Tell a little story or tangent about trading gold — a lesson, a past move, something human — then bring it back to today. Let it run long and natural.",
         "Really hype the room for a while — build the energy up, talk to the chat, react, go on a bit of a passionate rant about why you love this market today.",
+        # --- engagement / no dead air ---
+        "Ask the chat a fun question about gold or their trades, then IMMEDIATELY answer it yourself and keep rolling — never leave a silent pause waiting.",
+        "Welcome the room warmly, call out that you see new people coming in, and tell them to hit follow and smash the like so they catch the next signal.",
+        "Tease that a big gold signal is coming up soon and tell them to send a rose to unlock it — build the anticipation so nobody leaves.",
     ]
 
     def _live_market_ctx(self):
