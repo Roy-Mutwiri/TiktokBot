@@ -160,6 +160,7 @@ class AvatarStudio:
         self.booting = False
         self.engines = None
         self.swap_engine = None              # lazy inswapper face-swap (real head)
+        self.face_restore = None             # lazy CodeFormer HD face restore (PRO mode)
         self.tts = None
         # ALWAYS-ON resource monitor: live CPU/GPU/VRAM -> adaptive load routing so the
         # avatar never lags (movable filter work goes to whoever's free; heavy optional
