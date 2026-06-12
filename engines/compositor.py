@@ -44,10 +44,11 @@ PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.18"))   # stop at upp
 PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.56"))
 FEATHER_KERNEL = 31   # GaussianBlur kernel for the alpha edge feather (odd) - softer, no seam
 COLOR_MATCH_STRENGTH = float(os.environ.get("AVATAR_MOUTH_COLORMATCH", "0.4"))   # eased from 0.6 (it shifted the dark open-mouth interior toward skin = muted the opening)
-# Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). A little helps real
-# speech, but too much amplifies Wav2Lip's colour artifacts, so default OFF and
-# leave it as an opt-in tunable. AVATAR_MOUTH_SHARPEN.
-MOUTH_SHARPEN = float(os.environ.get("AVATAR_MOUTH_SHARPEN", "0.0"))
+# Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). The studio only
+# overlays the Wav2Lip mouth WHILE SPEAKING (idle uses the clean LP mouth), so a
+# mild amount crisps up the talking mouth without the idle-artifact issue. 0.3 is
+# a safe, natural amount; raise for more bite, lower if it looks over-sharpened.
+MOUTH_SHARPEN = float(os.environ.get("AVATAR_MOUTH_SHARPEN", "0.3"))
 MIN_BBOX = 12         # reject degenerate detections smaller than this (px)
 
 
