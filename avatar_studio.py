@@ -1885,7 +1885,10 @@ class AvatarStudio:
                 "Reason like a sharp analyst USING ONLY THESE EXACT NUMBERS — never "
                 "invent a price or level. Read what's ACTUALLY happening: where price "
                 "sits vs support/resistance, the trend, RSI, the 24h move, and what you "
-                "are watching next. Be precise, accurate and real, not vague hype.")
+                "are watching next. Be precise, accurate and real, not vague hype. "
+                "Say every number in plain spoken words like a person talking out loud. "
+                "NEVER use dollar signs, LaTeX, backslashes, math notation or markdown — "
+                "just speak the numbers.")
 
     def _check_market_alert(self):
         """Detect a SIGNIFICANT live gold event (round-level cross or sharp move) and
