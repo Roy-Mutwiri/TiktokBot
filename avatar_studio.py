@@ -1841,38 +1841,51 @@ class AvatarStudio:
         simulated chart only if the live feed is down. Also keeps the on-screen
         chart price synced to reality so the visuals match the commentary."""
         md = getattr(self, "market", None)
-        price = pct = None
+        price = None
+        tk = {}
         if md is not None:
             try:
-                p = md.price
-                if p and p > 0:
-                    price = p
-                    snap = md.snapshot()
-                    if snap is not None and len(snap) > 12:
-                        ref = float(snap[-12, 4])
-                        pct = (price - ref) / ref * 100.0 if ref else None
+                tk = md.live_ticker() or {}          # EXACT real-time price + 24h stats
+                price = tk.get("price") or md.price
+                if price and price > 0:
                     chart = self.engines.get("chart") if self.engines else None
-                    if chart is not None:        # sync the visual chart to reality
+                    if chart is not None:            # sync the visual chart to reality
                         chart.price = price
             except Exception:
                 price = None
-        if price is None:                        # live feed down -> simulated chart
+        if not price:                                # live feed down -> simulated chart
             chart = self.engines.get("chart") if self.engines else None
             price = getattr(chart, "price", None)
         if not price:
             return ""
-        move = ""
-        if pct is not None:
-            move = f", {'up' if pct >= 0 else 'down'} {abs(pct):.2f}% in the last few minutes"
-        ta = ""
+        # assemble the PRECISE, real, this-second data the model must reason over
+        facts = [f"price ${price:,.2f}"]
+        if tk:
+            facts.append(f"24h change {tk['change_pct']:+.2f}%")
+            facts.append(f"24h high ${tk['high']:,.0f}, 24h low ${tk['low']:,.0f}")
+            rng = tk["high"] - tk["low"]
+            if rng > 0:
+                facts.append(f"trading {(price - tk['low']) / rng * 100:.0f}% up its 24h range")
         try:
             import market_ta
-            if md is not None:
-                ta = market_ta.ta_summary(md.snapshot())
+            a = market_ta.analyze(md.snapshot()) if md is not None else None
+            if a:
+                if a.get("rsi") is not None:
+                    facts.append(f"RSI {a['rsi']:.0f}")
+                facts.append(f"short-term trend {a['trend']}")
+                res, sup = a.get("resistance"), a.get("support")
+                if res:
+                    facts.append(f"nearest resistance ${res:,.0f} ({(res - price) / price * 100:+.2f}%)")
+                if sup:
+                    facts.append(f"nearest support ${sup:,.0f} ({(sup - price) / price * 100:+.2f}%)")
         except Exception:
-            ta = ""
-        return (f" LIVE RIGHT NOW: gold (XAUUSD) is ${price:,.0f}{move}.{ta} "
-                f"Talk about THIS exact current price and the REAL levels, not old ones.")
+            pass
+        data = "; ".join(facts)
+        return (f" LIVE GOLD DATA RIGHT NOW (XAUUSD, real, this second): {data}. "
+                "Reason like a sharp analyst USING ONLY THESE EXACT NUMBERS — never "
+                "invent a price or level. Read what's ACTUALLY happening: where price "
+                "sits vs support/resistance, the trend, RSI, the 24h move, and what you "
+                "are watching next. Be precise, accurate and real, not vague hype.")
 
     def _check_market_alert(self):
         """Detect a SIGNIFICANT live gold event (round-level cross or sharp move) and
