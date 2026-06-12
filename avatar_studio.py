@@ -2097,16 +2097,30 @@ class AvatarStudio:
             pass
 
     # --- LIVE EVENT handlers (gifts / follows / likes / shares) -------------
+    # Reactions are built INSTANTLY from offline templates (engines/reactions.py,
+    # no LLM) the moment the event fires, and pushed to the TOP-priority queue so
+    # the avatar thanks the supporter immediately — gifts/follows lead the front.
+    @staticmethod
+    def _reactions():
+        try:
+            import reactions
+            return reactions
+        except Exception:
+            return None
+
     def _on_gift(self, user, gift, count, coins):
         try:
             self._log_msg(f"🎁 {user} sent {count}x {gift} ({coins} coins)")
             self._feed_msg(f"\U0001f381 {user} sent {count}x {gift} ({coins} coins)", "ev")
             self._sess_coins += max(0, int(coins))
-            self._event_q.put_nowait(("gift", user, gift, count, coins))
+            rx = self._reactions()
+            if rx is not None:                    # gifts to the FRONT (lead priority)
+                self._prio_events.appendleft(rx.gift(user, gift, count, coins))
             if self._sess_coins >= self._coin_goal:           # gift goal reached!
                 reached = self._coin_goal
                 self._coin_goal += int(os.environ.get("AVATAR_COIN_GOAL", "200"))
-                self._event_q.put_nowait(("goal", reached))
+                if rx is not None:
+                    self._prio_events.append(rx.goal(reached))
         except Exception:
             pass
 
@@ -2114,14 +2128,18 @@ class AvatarStudio:
         try:
             self._sess_follows += 1
             self._feed_msg(f"➕ {user} followed", "ev")
-            self._event_q.put_nowait(("follow", user))
+            rx = self._reactions()
+            if rx is not None:                    # follows to the FRONT (lead priority)
+                self._prio_events.appendleft(rx.follow(user))
         except Exception:
             pass
 
     def _on_share(self, user):
         try:
             self._feed_msg(f"↪ {user} shared the stream", "ev")
-            self._event_q.put_nowait(("share", user))
+            rx = self._reactions()
+            if rx is not None:
+                self._prio_events.append(rx.share(user))
         except Exception:
             pass
 
@@ -2130,7 +2148,9 @@ class AvatarStudio:
         try:
             self._sess_likes = max(self._sess_likes, int(total or 0))
             if total and total >= self._next_like_ms:
-                self._event_q.put_nowait(("likes", total))
+                rx = self._reactions()
+                if rx is not None:
+                    self._prio_events.append(rx.likes(total))
                 step = 500 if total < 1000 else (1000 if total < 10000 else 5000)
                 self._next_like_ms = ((total // step) + 1) * step
         except Exception:
