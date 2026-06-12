@@ -335,11 +335,13 @@ class LLMBrain:
         import urllib.request
         msgs = list(self.history[-(HISTORY_TURNS * 2):])
         msgs.append({"role": "user", "content": user_text})
+        note = self._anti_repeat_note()
+        sys_prompt = persona + ("\n\n" + note if note else "")
         body = json.dumps({
             "model": CLAUDE_MODEL,            # always the Claude model (Fable 5)
             "max_tokens": MAX_TOKENS,
             "temperature": TEMPERATURE,
-            "system": persona,
+            "system": sys_prompt,
             "messages": msgs,
         }).encode("utf-8")
         req = urllib.request.Request(CLAUDE_URL, data=body, headers={
