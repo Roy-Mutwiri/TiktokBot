@@ -1124,6 +1124,9 @@ class AvatarStudio:
             # LIVE MARKET ALERTS: watch the real gold price, react to big moves/levels.
             self._market_thread = threading.Thread(target=self._market_monitor, daemon=True)
             self._market_thread.start()
+            # WATCHDOG: auto-recover the render thread if it dies (unattended streaming).
+            self._wd_thread = threading.Thread(target=self._watchdog, daemon=True)
+            self._wd_thread.start()
 
             def _enable():
                 self.start_btn.configure(text="START")
@@ -1654,6 +1657,38 @@ class AvatarStudio:
             except Exception:
                 pass
             _t.sleep(8)
+
+    def _watchdog(self):
+        """Keep the stream alive unattended: if the render thread DIES, restart it; if
+        it STALLS (no new frame for a while), log it. Bounded restarts so a hard fault
+        doesn't loop forever."""
+        import time as _t
+        self._wd_restarts = getattr(self, "_wd_restarts", 0)
+        _t.sleep(15)                       # let the first boot settle
+        while getattr(self, "running", False):
+            _t.sleep(5)
+            try:
+                if not getattr(self, "running", False):
+                    break
+                w = getattr(self, "_worker", None)
+                if w is not None and not w.is_alive():        # render thread crashed
+                    if self._wd_restarts < 5:
+                        self._wd_restarts += 1
+                        self._log_msg(f"[watchdog] render thread died — restarting "
+                                      f"({self._wd_restarts}/5)…")
+                        self._last_frame_t = _t.monotonic()
+                        self._worker = threading.Thread(target=self._loop, daemon=True)
+                        self._worker.start()
+                    else:
+                        self._log_msg("[watchdog] too many restarts — needs a manual look.")
+                        _t.sleep(60)
+                else:
+                    lt = getattr(self, "_last_frame_t", 0)
+                    if lt and (_t.monotonic() - lt) > 20:     # alive but frozen
+                        self._log_msg("[watchdog] render stalled >20s (feed/GPU hiccup).")
+                        self._last_frame_t = _t.monotonic()   # don't spam the log
+            except Exception:
+                pass
 
     def _autotalk_loop(self):
         """Background host: the brain writes gold commentary and the Arabic-accent TTS
