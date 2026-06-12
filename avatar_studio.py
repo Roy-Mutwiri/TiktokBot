@@ -711,7 +711,7 @@ class AvatarStudio:
         # incoming comments and the avatar's spoken replies.
         cm = tk.Frame(left, bg=SURFACE, highlightthickness=1,
                       highlightbackground=self._mix(MAG, BG, 0.5))
-        cm.pack(side="bottom", fill="x", pady=(10, 0))
+        cm.pack(side="top", fill="both", expand=True, pady=(10, 0))
         ch = tk.Frame(cm, bg=SURFACE); ch.pack(fill="x", padx=10, pady=(8, 4))
         tk.Label(ch, text="\U0001f4ac LIVE TIKTOK COMMENTS", bg=SURFACE, fg=MAG,
                  font=("Consolas", 10, "bold")).pack(side="left")
