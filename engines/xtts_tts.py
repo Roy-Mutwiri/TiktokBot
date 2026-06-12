@@ -352,19 +352,26 @@ class XTTSBackend:
         # pacing) — small enough that the speech still flows, not choppy.
         gap = np.zeros(int(XTTS_GAP * self.sr), dtype=np.float32)
         parts = []
-        for seg_text, lang in codeswitch_segments(text):
-            for chunk in chunk_text(seg_text):
-                chunk = chunk.strip()
-                # an Arabic segment with no actual Arabic letters left (just stray
-                # punctuation) -> skip so XTTS isn't handed junk it distorts on
-                if not chunk or not re.search(r"\w", chunk):
-                    continue
-                try:
-                    w = self._synth_one(chunk, lang, speed)
-                    if w is not None and len(w):
-                        parts.append(w); parts.append(gap)
-                except Exception:
-                    continue
+        # split out written laughter so we can splice the speaker's REAL laugh
+        for seg, is_laugh in self._split_laughs(text):
+            if is_laugh and self._laugh_wav is not None:
+                parts.append(self._laugh_wav); parts.append(gap)
+                continue                       # real laugh instead of synthesised "haha"
+            if not seg.strip():
+                continue
+            for seg_text, lang in codeswitch_segments(seg):
+                for chunk in chunk_text(seg_text):
+                    chunk = chunk.strip()
+                    # an Arabic segment with no actual Arabic letters left (just stray
+                    # punctuation) -> skip so XTTS isn't handed junk it distorts on
+                    if not chunk or not re.search(r"\w", chunk):
+                        continue
+                    try:
+                        w = self._synth_one(chunk, lang, speed)
+                        if w is not None and len(w):
+                            parts.append(w); parts.append(gap)
+                    except Exception:
+                        continue
         if not parts:
             return None, self.sr
         return np.concatenate(parts).astype(np.float32), self.sr
