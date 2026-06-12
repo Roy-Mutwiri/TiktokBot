@@ -2370,6 +2370,59 @@ class AvatarStudio:
                     pass
             _t.sleep(3.0)
 
+    def _load_handles(self):
+        """Load the remembered @handle list (most-recent first, each once)."""
+        try:
+            import json
+            with open(self._handles_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, list):
+                seen, out = set(), []
+                for h in data:
+                    h = str(h).strip()
+                    if h and h.lower() not in seen:
+                        seen.add(h.lower())
+                        out.append(h)
+                return out
+        except Exception:
+            pass
+        return []
+
+    def _save_handle(self, handle):
+        """Remember a used @handle (deduped, most-recent first) + refresh the dropdown."""
+        h = (handle or "").strip()
+        if not h:
+            return
+        if not h.startswith("@"):
+            h = "@" + h
+        low = h.lower()
+        cur = [x for x in getattr(self, "_handles", []) if x.lower() != low]
+        self._handles = ([h] + cur)[:40]
+        try:
+            import json
+            with open(self._handles_file, "w", encoding="utf-8") as f:
+                json.dump(self._handles, f, ensure_ascii=False)
+        except Exception:
+            pass
+
+        def _apply():
+            try:
+                self.handle_combo["values"] = self._handles
+            except Exception:
+                pass
+        try:
+            self.root.after(0, _apply)
+        except Exception:
+            pass
+
+    def _on_handle_pick(self):
+        """A handle was picked from the dropdown — it's now in the field; remember it
+        (moves it to the top) so the live monitor switches to it on its next check."""
+        h = (self.handle_var.get() or "").strip()
+        if h:
+            self._save_handle(h)
+            self._log_msg(f"[comments] handle set to {h}")
+
     def _on_comments(self):
         """Toggle the live TikTok comment responder on/off."""
         try:
