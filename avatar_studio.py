@@ -744,6 +744,17 @@ class AvatarStudio:
         self._check(c, "Also send to OBS virtual camera",
                     self.obs_var).pack(fill="x", pady=3)
 
+        # ---- LIVE TIKTOK COMMENTS -----------------------------------------
+        c = self._card(right, "LIVE TIKTOK COMMENTS")
+        r = self._row(c, "Your @handle")
+        self.handle_var = tk.StringVar(value=os.environ.get("AVATAR_TIKTOK_USER", ""))
+        tk.Entry(r, textvariable=self.handle_var, width=16, bg=BG, fg=FG,
+                 insertbackground=CYAN, relief="flat",
+                 font=("Segoe UI", 10)).pack(side="right", ipady=2)
+        self.comments_var = tk.BooleanVar(value=False)
+        self._check(c, "Answer live comments  ·  filter spam, reply as a human",
+                    self.comments_var, self._on_comments).pack(fill="x", pady=3)
+
         # ---- VOICE ---------------------------------------------------------
         c = self._card(right, "VOICE")
         tk.Label(c, text="Mode", bg=SURFACE, fg=MUTED,
@@ -1578,6 +1589,10 @@ class AvatarStudio:
                 if tts.pending > LEAD:
                     _t.sleep(0.2)
                     continue
+                # PRIORITY: answer a worthwhile LIVE TikTok comment before the next
+                # scripted gold line — viewers come first (filtered for spam already).
+                if self._answer_one_comment():
+                    continue
                 beat = self._AUTOTALK_BEATS[i % len(self._AUTOTALK_BEATS)]; i += 1
                 ctx = self._live_market_ctx()    # REAL gold price + recent move, fetched NOW
                 line = None
@@ -1592,6 +1607,61 @@ class AvatarStudio:
             except Exception as exc:
                 self._log_msg(f"[autotalk] {exc}")
                 _t.sleep(2.0)
+
+    def _on_comment(self, user, text):
+        """Called from the TikTok reader thread for every live comment — queue it."""
+        try:
+            self._comment_q.put_nowait((user, text))
+        except Exception:
+            pass        # queue full = drop (we're behind on a comment flood)
+
+    def _answer_one_comment(self):
+        """Pop the next live comment; if it's worth answering, speak the answer.
+        Returns True if the avatar spoke (so the loop skips its scripted line)."""
+        try:
+            if self.responder is None or self._comment_q.empty() or self.tts is None:
+                return False
+            # drain a few at once but only answer ONE per cycle (keeps it fresh, not
+            # a backlog read-out); newer comments matter more so take the latest.
+            user, text = None, None
+            while not self._comment_q.empty():
+                user, text = self._comment_q.get_nowait()
+            reply = self.responder.respond(user, text)     # filter + research + answer
+            if reply:
+                self._log_msg(f"↳ {user}: {text}")
+                self._log_msg(f"avatar→{user}> {reply}")
+                self.tts.speak(reply)
+                return True
+            return False
+        except Exception as exc:
+            self._log_msg(f"[comments] {exc}")
+            return False
+
+    def _on_comments(self):
+        """Toggle the live TikTok comment responder on/off."""
+        try:
+            if not self.comments_var.get():
+                if self.tiktok is not None:
+                    self.tiktok.stop(); self.tiktok = None
+                self._log_msg("[comments] off")
+                return
+            handle = (self.handle_var.get() or "").strip()
+            if not handle:
+                self._log_msg("[comments] enter your TikTok @handle first.")
+                self.comments_var.set(False); return
+            if self.brain is None:
+                self._log_msg("[comments] press START first (brain not loaded yet).")
+                self.comments_var.set(False); return
+            from comment_responder import CommentResponder
+            from tiktok_comments import TikTokComments
+            if self.responder is None:
+                self.responder = CommentResponder(self.brain, get_context=self._live_market_ctx)
+            self.tiktok = TikTokComments(handle, self._on_comment)
+            self.tiktok.start()
+            self._log_msg(f"[comments] connecting to {handle} — reading live comments…")
+        except Exception as exc:
+            self._log_msg(f"[comments] failed: {exc}")
+            self.comments_var.set(False)
 
     def _broadcast_frame(self, fr, scale=0.82):
         """BROADCAST framing: render the avatar at a natural size on a soft blur of
