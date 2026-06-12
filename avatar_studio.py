@@ -2157,18 +2157,39 @@ class AvatarStudio:
             pass
 
     def _react_one_event(self):
-        """Speak the next live-event reaction (gift/follow/share/likes). Gifts come
-        first. Returns True if the avatar spoke (loop skips its scripted line)."""
+        """Speak the next live event. TOP priority = INSTANT offline reactions
+        (follows/gifts/shares/likes/goals, already built as text) which clear the
+        filler queue and play immediately. Then market alerts / polls from the
+        secondary queue (these may use the LLM). Returns True if the avatar spoke."""
         try:
-            if self._event_q.empty() or self.tts is None:
+            if self.tts is None:
+                return False
+            # 1) INSTANT appreciation — speak NOW, jump ahead of any filler commentary
+            if self._prio_events:
+                try:
+                    txt = self._prio_events.popleft()
+                except IndexError:
+                    txt = None
+                if txt:
+                    try:
+                        self.tts.clear_pending()   # thank-you plays right after current line
+                    except Exception:
+                        pass
+                    self._log_msg("avatar> " + txt)
+                    self.tts.speak(txt)
+                    self._last_spoke_t = time.monotonic()
+                    return True
+            # 2) market alerts / polls (secondary — may phrase via the brain)
+            if self._event_q.empty():
                 return False
             ev = self._event_q.get_nowait()
             kind = ev[0]
             reply = None
-            if kind == "market":                   # autonomous — no responder needed
-                reply = self._generate(ev[1])      # brain phrases the live alert
-            elif kind == "goal":                   # gift-goal reached celebration
-                reply = (self.responder.react_goal(ev[1]) if self.responder is not None
+            if kind == "market":                   # autonomous — brain phrases the alert
+                reply = self._generate(ev[1])
+            elif kind == "goal":                   # legacy path (now usually instant)
+                rx = self._reactions()
+                reply = (rx.goal(ev[1]) if rx is not None
                          else f"We just smashed the {ev[1]}-coin goal — thank you all!")
             elif kind == "poll_start":
                 reply = ("Quick poll, fam — are you BUYING or SELLING gold right now? "
@@ -2182,29 +2203,12 @@ class AvatarStudio:
                     lead = "BUYING" if b >= s else "SELLING"
                     reply = (f"Poll's in — the chat is {lead} gold! Buy {bp}%, sell {100 - bp}%, "
                              f"{tot} votes. Let's trade it.")
-            elif self.responder is not None:
-                if kind == "gift":
-                    reply = self.responder.react_gift(ev[1], ev[2], ev[3], ev[4])
-                elif kind == "follow":
-                    reply = self.responder.react_follow(ev[1])
-                elif kind == "share":
-                    reply = self.responder.react_share(ev[1])
-                elif kind == "likes":
-                    reply = self.responder.react_likes(ev[1])
             if not reply:
                 return False
-            if reply:
-                # appreciation is time-sensitive — clear queued scripted lines so the
-                # thank-you plays NEXT (right after the current line), not minutes later
-                if kind in ("gift", "follow", "share", "likes", "goal"):
-                    try:
-                        self.tts.clear_pending()
-                    except Exception:
-                        pass
-                self._log_msg(f"avatar→{kind}> {reply}")
-                self.tts.speak(reply)
-                return True
-            return False
+            self._log_msg(f"avatar→{kind}> {reply}")
+            self.tts.speak(reply)
+            self._last_spoke_t = time.monotonic()
+            return True
         except Exception as exc:
             self._log_msg(f"[events] {exc}")
             return False
