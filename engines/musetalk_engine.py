@@ -66,7 +66,7 @@ MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "0.0"))
 MOUTH_INTERIOR = float(os.environ.get("AVATAR_MOUTH_INTERIOR", "1.0"))
 # DE-BLUR the speaking mouth: Real-ESRGAN detail on the (small) mouth crop — ~0ms,
 # adds genuine sharpness so the open/talking mouth isn't soft. 0 = off.
-DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0"))  # OFF: GPU op contends with voice synth during speech = lag. CPU crisp in _pop_mouth instead
+DEBLUR_MOUTH = float(os.environ.get("AVATAR_MOUTH_DEBLUR", "0.7"))  # PRO: governor-gated (loop sets allow_deblur=GPU-free) so it sharpens without speech lag
 
 SAMPLE_RATE = 16000
 AUDIO_WINDOW_MS = 200
