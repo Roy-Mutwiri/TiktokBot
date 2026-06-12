@@ -202,35 +202,34 @@ class XTTSBackend:
             pass
 
     def _synth_one(self, text, lang):
+        # already-short chunk -> own splitting OFF (we control chunk size)
         out = self._model.inference(
             text, lang, self._gpt_latent, self._spk_emb,
             temperature=XTTS_TEMP, length_penalty=XTTS_LEN_PEN,
             repetition_penalty=XTTS_REP_PEN, top_k=XTTS_TOP_K, top_p=XTTS_TOP_P,
-            speed=XTTS_SPEED, enable_text_splitting=True)
+            speed=XTTS_SPEED, enable_text_splitting=False)
         wav = out["wav"] if isinstance(out, dict) else out
         if hasattr(wav, "detach"):
             wav = wav.detach().float().cpu().numpy()
         return np.asarray(wav, dtype=np.float32).flatten()
 
     def synthesize(self, text):
-        """Synthesise `text` in the cloned voice -> (float32, sr). Code-switches:
-        Arabic-script runs are spoken Arabic, Latin runs English, so the host can
-        drop Arabic words/greetings mid-sentence and each is pronounced right."""
+        """Synthesise `text` in the cloned voice -> (float32, sr). Two safeguards
+        against long-speech distortion: (1) code-switch into Arabic/Latin runs;
+        (2) chunk each run into short sentence-sized pieces so no single XTTS
+        generation runs long enough to drift/distort. Pieces are concatenated."""
         if self._model is None or not (text or "").strip():
             return None, self.sr
-        segs = codeswitch_segments(text)
-        if len(segs) <= 1:
-            lang = segs[0][1] if segs else "en"
-            return self._synth_one(text, lang), self.sr
         gap = np.zeros(int(0.05 * self.sr), dtype=np.float32)
         parts = []
-        for seg_text, lang in segs:
-            try:
-                w = self._synth_one(seg_text, lang)
-                if w is not None and len(w):
-                    parts.append(w); parts.append(gap)
-            except Exception:
-                continue
+        for seg_text, lang in codeswitch_segments(text):
+            for chunk in chunk_text(seg_text):
+                try:
+                    w = self._synth_one(chunk, lang)
+                    if w is not None and len(w):
+                        parts.append(w); parts.append(gap)
+                except Exception:
+                    continue
         if not parts:
             return None, self.sr
         return np.concatenate(parts).astype(np.float32), self.sr
