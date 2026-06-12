@@ -165,6 +165,7 @@ class TTSStreamEngine:
         self._mltts_tried = False
         self._xtts = None                # Coqui XTTS-v2 (Arabic + English clone)
         self._xtts_tried = False
+        self._hifi = {}                  # feed-pcm hash -> (hi-fi 24k pcm, sr) for playback
         self.backend = "edge-tts"
         # Active backend (switchable at runtime via set_backend) — starts from
         # the AVATAR_TTS env default.
@@ -638,13 +639,24 @@ class TTSStreamEngine:
         return np.asarray(wav, dtype=np.float32)
 
     def _synth_xtts(self, text):
-        """Coqui XTTS-v2 synth (auto Arabic/English) -> 16 kHz mono float32 PCM."""
+        """Coqui XTTS-v2 synth (auto Arabic/English). Returns the 16 kHz feed PCM (for
+        the mouth) but STASHES the full-quality 24 kHz audio so playback uses it —
+        the listener hears XTTS's native fidelity, not a 16 kHz downsample."""
         wav, sr = self._xtts.synthesize(self._strip_emotion_tags(text))
         if wav is None or len(wav) == 0:
             return None
-        if sr != SAMPLE_RATE:
-            wav = self._resample(wav, sr, SAMPLE_RATE)
-        return np.asarray(wav, dtype=np.float32)
+        wav = np.asarray(wav, dtype=np.float32)
+        feed = self._resample(wav, sr, SAMPLE_RATE) if sr != SAMPLE_RATE else wav
+        feed = np.asarray(feed, dtype=np.float32)
+        if sr > SAMPLE_RATE:                      # keep the hi-fi version for playback
+            try:
+                key = hash(feed[:512].tobytes())
+                self._hifi[key] = (wav, int(sr))
+                if len(self._hifi) > 8:           # bound the stash
+                    self._hifi.pop(next(iter(self._hifi)))
+            except Exception:
+                pass
+        return feed
 
     # Maya1-style inline emotion tags like <laugh>, <sigh>. Only Maya1 performs
     # them; every other backend must strip them so they aren't read aloud.
