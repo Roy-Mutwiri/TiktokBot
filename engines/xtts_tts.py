@@ -240,7 +240,8 @@ class XTTSBackend:
         against long-speech distortion: (1) code-switch into Arabic/Latin runs;
         (2) chunk each run into short sentence-sized pieces so no single XTTS
         generation runs long enough to drift/distort. Pieces are concatenated."""
-        if self._model is None or not (text or "").strip():
+        text = clean_for_tts(text)            # strip emojis/symbols, tame letter runs
+        if self._model is None or not text:
             return None, self.sr
         # a SHORT natural pause between sentences (like a real person breathing/
         # pacing) — small enough that the speech still flows, not choppy.
@@ -248,6 +249,11 @@ class XTTSBackend:
         parts = []
         for seg_text, lang in codeswitch_segments(text):
             for chunk in chunk_text(seg_text):
+                chunk = chunk.strip()
+                # an Arabic segment with no actual Arabic letters left (just stray
+                # punctuation) -> skip so XTTS isn't handed junk it distorts on
+                if not chunk or not re.search(r"\w", chunk):
+                    continue
                 try:
                     w = self._synth_one(chunk, lang)
                     if w is not None and len(w):
