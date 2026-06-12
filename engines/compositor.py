@@ -43,7 +43,7 @@ PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.18"))   # stop at upp
 # OPENING reads clearly instead of being clipped.
 PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.56"))
 FEATHER_KERNEL = 31   # GaussianBlur kernel for the alpha edge feather (odd) - softer, no seam
-COLOR_MATCH_STRENGTH = 0.6   # 0..1 how strongly to match crop colour to skin
+COLOR_MATCH_STRENGTH = float(os.environ.get("AVATAR_MOUTH_COLORMATCH", "0.4"))   # eased from 0.6 (it shifted the dark open-mouth interior toward skin = muted the opening)
 # Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). A little helps real
 # speech, but too much amplifies Wav2Lip's colour artifacts, so default OFF and
 # leave it as an opt-in tunable. AVATAR_MOUTH_SHARPEN.
