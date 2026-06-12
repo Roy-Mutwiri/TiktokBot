@@ -736,9 +736,19 @@ class TTSStreamEngine:
                     pass
 
     async def _play_and_feed(self, pcm):
-        """Play audio and feed the mouth engine 40 ms at a time, paced to playback."""
+        """Play audio and feed the mouth engine 40 ms at a time, paced to playback.
+        Playback uses the stashed HI-FI (24 kHz) version when available so the
+        listener hears full fidelity; the mouth is always fed the 16 kHz pcm."""
         self._set_speaking(True)
         wav_holder = {}
+        # find the matching hi-fi (24k) buffer for playback; fall back to the 16k pcm
+        play_pcm, play_sr = pcm, SAMPLE_RATE
+        try:
+            hi = self._hifi.pop(hash(pcm[:512].tobytes()), None)
+            if hi is not None:
+                play_pcm, play_sr = hi
+        except Exception:
+            pass
 
         # a) start audio playback AFTER MOUTH_SYNC_DELAY so the audible voice lines up
         #    with the on-screen mouth (delayed by the render pipeline).
@@ -746,7 +756,7 @@ class TTSStreamEngine:
             if MOUTH_SYNC_DELAY > 0:
                 await asyncio.sleep(MOUTH_SYNC_DELAY)
             if HAVE_WINSOUND and not self.muted and self._running:
-                wav = self._write_temp_wav(pcm)
+                wav = self._write_temp_wav(play_pcm, play_sr)
                 if wav:
                     try:
                         winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
