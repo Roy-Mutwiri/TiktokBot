@@ -16,6 +16,11 @@ import sys
 import time
 import statistics
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 os.environ.setdefault("AVATAR_COMMENTS_WEB", "0")   # web tested separately (fast battery)
 sys.path.insert(0, "engines")
 
