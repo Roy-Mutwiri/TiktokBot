@@ -1985,10 +1985,35 @@ class AvatarStudio:
                         news = cal.next_alert()
                         if news:
                             self._event_q.put_nowait(("market", news))
+                    self._refresh_gold_news()            # real headlines (cached ~6 min)
                     self._poll_tick()                    # buy/sell poll lifecycle
             except Exception:
                 pass
             _t.sleep(8)
+
+    def _refresh_gold_news(self):
+        """Cache the top real gold-market headline (~every 6 min) so the host can
+        reference WHY gold is moving, grounded in actual news, not made up."""
+        import time as _t
+        now = _t.monotonic()
+        if now - getattr(self, "_news_t", 0.0) < 360:
+            return
+        self._news_t = now
+        def _fetch():
+            try:
+                import web_research
+                res = web_research.research("gold XAUUSD price today news driver fed dollar",
+                                            max_results=3)
+                if res:
+                    # keep the first concrete headline line
+                    for ln in res.splitlines():
+                        ln = ln.strip(" -•").strip()
+                        if len(ln) > 30:
+                            self._gold_news = ln[:200]
+                            break
+            except Exception:
+                pass
+        threading.Thread(target=_fetch, daemon=True).start()
 
     def _watchdog(self):
         """Keep the stream alive unattended: if the render thread DIES, restart it; if
