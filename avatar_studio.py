@@ -1748,25 +1748,41 @@ class AvatarStudio:
     # MARKET-focused beats — used when gold is actually moving (lean into analysis,
     # levels, reactions). Mixed length so pacing stays unpredictable/human.
     _MARKET_BEATS = [
-        "Snap a quick one-line hyped reaction to gold's latest move. Keep it SHORT, one breath.",
-        "Drop a single quick gut-reaction word or phrase about gold right now, like you just glanced at the chart.",
-        "Quick short call: bullish or bearish on gold right now, in one snappy line.",
         "Give a live update on where gold is trading and what you're watching.",
         "Call out a key support or resistance level on gold and what you'd do around it.",
-        "Take your time and go DEEP — read the real technicals out loud (trend, RSI, the exact support and resistance) and walk the chat through your full thinking like a sharp analyst, ramble a bit.",
         "React in the moment to gold's move and tell the chat exactly what level you're watching next and why.",
-        "Tell a little story or tangent about trading gold — a lesson, a past move — then bring it back to THIS move today.",
+        "Quick call: bullish or bearish on gold right now, and why, in a snappy line or two.",
+        "Walk the chat through the gold chart right now — the trend and the nearest level that matters.",
+        "Point out what gold is doing around the current price and the level you'd watch for a move.",
     ]
     # ENGAGEMENT-focused beats — used when the market is quiet (work the chat, CTAs,
     # questions, hype) so there's never dead air.
     _ENGAGE_BEATS = [
         "Fire off a punchy short line telling the chat to smash like. One sentence max.",
         "Push the gift goal — tell viewers to send a rose to unlock the next gold signal.",
-        "Really hype the room for a while — build the energy up, talk to the chat, react, go on a passionate rant.",
         "Ask the chat a fun question about gold or their trades, then IMMEDIATELY answer it yourself and keep rolling — never leave a silent pause waiting.",
         "Welcome the room warmly, call out that you see new people coming in, and tell them to hit follow and smash the like.",
         "Tease that a big gold signal is coming up soon and tell them to send a rose to unlock it — build anticipation so nobody leaves.",
         "Banter with the chat — answer the vibe of the room, shout people out, keep it warm and fun.",
+    ]
+    # SHORT snappy one-breath lines — FAST to generate. Used to refill the voice
+    # buffer the instant it runs dry so the avatar never goes silent. Chart-flavoured
+    # so even the filler keeps the show on gold.
+    _SHORT_BEATS = [
+        "One snappy line reacting to gold's price RIGHT NOW. One breath, high energy.",
+        "Quick call in one line: is gold pushing up or fading here?",
+        "Shout the current gold level and the one number you're watching next. One line.",
+        "One quick line hyping the chat to smash that like while you watch gold.",
+        "Your gut read on the gold chart this second — one punchy sentence.",
+        "Drop a quick 'eyes on this level' callout for gold. One short line.",
+    ]
+    # DEEP dives — long, passionate, rambling. Only fired when there's a voice cushion
+    # (a queued line already playing) so the slow generation can't create dead air.
+    _DEEP_BEATS = [
+        "Take your time and go DEEP — read the real technicals out loud (trend, RSI, the exact support and resistance) and walk the chat through your full thinking like a sharp analyst, ramble a bit.",
+        "Tell a little story or tangent about trading gold — a lesson, a past move — then bring it back to THIS move today.",
+        "Really hype the room for a while — build the energy up, talk to the chat, react, go on a passionate rant about where gold is headed.",
+        "Break down your whole game plan on gold from here — the level you want, your invalidation, and what gets you excited, out loud like a pro.",
     ]
     _AUTOTALK_BEATS = _MARKET_BEATS + _ENGAGE_BEATS    # union (compat)
 
@@ -1936,7 +1952,7 @@ class AvatarStudio:
         # Look-ahead = 2 so a NEXT line is always synthesized and ready the instant
         # the current one ends — no dead air between lines (streamers never leave
         # silence). The music bed covers any micro-gap while a line generates.
-        LEAD = 2
+        LEAD = 3                  # keep ~3 lines buffered so the voice never runs dry
         i = 0
         while getattr(self, "running", False):
             try:
@@ -1966,17 +1982,36 @@ class AvatarStudio:
                 # NOTE: counter name must NOT be self._mix — that's the colour-mixing
                 # method (self._mix(a,b,t)); reusing it threw "function + int" each loop.
                 self._chat_mix = getattr(self, "_chat_mix", 0) + 1
+                # PRIORITY 2: answer the live chat. Moving market -> sparingly (~1 in 4,
+                # so analysis leads); quiet market -> eagerly (viewers come first).
                 if active:
-                    pool = self._MARKET_BEATS
-                    # still answer the chat, but sparingly (~1 in 4) so market leads
                     if self._chat_mix % 4 == 0 and self._answer_one_comment():
                         continue
                 else:
-                    pool = self._ENGAGE_BEATS
-                    # quiet market -> viewers come first, answer comments eagerly
                     if self._answer_one_comment():
                         continue
-                beat = pool[i % len(pool)]; i += 1
+                # PRIORITY 3: keep talking — CHART-FORWARD. Moving market -> all chart
+                # beats. Quiet market with no comments -> ALTERNATE chart talk with
+                # engagement so the chart is ALWAYS part of the show (never pure filler).
+                if active:
+                    pool = self._MARKET_BEATS
+                else:
+                    pool = (self._MARKET_BEATS if (self._chat_mix % 2 == 0)
+                            else self._ENGAGE_BEATS)
+                # BUFFER-AWARE beat choice = the anti-silence mechanism. _generate() is
+                # synchronous and a long DEEP line can take many seconds, so:
+                #   * buffer empty   -> a SHORT line refills it fast (no dead air)
+                #   * buffer cushion -> occasionally go DEEP (long generation is covered
+                #                       by the line still playing)
+                #   * otherwise      -> the normal chart/engagement rotation
+                pend = getattr(self.tts, "pending", 0) or 0
+                if pend <= 0:
+                    beat = self._SHORT_BEATS[i % len(self._SHORT_BEATS)]
+                elif pend >= 2 and self._chat_mix % 7 == 0:
+                    beat = self._DEEP_BEATS[i % len(self._DEEP_BEATS)]
+                else:
+                    beat = pool[i % len(pool)]
+                i += 1
                 ctx = self._live_market_ctx()    # REAL gold price + recent move, fetched NOW
                 line = None
                 try:
@@ -1987,6 +2022,7 @@ class AvatarStudio:
                 if line and self.autotalk_var.get() and _t.monotonic() >= self._user_active_until:
                     self._log_msg("avatar> " + line)
                     self.tts.speak(line)
+                    self._last_spoke_t = _t.monotonic()
             except Exception as exc:
                 self._log_msg(f"[autotalk] {exc}")
                 _t.sleep(2.0)
