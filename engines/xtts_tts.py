@@ -245,6 +245,8 @@ class XTTSBackend:
         self._model = None
         self._gpt_latent = None
         self._spk_emb = None
+        self._laugh_wav = None       # the speaker's REAL laugh, spliced on laugh cues
+        self._breath_wav = None      # the speaker's REAL breath
         try:
             self._load()
         except Exception as exc:
