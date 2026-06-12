@@ -1116,6 +1116,9 @@ class AvatarStudio:
             # pauses the LLM).
             self._autotalk_thread = threading.Thread(target=self._autotalk_loop, daemon=True)
             self._autotalk_thread.start()
+            # LIVE MARKET ALERTS: watch the real gold price, react to big moves/levels.
+            self._market_thread = threading.Thread(target=self._market_monitor, daemon=True)
+            self._market_thread.start()
 
             def _enable():
                 self.start_btn.configure(text="START")
