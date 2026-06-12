@@ -317,25 +317,38 @@ class TTSStreamEngine:
             q = 0
         return q + (1 if (self.synthesizing or self.speaking) else 0)
 
-    def clear_pending(self):
-        """Drop queued (not-yet-started) lines so a higher-priority line (e.g. a
-        user's ASK answer) plays next instead of behind an auto-host backlog. The
-        currently-playing line is left to finish."""
+    def clear_pending(self, below=999):
+        """Drop QUEUED (not-yet-started) lines whose priority is < `below`, so a more
+        important line plays next instead of behind a backlog. Items with priority
+        >= `below` are KEPT (re-queued in order). The currently-playing line always
+        finishes. Priorities: 0 = filler commentary, 1 = comment answer, 2 = live
+        appreciation (follow/gift). So a comment clears filler (below=1) but never a
+        queued thank-you; a thank-you clears both (below=2) so it lands immediately."""
         if self._loop is None or self.speech_queue is None:
             return
+
         async def _drain():
+            kept = []
             try:
                 while not self.speech_queue.empty():
-                    self.speech_queue.get_nowait()
+                    item = self.speech_queue.get_nowait()
+                    prio = item[0] if isinstance(item, tuple) else 0
+                    if item is not None and prio >= below:
+                        kept.append(item)
             except Exception:
                 pass
+            for it in kept:                      # put the survivors back, in order
+                try:
+                    self.speech_queue.put_nowait(it)
+                except Exception:
+                    pass
         try:
             asyncio.run_coroutine_threadsafe(_drain(), self._loop)
         except Exception:
             pass
 
-    def speak(self, text):
-        """Queue text to be spoken; trigger any keyword reaction immediately."""
+    def speak(self, text, priority=0):
+        """Queue text to be spoken (priority: 0 filler, 1 comment, 2 appreciation)."""
         text = (text or "").strip()
         if not text:
             return
@@ -347,7 +360,8 @@ class TTSStreamEngine:
         self.words_spoken += len(text.split())
         self.lines_spoken += 1
         if self._loop is not None:
-            asyncio.run_coroutine_threadsafe(self.speech_queue.put(text), self._loop)
+            asyncio.run_coroutine_threadsafe(
+                self.speech_queue.put((int(priority), text)), self._loop)
 
     def set_muted(self, muted):
         """Mute/unmute audio output (mouth still moves when muted)."""
