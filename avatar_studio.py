@@ -1975,6 +1975,7 @@ class AvatarStudio:
         """Called from the TikTok reader thread for every live comment — queue it
         (or count it as a poll vote if a buy/sell poll is running)."""
         try:
+            self._feed_msg(f"{user}:  {text}", "q")     # show ALL comments live
             poll = self._poll
             if poll is not None:
                 t = (text or "").strip().lower()
@@ -2109,12 +2110,31 @@ class AvatarStudio:
             if reply:
                 self._log_msg(f"↳ {user}: {text}")
                 self._log_msg(f"avatar→{user}> {reply}")
+                self._feed_msg(f"\U0001f916 → {user}:  {reply}", "a")
                 self.tts.speak(reply)
                 return True
             return False
         except Exception as exc:
             self._log_msg(f"[comments] {exc}")
             return False
+
+    def _feed_msg(self, text, kind="sys"):
+        """Append one line to the live-comments feed below the avatar. Thread-safe.
+        kind: 'q' viewer comment, 'a' avatar reply, 'ev' gift/follow, 'sys' note."""
+        def _apply():
+            try:
+                self.feed.configure(state="normal")
+                self.feed.insert("end", text + "\n", kind)
+                if int(self.feed.index("end-1c").split(".")[0]) > 250:
+                    self.feed.delete("1.0", "80.0")     # cap scrollback
+                self.feed.see("end")
+                self.feed.configure(state="disabled")
+            except Exception:
+                pass
+        try:
+            self.root.after(0, _apply)
+        except Exception:
+            pass
 
     def _set_live_light(self, state):
         """Drive the live-status dot. state: 'live' (green), 'off' (red),
@@ -2124,11 +2144,21 @@ class AvatarStudio:
             "off":  ("#ff3b5c", "#4a0c1a"),   # red + dark red halo
             "none": ("#3a3f4a", ""),          # grey, no halo
         }.get(state, ("#3a3f4a", ""))
+        word, wcol = {
+            "live": ("LIVE", "#27ff9e"),
+            "off":  ("offline", "#ff3b5c"),
+            "none": ("no handle", MUTED),
+        }.get(state, ("no handle", MUTED))
 
         def _apply():
             try:
                 self.live_light.itemconfig(self._live_dot, fill=dot)
                 self.live_light.itemconfig(self._live_glow, fill=glow)
+            except Exception:
+                pass
+            try:                                  # mirror onto the docked feed panel
+                self.feed_light.itemconfig(self._feed_dot, fill=dot)
+                self.feed_status.configure(text=word, fg=wcol)
             except Exception:
                 pass
         try:

@@ -23,6 +23,8 @@
 import os
 import sys
 import time
+import json
+import random
 import threading
 
 try:
@@ -38,7 +40,15 @@ BASE_VOL = float(os.environ.get("AVATAR_MUSIC_VOL", "0.17"))   # idle (pause) be
 # on top (0.15 -> bed ~5-6x quieter than the voice). Lower = voice more dominant.
 DUCK = float(os.environ.get("AVATAR_MUSIC_DUCK", "0.15"))
 SONG_SECONDS = float(os.environ.get("AVATAR_MUSIC_SONG_SECONDS", "26"))  # per track
-NUM_SONGS = int(os.environ.get("AVATAR_MUSIC_SONGS", "50"))    # unique tracks before any repeat
+# HUGE pool of procedurally-unique tracks so we can go a long time with no repeat.
+# 5000 tracks x ~26s = ~36 hours of music before the pool could even be exhausted.
+NUM_SONGS = int(os.environ.get("AVATAR_MUSIC_SONGS", "5000"))
+# Don't replay a track until this many DAYS have passed (persisted across sessions).
+REPEAT_GAP = float(os.environ.get("AVATAR_MUSIC_REPEAT_DAYS", "2")) * 86400.0
+# Persistent play history (seed -> last-played unix time) so "heard today, not
+# again for ~2 days" survives restarts.
+_PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+HISTORY_FILE = os.path.join(_PROJECT, "_music_history.json")
 
 # Dark scales only — phonk lives in minor/phrygian/harmonic-minor.
 DARK_SCALES = {
