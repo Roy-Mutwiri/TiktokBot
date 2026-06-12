@@ -276,7 +276,7 @@ def apply_clarity(frame, amount=0.34):
     blur_l = cv2.GaussianBlur(frame, (0, 0), 3.0)
     out = cv2.addWeighted(frame, 1.0 + amount, blur_l, -amount, 0)
     # small radius — fine detail / edge crispness (features, lashes, beard, lips)
-    fine = float(os.environ.get("AVATAR_FINE_SHARP", "0.7"))
+    fine = float(os.environ.get("AVATAR_FINE_SHARP", "0.85"))
     if fine > 0:
         blur_s = cv2.GaussianBlur(out, (0, 0), 0.9)
         out = cv2.addWeighted(out, 1.0 + fine, blur_s, -fine, 0)
