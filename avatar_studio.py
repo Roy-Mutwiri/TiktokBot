@@ -1566,6 +1566,64 @@ class AvatarStudio:
         return (f" LIVE RIGHT NOW: gold (XAUUSD) is ${price:,.0f}{move}. "
                 f"Talk about THIS exact current price, not an old level.")
 
+    def _check_market_alert(self):
+        """Detect a SIGNIFICANT live gold event (round-level cross or sharp move) and
+        return a brain prompt to announce it live, or None. Tracks price history; rate-
+        limited so it doesn't spam."""
+        md = getattr(self, "market", None)
+        if md is None:
+            return None
+        try:
+            price = float(md.price)
+        except Exception:
+            return None
+        if not price or price <= 0:
+            return None
+        now = time.monotonic()
+        if not hasattr(self, "_ma_hist"):
+            import collections as _c
+            self._ma_hist = _c.deque(maxlen=60)
+            self._ma_last = 0.0
+            self._ma_prev = price
+        self._ma_hist.append((now, price))
+        if now - self._ma_last < 75:        # at most ~1 alert / 75s
+            self._ma_prev = price
+            return None
+        alert = None
+        lvl = 25                            # gold "round" levels every $25
+        if int(price // lvl) != int(self._ma_prev // lvl):     # crossed a round level
+            crossed = (int(price // lvl) * lvl if price > self._ma_prev
+                       else (int(price // lvl) + 1) * lvl)
+            alert = (f"BREAKING: gold just crossed ${crossed:,} and is now ${price:,.0f}. "
+                     "React live to this level break — support, resistance, or breakout? "
+                     "One short, energetic sentence.")
+        else:                               # sharp % move over ~90s
+            ref = next((p for t, p in self._ma_hist if now - t >= 80), None)
+            if ref:
+                pct = (price - ref) / ref * 100.0
+                if abs(pct) >= 0.22:
+                    d = "spiking UP" if pct > 0 else "DROPPING"
+                    alert = (f"Gold is {d} fast — now ${price:,.0f}, "
+                             f"{'+' if pct > 0 else '-'}{abs(pct):.2f}% in minutes. React live to "
+                             "this move and what it means for traders. Short and energetic.")
+        self._ma_prev = price
+        if alert:
+            self._ma_last = now
+        return alert
+
+    def _market_monitor(self):
+        """Background: watch the live price, queue an alert when something big happens."""
+        import time as _t
+        while getattr(self, "running", False):
+            try:
+                if (getattr(self, "autotalk_var", None) and self.autotalk_var.get()):
+                    alert = self._check_market_alert()
+                    if alert:
+                        self._event_q.put_nowait(("market", alert))
+            except Exception:
+                pass
+            _t.sleep(8)
+
     def _autotalk_loop(self):
         """Background host: the brain writes gold commentary and the Arabic-accent TTS
         speaks it (mouth lip-syncs). PIPELINED — the brain generates the NEXT line
@@ -1591,7 +1649,11 @@ class AvatarStudio:
                 if tts.pending > LEAD:
                     _t.sleep(0.2)
                     continue
-                # PRIORITY: answer a worthwhile LIVE TikTok comment before the next
+                # PRIORITY 1: react to gifts / follows / shares / like-milestones —
+                # time-sensitive engagement comes first.
+                if self._react_one_event():
+                    continue
+                # PRIORITY 2: answer a worthwhile LIVE TikTok comment before the next
                 # scripted gold line — viewers come first (filtered for spam already).
                 if self._answer_one_comment():
                     continue
@@ -1651,19 +1713,23 @@ class AvatarStudio:
         """Speak the next live-event reaction (gift/follow/share/likes). Gifts come
         first. Returns True if the avatar spoke (loop skips its scripted line)."""
         try:
-            if self.responder is None or self._event_q.empty() or self.tts is None:
+            if self._event_q.empty() or self.tts is None:
                 return False
             ev = self._event_q.get_nowait()
             kind = ev[0]
-            if kind == "gift":
-                reply = self.responder.react_gift(ev[1], ev[2], ev[3], ev[4])
-            elif kind == "follow":
-                reply = self.responder.react_follow(ev[1])
-            elif kind == "share":
-                reply = self.responder.react_share(ev[1])
-            elif kind == "likes":
-                reply = self.responder.react_likes(ev[1])
-            else:
+            reply = None
+            if kind == "market":                   # autonomous — no responder needed
+                reply = self._generate(ev[1])      # brain phrases the live alert
+            elif self.responder is not None:
+                if kind == "gift":
+                    reply = self.responder.react_gift(ev[1], ev[2], ev[3], ev[4])
+                elif kind == "follow":
+                    reply = self.responder.react_follow(ev[1])
+                elif kind == "share":
+                    reply = self.responder.react_share(ev[1])
+                elif kind == "likes":
+                    reply = self.responder.react_likes(ev[1])
+            if not reply:
                 return False
             if reply:
                 self._log_msg(f"avatar→{kind}> {reply}")
@@ -1715,9 +1781,11 @@ class AvatarStudio:
             from tiktok_comments import TikTokComments
             if self.responder is None:
                 self.responder = CommentResponder(self.brain, get_context=self._live_market_ctx)
-            self.tiktok = TikTokComments(handle, self._on_comment)
+            self.tiktok = TikTokComments(handle, self._on_comment,
+                                         on_gift=self._on_gift, on_follow=self._on_follow,
+                                         on_like=self._on_like, on_share=self._on_share)
             self.tiktok.start()
-            self._log_msg(f"[comments] connecting to {handle} — reading live comments…")
+            self._log_msg(f"[comments] connecting to {handle} — comments + gifts/follows…")
         except Exception as exc:
             self._log_msg(f"[comments] failed: {exc}")
             self.comments_var.set(False)
