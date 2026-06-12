@@ -185,16 +185,18 @@ class TTSStreamEngine:
         """Validate TTS can run; resolve the voice backend. Returns (ok, message)."""
         # Decide/load the backend now so the banner is honest and the (heavy)
         # model load happens here, not on the first SPEAK.
-        if self.tts_backend == "multilingual" and self._get_mltts() is not None:
+        if self.tts_backend == "xtts" and self._get_xtts() is not None:
+            self.backend = self._xtts.startup_check()[1]
+        elif self.tts_backend == "multilingual" and self._get_mltts() is not None:
             self.backend = self._mltts.startup_check()[1]
         elif self.tts_backend == "maya1" and self._get_maya1() is not None:
             self.backend = "Maya1 (expressive — laughs/emotion tags)"
         elif self.tts_backend == "chatterbox" and self._get_chatterbox() is not None:
             self.backend = self._chatter.startup_check()[1]
-        elif self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox", "multilingual") and \
+        elif self.tts_backend in ("auto", "kokoro", "maya1", "chatterbox", "multilingual", "xtts") and \
                 self._get_kokoro() is not None:
             extra = " — heavy backend unavailable, using Kokoro" \
-                if self.tts_backend in ("maya1", "chatterbox", "multilingual") else ""
+                if self.tts_backend in ("maya1", "chatterbox", "multilingual", "xtts") else ""
             self.backend = f"Kokoro/{KOKORO_VOICE}{extra}"
         else:
             self.backend = f"edge-tts/{self.voice}"
