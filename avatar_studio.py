@@ -2645,6 +2645,12 @@ class AvatarStudio:
 
     def _on_close(self):
         self.running = False
+        self._live_stop = True
+        if self.tiktok is not None:
+            try:
+                self.tiktok.stop()
+            except Exception:
+                pass
         if self._worker is not None:
             self._worker.join(timeout=2.0)
         for fn in (lambda: self.cap.release() if self.cap else None,
