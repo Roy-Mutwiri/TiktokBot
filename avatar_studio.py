@@ -2009,36 +2009,33 @@ class AvatarStudio:
                 else:
                     if self._answer_one_comment():
                         continue
-                # PRIORITY 3: keep talking — CHART-FORWARD. Moving market -> all chart
-                # beats. Quiet market with no comments -> ALTERNATE chart talk with
-                # engagement so the chart is ALWAYS part of the show (never pure filler).
-                if active:
-                    pool = self._MARKET_BEATS
-                else:
-                    # quiet: ~2 of every 3 beats are chart talk (user wants the charts
-                    # to fill the gaps), the other 1/3 are like/follow/gift CTAs.
-                    pool = (self._ENGAGE_BEATS if (self._chat_mix % 3 == 0)
-                            else self._MARKET_BEATS)
-                # BUFFER-AWARE beat choice = the anti-silence mechanism. _generate() is
-                # synchronous and a long DEEP line can take many seconds, so:
-                #   * buffer empty   -> a SHORT line refills it fast (no dead air)
-                #   * buffer cushion -> occasionally go DEEP (long generation is covered
-                #                       by the line still playing)
-                #   * otherwise      -> the normal chart/engagement rotation
-                pend = getattr(self.tts, "pending", 0) or 0
-                if pend <= 0:
-                    beat = self._SHORT_BEATS[i % len(self._SHORT_BEATS)]
-                elif pend >= 2 and self._chat_mix % 7 == 0:
-                    beat = self._DEEP_BEATS[i % len(self._DEEP_BEATS)]
-                else:
-                    beat = pool[i % len(pool)]
-                i += 1
-                ctx = self._live_market_ctx()    # REAL gold price + recent move, fetched NOW
+                # PRIORITY 3: keep talking. FIRST try a PRE-GENERATED line from the
+                # parallel pool — instant, no waiting on the model = no dead air. The
+                # pool's beats are already chart-forward (market beats weighted).
                 line = None
-                try:
-                    line = self._generate(beat + ctx)   # ONE-at-a-time brain access
-                except Exception as exc:
-                    self._log_msg(f"[autotalk] brain: {exc}")
+                if self.brain_pool is not None:
+                    line = self.brain_pool.get(timeout=0.1)
+                if line is None:
+                    # pool cold/empty -> generate ONE inline (chart-forward + buffer-
+                    # aware), same as before so we always have a fallback.
+                    if active:
+                        pool = self._MARKET_BEATS
+                    else:
+                        pool = (self._ENGAGE_BEATS if (self._chat_mix % 3 == 0)
+                                else self._MARKET_BEATS)
+                    pend = getattr(self.tts, "pending", 0) or 0
+                    if pend <= 0:
+                        beat = self._SHORT_BEATS[i % len(self._SHORT_BEATS)]
+                    elif pend >= 2 and self._chat_mix % 7 == 0:
+                        beat = self._DEEP_BEATS[i % len(self._DEEP_BEATS)]
+                    else:
+                        beat = pool[i % len(pool)]
+                    i += 1
+                    ctx = self._live_market_ctx()    # REAL gold price, fetched NOW
+                    try:
+                        line = self._generate(beat + ctx)   # ONE-at-a-time brain access
+                    except Exception as exc:
+                        self._log_msg(f"[autotalk] brain: {exc}")
                 # if you interacted while it was generating, drop this line
                 if line and self.autotalk_var.get() and _t.monotonic() >= self._user_active_until:
                     self._log_msg("avatar> " + line)
@@ -2831,6 +2828,11 @@ class AvatarStudio:
     def _on_close(self):
         self.running = False
         self._live_stop = True
+        if self.brain_pool is not None:
+            try:
+                self.brain_pool.stop()
+            except Exception:
+                pass
         if self.tiktok is not None:
             try:
                 self.tiktok.stop()
