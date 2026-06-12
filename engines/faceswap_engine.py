@@ -767,7 +767,15 @@ class FaceSwapEngine:
             # mis-places it on this character (causing the doubled-mouth look).
             mc = (kps[3] + kps[4]) / 2.0
             mw = float(np.linalg.norm(kps[3] - kps[4])) + 1e-6
-            self.last_mouth = (float(mc[0]), float(mc[1]), mw)
+            nm = (float(mc[0]), float(mc[1]), mw)
+            # SMOOTH the mouth location frame-to-frame (kps jitter ~1-2px per frame =
+            # the mouth bbox jumps = the synced mouth FLICKERS). EMA stabilises it.
+            if self.last_mouth is not None:
+                a = 0.45
+                self.last_mouth = tuple(a * n + (1 - a) * o
+                                        for n, o in zip(nm, self.last_mouth))
+            else:
+                self.last_mouth = nm
             target = self._Face(bbox=bbox, kps=kps, det_score=bboxes[i, 4])
             # SEAMLESS paste (Poisson) — boundary matches skin tone, no forehead line.
             out = self._paste_seamless(frame, target)
