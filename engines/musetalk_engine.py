@@ -274,8 +274,10 @@ class MuseTalkEngine:
                 synced_full = self._w2l.process_frame(lp_face_frame)
                 mouth = synced_full[y1:y2, x1:x2].copy()
                 mouth = self._pop_mouth(mouth)
-                # DE-BLUR the SPEAKING mouth with Real-ESRGAN (the small crop is ~0ms)
-                if speaking and DEBLUR_MOUTH > 0:
+                # DE-BLUR the SPEAKING mouth with Real-ESRGAN — but ONLY when the
+                # governor says the GPU is free (allow_deblur), so it sharpens during
+                # playback yet never fights the voice-synthesis GPU spike = no lag.
+                if (speaking and DEBLUR_MOUTH > 0 and getattr(self, "allow_deblur", True)):
                     up = self._get_upscaler()
                     if up is not None:
                         mouth = up.enhance_crop(mouth, DEBLUR_MOUTH)
