@@ -24,6 +24,16 @@
     "New face, {user} — welcome! Thank you for the follow, akhi.",
     "{user} followed — let's go! Appreciate you brother, welcome home."
   ],
+  "follow_batch": [
+    "Welcome to the family {names} — thank you all for the follow, habibi!",
+    "Big love to {names} — thanks for following, welcome in brothers!",
+    "{names} just followed — mashallah, welcome to the squad, thank you!",
+    "Yalla, welcome {names}! Appreciate every one of those follows, akhi!",
+    "Thank you {names} for the follows — welcome to the gold family!",
+    "{names} in the building — thanks for following, much love to you all!",
+    "Ya salam, welcome {names}! Thank you for the follows, you're family now!",
+    "Shout out to {names} — thanks for the follow, welcome aboard everyone!"
+  ],
   "gift_small": [
     "Thank you for the {gift}, {user}! Appreciate you, habibi.",
     "Ya salam {user}, thanks for the {gift}! That's love right there.",

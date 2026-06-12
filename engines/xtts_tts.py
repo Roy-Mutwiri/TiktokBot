@@ -100,14 +100,18 @@ _JUNK = re.compile(
     "⌀-⏿⬀-⯿■-◿✀-➿]+")
 _CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁠﻿]")
 _RUN = re.compile(r"(\w)\1{2,}")            # 3+ of the same letter in a row
+# LaTeX / math / markdown artifacts that smarter LLMs (qwen) sometimes emit around
+# numbers — they would be read aloud as garbage, so strip them.
+_MATH = re.compile(r"\\[\(\)\[\]]|\\[a-zA-Z]+|[\\$*_`#{}]|\^|~")
 
 
 def clean_for_tts(text):
-    """Strip emojis/symbols/control chars and tame repeated-letter runs so names
-    and hype words don't make XTTS error or distort. Keeps letters (incl Arabic),
-    digits and normal punctuation."""
+    """Strip emojis/symbols/control/math-markup chars and tame repeated-letter runs
+    so names, hype words and LLM number-formatting don't make XTTS error or distort.
+    Keeps letters (incl Arabic), digits and normal punctuation."""
     t = _JUNK.sub(" ", text or "")
     t = _CTRL.sub("", t)
+    t = _MATH.sub(" ", t)                   # \( \) $ * _ ` # etc -> gone
     t = t.replace("_", " ")                 # handles like "Ahmed_2010" read naturally
     t = _RUN.sub(r"\1\1", t)                # "gooooo" -> "goo", "yaaaa" -> "yaa"
     return re.sub(r"\s+", " ", t).strip()
