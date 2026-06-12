@@ -44,3 +44,7 @@ WARNING: All log messages before absl::InitializeLog() is called are written to 
 W0000 00:00:1781242823.290424   47412 inference_feedback_manager.cc:114] Feedback manager requires a model with a single signature inference. Disabling support for feedback tensors.
 C:\Users\user\Documents\TiktokBot\ai-face\Wav2Lip\audio.py:18: FutureWarning: In the future `np.bool` will be defined as the corresponding NumPy scalar.
   if not hasattr(np, "bool"):
+[transformers] Model config: bos_token_id must be `None` or an integer within the vocabulary (between 0 and 255), got 50256. This may result in unexpected behavior.
+[transformers] Model config: eos_token_id must be `None` or an integer within the vocabulary (between 0 and 255), got 50256. This may result in unexpected behavior.
+[transformers] Model config: bos_token_id must be `None` or an integer within the vocabulary (between 0 and 607), got 50256. This may result in unexpected behavior.
+[transformers] Model config: eos_token_id must be `None` or an integer within the vocabulary (between 0 and 607), got 50256. This may result in unexpected behavior.
