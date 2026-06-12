@@ -54,12 +54,42 @@ class CommentResponder:
         self._last_greet = 0.0
         self._last_deep = 0.0      # last time we dug deep into a topic (spacing)
         self._supporters = {}      # user -> {coins, gifts, follow} cumulative support
+        import collections as _c
+        self._recent_openers = _c.deque(maxlen=10)   # avoid repeating thank-you openers
 
     # warm Arab-host voice for the appreciation lines (matches the avatar persona)
     _ARAB_HOST_SYS = (
         "You are a warm, charismatic ARAB live-stream host who is genuinely grateful "
         "to your supporters. Drop a natural Arabic word like habibi, wallahi, mashallah, "
         "akhi or ya salam. Speak out loud like a real person. No emojis, no markdown.")
+
+    # rotate the FLAVOUR of every thank-you so it's NEVER the same twice
+    _THANK_STYLES = [
+        "shout them out loud and proud like they just became a VIP of the stream",
+        "be heartfelt and genuinely touched, straight from the heart",
+        "be hyped and explosive with energy about it",
+        "be warm and playful, share a little joke with them",
+        "promise them the next gold signal as your personal thank-you",
+        "call them a legend and hype the whole room about them",
+        "thank them humbly and sincerely, almost surprised by their kindness",
+        "welcome them into the family like they're an old friend",
+        "react with delight and tell the chat to show this person some love",
+        "keep it short, punchy and full of gratitude",
+    ]
+
+    def _vary(self):
+        """Random thank-you style + an instruction to not reuse recent openers."""
+        import random
+        style = random.choice(self._THANK_STYLES)
+        clause = f"Style: {style}. "
+        if self._recent_openers:
+            clause += ("Start in a COMPLETELY different way than these recent openers, "
+                       "do NOT begin the same: " + " / ".join(self._recent_openers) + ". ")
+        return clause
+
+    def _remember_opener(self, reply):
+        if reply:
+            self._recent_openers.append(" ".join(reply.split()[:3]).lower())
 
     def _support(self, user):
         return self._supporters.setdefault(user, {"coins": 0, "gifts": 0, "follow": False})
