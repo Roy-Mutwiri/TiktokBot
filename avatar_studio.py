@@ -161,6 +161,15 @@ class AvatarStudio:
         self.engines = None
         self.swap_engine = None              # lazy inswapper face-swap (real head)
         self.tts = None
+        # ALWAYS-ON resource monitor: live CPU/GPU/VRAM -> adaptive load routing so the
+        # avatar never lags (movable filter work goes to whoever's free; heavy optional
+        # passes drop when both are saturated). Starts now, runs the whole session.
+        self.monitor = None
+        try:
+            from resource_monitor import ResourceMonitor
+            self.monitor = ResourceMonitor()
+        except Exception as _mexc:
+            print(f"[monitor] resource monitor unavailable ({_mexc})")
         self.brain = None                    # Ollama LLM brain (answers in character)
         self.tiktok = None                   # LIVE TikTok comment reader
         self.responder = None                # comment filter + answerer (web research)
