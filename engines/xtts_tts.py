@@ -306,8 +306,10 @@ class XTTSBackend:
         (2) chunk each run into short sentence-sized pieces so no single XTTS
         generation runs long enough to drift/distort. Pieces are concatenated."""
         text = clean_for_tts(text)            # strip emojis/symbols, tame letter runs
+        text = arabicize(text)                # transliterated Arabic -> Arabic script
         if self._model is None or not text:
             return None, self.sr
+        speed = pace_for(text)                # calm/fast per line (not a flat robotic pace)
         # a SHORT natural pause between sentences (like a real person breathing/
         # pacing) — small enough that the speech still flows, not choppy.
         gap = np.zeros(int(0.12 * self.sr), dtype=np.float32)
@@ -320,7 +322,7 @@ class XTTSBackend:
                 if not chunk or not re.search(r"\w", chunk):
                     continue
                 try:
-                    w = self._synth_one(chunk, lang)
+                    w = self._synth_one(chunk, lang, speed)
                     if w is not None and len(w):
                         parts.append(w); parts.append(gap)
                 except Exception:
