@@ -53,10 +53,10 @@ MAX_TOKENS = int(os.environ.get("AVATAR_BRAIN_MAXTOKENS", "220"))  # headroom fo
 TEMPERATURE = float(os.environ.get("AVATAR_BRAIN_TEMP", "0.92"))  # higher = more unpredictable, human variety
 # ANTI-REPETITION — small models lean on the same openers/catchphrases. These
 # token-level penalties push the model OFF words it just used so it doesn't loop.
-REPEAT_PENALTY = float(os.environ.get("AVATAR_BRAIN_REPEAT_PENALTY", "1.22"))
+REPEAT_PENALTY = float(os.environ.get("AVATAR_BRAIN_REPEAT_PENALTY", "1.3"))
 REPEAT_LAST_N = int(os.environ.get("AVATAR_BRAIN_REPEAT_LASTN", "320"))
-FREQ_PENALTY = float(os.environ.get("AVATAR_BRAIN_FREQ_PENALTY", "0.5"))
-PRESENCE_PENALTY = float(os.environ.get("AVATAR_BRAIN_PRESENCE_PENALTY", "0.4"))
+FREQ_PENALTY = float(os.environ.get("AVATAR_BRAIN_FREQ_PENALTY", "0.6"))
+PRESENCE_PENALTY = float(os.environ.get("AVATAR_BRAIN_PRESENCE_PENALTY", "0.5"))
 TOP_P = float(os.environ.get("AVATAR_BRAIN_TOP_P", "0.95"))
 # Keep the model RESIDENT in VRAM so it doesn't unload between questions and pay
 # the ~45s cold-load again mid-stream. -1 = never unload; or "30m".
