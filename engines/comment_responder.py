@@ -161,8 +161,19 @@ class CommentResponder:
         return self._say(r) or f"We just passed {total} likes — thank you all, keep them coming!"
 
     # -- 3) compose the spoken answer ----------------------------------------
-    def respond(self, user, text):
-        """Return a spoken-ready reply for this comment, or None to ignore."""
+    def respond(self, user, text, on_answering=None):
+        """Return a spoken-ready reply for this comment, or None to ignore.
+
+        on_answering(user, text, mode) — optional callback fired the moment we
+        COMMIT to answering this comment (after spam-filter + triage pass, before
+        the slow web-research/LLM step). mode is 'greeting' or 'answering'. Lets the
+        UI show 'now answering this comment' for genuine answers only (not spam)."""
+        def _commit(mode):
+            if on_answering:
+                try:
+                    on_answering(user, text, mode)
+                except Exception:
+                    pass
         try:
             if self._rule_skip(text):
                 return None
@@ -177,6 +188,7 @@ class CommentResponder:
                 if now - self._last_greet < 25:    # don't greet too often
                     return None
                 self._last_greet = now
+                _commit("greeting")
                 reply = self.brain.quick(
                     f"A viewer named {user} said \"{text}\" on your live gold-trading "
                     "stream. Give a SHORT, warm one-line welcome/acknowledgement by name, "
@@ -185,6 +197,7 @@ class CommentResponder:
                 return self._say(reply)
 
             # QUESTION -> research + answer as the host
+            _commit("answering")          # commit BEFORE the slow research/LLM step
             ctx = ""
             if self.get_context:
                 try:
