@@ -298,9 +298,10 @@ class BackgroundMusic:
     def _gen_loop(self):
         while self._alive:
             if self._cur is not None and self._next is None:
-                ni = (self._oi + 1) % len(self._order)
                 try:
-                    self._next = _make_track(self._order[ni])
+                    seed = self._pick_seed()        # history-aware (no repeat ~2 days)
+                    self._next = _make_track(seed)
+                    self._next_seed = seed
                 except Exception:
                     self._next = None
             time.sleep(0.25)
@@ -340,8 +341,8 @@ class BackgroundMusic:
             if (self._song_until and time.monotonic() >= self._song_until
                     and self._next is not None):
                 self._cur, self.meta = self._next
-                self._next = None
-                self._oi = (self._oi + 1) % len(self._order)
+                self._cur_seed = self._next_seed
+                self._next = None                  # gen thread picks + marks the next
                 self._pos = 0
                 self._song_until = time.monotonic() + SONG_SECONDS
                 buf = self._cur[:frames]

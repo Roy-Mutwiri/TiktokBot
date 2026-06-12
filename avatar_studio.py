@@ -2008,6 +2008,7 @@ class AvatarStudio:
     def _on_gift(self, user, gift, count, coins):
         try:
             self._log_msg(f"🎁 {user} sent {count}x {gift} ({coins} coins)")
+            self._feed_msg(f"\U0001f381 {user} sent {count}x {gift} ({coins} coins)", "ev")
             self._sess_coins += max(0, int(coins))
             self._event_q.put_nowait(("gift", user, gift, count, coins))
             if self._sess_coins >= self._coin_goal:           # gift goal reached!
@@ -2020,12 +2021,14 @@ class AvatarStudio:
     def _on_follow(self, user):
         try:
             self._sess_follows += 1
+            self._feed_msg(f"➕ {user} followed", "ev")
             self._event_q.put_nowait(("follow", user))
         except Exception:
             pass
 
     def _on_share(self, user):
         try:
+            self._feed_msg(f"↪ {user} shared the stream", "ev")
             self._event_q.put_nowait(("share", user))
         except Exception:
             pass
