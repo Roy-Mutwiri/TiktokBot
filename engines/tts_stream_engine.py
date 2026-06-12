@@ -470,6 +470,15 @@ class TTSStreamEngine:
     async def _synthesize_uncached(self, text):
         """Synthesize a line to 16 kHz mono float PCM, dispatching on the chosen
         backend with a graceful fallback chain. Returns an ndarray."""
+        # XTTS-v2 (Coqui) — Arabic + English voice clone, auto language per line.
+        if self.tts_backend == "xtts" and self._get_xtts() is not None:
+            try:
+                pcm = self._synth_xtts(text)
+                if pcm is not None and len(pcm) > 0:
+                    return pcm
+            except Exception as exc:
+                print(f"[TTS] XTTS synth failed ({exc}) — falling back.")
+
         # Multilingual backend (Chatterbox ML) — Arabic + English + 21 more, with
         # automatic per-segment language routing for code-switched text.
         if self.tts_backend == "multilingual" and self._get_mltts() is not None:
@@ -532,6 +541,15 @@ class TTSStreamEngine:
     def _synth_mltts(self, text):
         """Chatterbox Multilingual synth (auto Arabic/English/...) -> 16 kHz PCM."""
         wav, sr = self._mltts.synthesize(text)
+        if wav is None or len(wav) == 0:
+            return None
+        if sr != SAMPLE_RATE:
+            wav = self._resample(wav, sr, SAMPLE_RATE)
+        return np.asarray(wav, dtype=np.float32)
+
+    def _synth_xtts(self, text):
+        """Coqui XTTS-v2 synth (auto Arabic/English) -> 16 kHz mono float32 PCM."""
+        wav, sr = self._xtts.synthesize(self._strip_emotion_tags(text))
         if wav is None or len(wav) == 0:
             return None
         if sr != SAMPLE_RATE:
