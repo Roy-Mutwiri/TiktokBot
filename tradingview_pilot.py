@@ -182,6 +182,16 @@ class TradingViewPilot:
         ua = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/124.0 Safari/537.36")
         user_dir = os.path.join(PROJECT_DIR, ".tv_profile")
+        # An unclean previous exit leaves Chromium singleton lock files behind, which
+        # make launch_persistent_context fail with "profile already in use". Clear the
+        # stale locks first so the browser always opens.
+        for _lock in ("SingletonLock", "SingletonCookie", "SingletonSocket", "lockfile"):
+            try:
+                _p = os.path.join(user_dir, _lock)
+                if os.path.lexists(_p):
+                    os.remove(_p)
+            except Exception:
+                pass
         self._ctx = self._pw.chromium.launch_persistent_context(
             user_dir, headless=self.headless, viewport={"width": 1366, "height": 768},
             user_agent=ua, args=["--start-maximized", "--disable-blink-features=AutomationControlled"])
