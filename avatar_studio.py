@@ -162,6 +162,9 @@ class AvatarStudio:
         self.swap_engine = None              # lazy inswapper face-swap (real head)
         self.tts = None
         self.brain = None                    # Ollama LLM brain (answers in character)
+        self.tiktok = None                   # LIVE TikTok comment reader
+        self.responder = None                # comment filter + answerer (web research)
+        self._comment_q = queue.Queue(maxsize=80)
         self.market = None                   # LIVE gold price feed (Binance PAXG)
         self._thinking = False               # True while the brain is generating
         self.cap = None
