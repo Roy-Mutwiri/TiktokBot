@@ -460,9 +460,10 @@ class TTSStreamEngine:
         isn't silent while a long line synthesizes."""
         loop = asyncio.get_event_loop()
         while self._running:
-            text = await self.speech_queue.get()
-            if text is None or not self._running:        # shutdown sentinel
+            item = await self.speech_queue.get()
+            if item is None or not self._running:        # shutdown sentinel
                 break
+            text = item[1] if isinstance(item, tuple) else item   # (priority, text)
             try:
                 chunks = self._split_for_tts(text)
                 if not chunks:

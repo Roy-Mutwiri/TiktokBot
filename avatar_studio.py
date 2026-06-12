@@ -2184,12 +2184,15 @@ class AvatarStudio:
                 except IndexError:
                     txt = None
                 if txt:
+                    # priority 2 = appreciation: clear everything queued below it
+                    # (filler + comments) so the thank-you lands right now, and a
+                    # later comment's clear (below=1) can never drop a queued one.
                     try:
-                        self.tts.clear_pending()   # thank-you plays right after current line
+                        self.tts.clear_pending(below=2)
                     except Exception:
                         pass
                     self._log_msg("avatar> " + txt)
-                    self.tts.speak(txt)
+                    self.tts.speak(txt, priority=2)
                     self._last_spoke_t = time.monotonic()
                     return True
             # 2) market alerts / polls (secondary — may phrase via the brain)
