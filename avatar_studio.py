@@ -234,6 +234,11 @@ class AvatarStudio:
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_ui()                     # start the UI refresh loop
         self._animate()                     # start the HUD animation loop
+        # ALWAYS-ON live-status monitor: from the moment the app opens it keeps
+        # checking whether the entered @handle is LIVE on TikTok and drives the
+        # green/red light by the SPEECH button. No START needed, never sleeps long.
+        self._live_stop = False
+        threading.Thread(target=self._live_status_loop, daemon=True).start()
         # ASYNC auto-config: benchmark the GPU AFTER the window paints, with a
         # loading bar; START stays disabled until the chosen model is known (its
         # env must be set before the engines load).
