@@ -2209,6 +2209,13 @@ class AvatarStudio:
                 self._log_msg(f"↳ {user}: {text}")
                 self._log_msg(f"avatar→{user}> {reply}")
                 self._feed_msg(f"\U0001f916 → {user}:  {reply}", "a")
+                # drop any QUEUED filler commentary so the viewer's reply plays right
+                # after the current line (keeps answers in real time, not behind a
+                # backlog). The currently-playing line is left to finish cleanly.
+                try:
+                    self.tts.clear_pending()
+                except Exception:
+                    pass
                 self.tts.speak(reply)         # bar keeps showing the comment until spoken
                 self._clear_answering()
                 return True
