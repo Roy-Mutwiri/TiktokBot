@@ -91,6 +91,26 @@ MODEL_NAME = "tts_models/multilingual/multi-dataset/xtts_v2"
 _SENT_SPLIT = re.compile(r"(?<=[\.\!\?\:؟…])\s+")
 _CLAUSE_SPLIT = re.compile(r"(?<=[,،;:\-—])\s+")
 
+# TikTok names/comments are full of emojis, flags, arrows and zero-width chars that
+# make XTTS error or distort; hype words like "gooooo"/"yaaaa" make it drift. Strip
+# the junk and tame long same-letter runs BEFORE synthesis.
+_JUNK = re.compile(
+    "[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF"
+    "\U00002B00-\U00002BFF\U0001F900-\U0001F9FF︀-️←-⇿"
+    "⌀-⏿⬀-⯿■-◿✀-➿]+")
+_CTRL = re.compile(r"[\x00-\x08\x0b-\x1f\x7f​-‏‪-‮⁠﻿]")
+_RUN = re.compile(r"(\w)\1{2,}")            # 3+ of the same letter in a row
+
+
+def clean_for_tts(text):
+    """Strip emojis/symbols/control chars and tame repeated-letter runs so names
+    and hype words don't make XTTS error or distort. Keeps letters (incl Arabic),
+    digits and normal punctuation."""
+    t = _JUNK.sub(" ", text or "")
+    t = _CTRL.sub("", t)
+    t = _RUN.sub(r"\1\1", t)                # "gooooo" -> "goo", "yaaaa" -> "yaa"
+    return re.sub(r"\s+", " ", t).strip()
+
 
 def chunk_text(text, max_chars=None):
     """Split into short, sentence-sized chunks so each XTTS generation stays
