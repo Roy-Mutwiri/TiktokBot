@@ -188,7 +188,12 @@ class TTSStreamEngine:
         """Validate TTS can run; resolve the voice backend. Returns (ok, message)."""
         # Decide/load the backend now so the banner is honest and the (heavy)
         # model load happens here, not on the first SPEAK.
-        if self.tts_backend == "xtts" and self._get_xtts() is not None:
+        if self.tts_backend == "elevenlabs" and self._get_eleven() is not None:
+            self.backend = self._eleven.startup_check()[1]
+        elif self.tts_backend == "elevenlabs" and self._get_xtts() is not None:
+            self.backend = "ElevenLabs unavailable — using local XTTS. " \
+                + self._xtts.startup_check()[1]
+        elif self.tts_backend == "xtts" and self._get_xtts() is not None:
             self.backend = self._xtts.startup_check()[1]
         elif self.tts_backend == "multilingual" and self._get_mltts() is not None:
             self.backend = self._mltts.startup_check()[1]
@@ -297,6 +302,34 @@ class TTSStreamEngine:
             self._xtts_tried = True
             return self._xtts
 
+    def _get_eleven(self):
+        """Lazily init the ElevenLabs cloud backend (cheap auth check, no model load)."""
+        with self._load_lock:
+            if self._eleven_tried:
+                return self._eleven
+            try:
+                from elevenlabs_tts import ElevenLabsBackend
+                eng = ElevenLabsBackend()
+                self._eleven = eng if eng.ok else None
+                if eng.ok:
+                    print("[TTS] " + eng.startup_check()[1])
+                else:
+                    print(f"[TTS] ElevenLabs off: {eng.last_error} — using local voice.")
+            except Exception as exc:
+                self._eleven = None
+                print(f"[TTS] ElevenLabs unavailable ({exc}).")
+            self._eleven_tried = True
+            return self._eleven
+
+    def _synth_eleven(self, text):
+        """ElevenLabs synth -> 16 kHz mono float32 PCM (None on failure -> fallback)."""
+        wav, sr = self._eleven.synthesize(text)
+        if wav is None or len(wav) == 0:
+            return None
+        if sr != SAMPLE_RATE:
+            wav = self._resample(wav, sr, SAMPLE_RATE)
+        return np.asarray(wav, dtype=np.float32)
+
     # -------------------------------------------------------------------------
     def _run_loop(self):
         """Background thread that owns the asyncio event loop."""
@@ -380,7 +413,10 @@ class TTSStreamEngine:
         edge / auto). Returns (ok, message). The heavy model loads lazily on the
         next synth; call warm_backend() first to pay that cost up front."""
         name = (name or "").strip().lower()
-        valid = ("xtts", "maya1", "chatterbox", "multilingual", "kokoro", "edge", "auto")
+        valid = ("xtts", "elevenlabs", "eleven", "maya1", "chatterbox", "multilingual",
+                 "kokoro", "edge", "auto")
+        if name == "eleven":
+            name = "elevenlabs"
         if name not in valid:
             return False, f"unknown backend {name!r}"
         self.tts_backend = name
@@ -544,7 +580,11 @@ class TTSStreamEngine:
                 return cached
             pcm = None
             b = self.tts_backend
-            if b == "xtts" and self._get_xtts() is not None:
+            if b == "elevenlabs" and self._get_eleven() is not None:
+                pcm = self._synth_eleven(text)
+                if pcm is None and self._get_xtts() is not None:
+                    pcm = self._synth_xtts(text)         # cloud failed -> local XTTS
+            elif b == "xtts" and self._get_xtts() is not None:
                 pcm = self._synth_xtts(text)
             elif b == "multilingual" and self._get_mltts() is not None:
                 pcm = self._synth_mltts(text)
@@ -578,8 +618,16 @@ class TTSStreamEngine:
     async def _synthesize_uncached(self, text):
         """Synthesize a line to 16 kHz mono float PCM, dispatching on the chosen
         backend with a graceful fallback chain. Returns an ndarray."""
+        # ElevenLabs cloud voice — highest quality, natural Arabic + English.
+        if self.tts_backend == "elevenlabs" and self._get_eleven() is not None:
+            try:
+                pcm = self._synth_eleven(text)
+                if pcm is not None and len(pcm) > 0:
+                    return pcm
+            except Exception as exc:
+                print(f"[TTS] ElevenLabs synth failed ({exc}) — falling back.")
         # XTTS-v2 (Coqui) — Arabic + English voice clone, auto language per line.
-        if self.tts_backend == "xtts" and self._get_xtts() is not None:
+        if self.tts_backend in ("xtts", "elevenlabs") and self._get_xtts() is not None:
             try:
                 pcm = self._synth_xtts(text)
                 if pcm is not None and len(pcm) > 0:

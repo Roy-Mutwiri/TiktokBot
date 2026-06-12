@@ -55,10 +55,11 @@ _REFDIR = os.path.join(_PROJECT, "voice_refs")
 
 def _default_refs():
     """Reference clips for cloning, best-first:
-      1. arabic_master_*.wav  — curated best clips from the training videos
-      2. arabic_trained_*.wav — the 45s windows
-      3. arabic_accent.wav    — original fallback sample."""
-    for pat in ("arabic_master_*.wav", "arabic_trained_*.wav"):
+      1. moha_*.wav           — the "Mohamed" voice clips (ElevenLabs, 6.7 min)
+      2. arabic_master_*.wav  — curated best clips from the training videos
+      3. arabic_trained_*.wav — the 45s windows
+      4. arabic_accent.wav    — original fallback sample."""
+    for pat in ("moha_*.wav", "arabic_master_*.wav", "arabic_trained_*.wav"):
         hits = sorted(_glob.glob(os.path.join(_REFDIR, pat)))
         if hits:
             return hits
