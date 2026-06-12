@@ -1845,7 +1845,10 @@ class AvatarStudio:
         WHILE the current one is synthesizing/playing, so voice generation never
         pauses the LLM. A 1-line look-ahead keeps it bounded so commentary stays fresh."""
         import time as _t
-        LEAD = 1
+        # Look-ahead = 2 so a NEXT line is always synthesized and ready the instant
+        # the current one ends — no dead air between lines (streamers never leave
+        # silence). The music bed covers any micro-gap while a line generates.
+        LEAD = 2
         i = 0
         while getattr(self, "running", False):
             try:
