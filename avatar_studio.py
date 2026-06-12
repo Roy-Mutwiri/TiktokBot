@@ -165,6 +165,8 @@ class AvatarStudio:
         self.tiktok = None                   # LIVE TikTok comment reader
         self.responder = None                # comment filter + answerer (web research)
         self._comment_q = queue.Queue(maxsize=80)
+        self._event_q = queue.Queue(maxsize=40)   # gifts / follows / shares / like-milestones
+        self._next_like_ms = 500                  # next likes milestone to celebrate
         self.market = None                   # LIVE gold price feed (Binance PAXG)
         self._thinking = False               # True while the brain is generating
         self.cap = None
