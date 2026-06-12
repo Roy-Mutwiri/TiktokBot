@@ -94,6 +94,34 @@ class CommentResponder:
         r = (reply or "").strip().strip('"').strip("'").strip("`").strip()
         return r or None
 
+    # -- live-event reactions (gifts / follows / likes / shares) -------------
+    def react_gift(self, user, gift, count, coins):
+        amt = f"{count} {gift}s" if count > 1 else f"a {gift}"
+        r = self.brain.quick(
+            f"A viewer named {user} just sent you {amt} ({coins} coins) on your live "
+            "gold-trading stream. Give an EXCITED, genuine one-line thank-you by name, "
+            "like a real streamer who's grateful. Max 16 words. No emojis.",
+            system="You are an enthusiastic, grateful live-stream host.", max_tokens=44) \
+            if self.brain else None
+        return self._say(r) or f"Thank you so much {user} for the {gift}, I appreciate you!"
+
+    def react_follow(self, user):
+        r = self.brain.quick(
+            f"{user} just FOLLOWED your live gold-trading stream. Give a short, warm "
+            "welcome-to-the-family one-liner by name. Max 13 words. No emojis.",
+            system="You are a warm live-stream host.", max_tokens=34) if self.brain else None
+        return self._say(r) or f"Welcome to the family {user}, thanks for the follow!"
+
+    def react_share(self, user):
+        return f"Thanks for sharing the stream, {user}, that means a lot!"
+
+    def react_likes(self, total):
+        r = self.brain.quick(
+            f"Your live gold-trading stream just passed {total} likes. Give a short, hyped "
+            "one-line thank-you to everyone for the likes. Max 15 words. No emojis.",
+            system="You are an enthusiastic live-stream host.", max_tokens=38) if self.brain else None
+        return self._say(r) or f"We just passed {total} likes — thank you all, keep them coming!"
+
     # -- 3) compose the spoken answer ----------------------------------------
     def respond(self, user, text):
         """Return a spoken-ready reply for this comment, or None to ignore."""
