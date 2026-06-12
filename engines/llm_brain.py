@@ -151,12 +151,23 @@ class LLMBrain:
         with self._opener_lock:
             if not self._recent_openers:
                 return None
-            recent = "; ".join(f'"{o}…"' for o in list(self._recent_openers)[-7:])
+            recents = list(self._recent_openers)[-7:]
+        recent = "; ".join(f'"{o}…"' for o in recents)
+        # detect an OVER-USED first word (e.g. always opening "wallahi") and ban it
+        ban = ""
+        firsts = [o.split()[0] for o in recents if o.split()]
+        if firsts:
+            w, c = collections.Counter(firsts).most_common(1)[0]
+            if c >= 2:
+                ban = (f" You keep STARTING lines with '{w}' — do NOT begin with "
+                       f"'{w}' or any Arabic exclamation this time; open with a "
+                       "totally different word and dive straight into the point.")
         return ("VARIETY CHECK — your last lines already began: " + recent +
                 ". Do NOT open the same way or reuse those same words, catchphrases, "
-                "or Arabic fillers again now. Start with different first words and a "
-                "different rhythm — phrase it completely fresh even if the topic or "
-                "the price level is the same. A real human never repeats themselves.")
+                "or Arabic fillers again now." + ban + " Start with different first "
+                "words and a different rhythm — phrase it completely fresh even if "
+                "the topic or the price level is the same. A real human never repeats "
+                "themselves.")
 
     def _record_opener(self, reply):
         """Remember the first few words of a reply so _anti_repeat_note can steer
