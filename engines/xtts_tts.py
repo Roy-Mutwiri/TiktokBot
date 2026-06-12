@@ -348,7 +348,8 @@ class XTTSBackend:
         (2) chunk each run into short sentence-sized pieces so no single XTTS
         generation runs long enough to drift/distort. Pieces are concatenated."""
         text = clean_for_tts(text)            # strip emojis/symbols, tame letter runs
-        text = arabicize(text)                # transliterated Arabic -> Arabic script
+        if ARABICIZE:                         # OFF by default (it fragments the line)
+            text = arabicize(text)            # transliterated Arabic -> Arabic script
         if self._model is None or not text:
             return None, self.sr
         speed = pace_for(text)                # calm/fast per line (not a flat robotic pace)
