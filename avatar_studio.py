@@ -2176,6 +2176,13 @@ class AvatarStudio:
             if not reply:
                 return False
             if reply:
+                # appreciation is time-sensitive — clear queued scripted lines so the
+                # thank-you plays NEXT (right after the current line), not minutes later
+                if kind in ("gift", "follow", "share", "likes", "goal"):
+                    try:
+                        self.tts.clear_pending()
+                    except Exception:
+                        pass
                 self._log_msg(f"avatar→{kind}> {reply}")
                 self.tts.speak(reply)
                 return True
