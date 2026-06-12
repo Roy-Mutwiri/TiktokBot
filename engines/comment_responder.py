@@ -197,15 +197,34 @@ class CommentResponder:
                 grounding += f"\nLive market context: {ctx}"
             if web:
                 grounding += f"\nWeb research:\n{web}"
-            reply = self.brain.quick(
-                f"You are the human host of a live gold/XAUUSD trading stream. A viewer "
-                f"named {user} asked: \"{text}\".{grounding}\n\n"
-                "Answer them directly as a real person on the mic — natural, confident, "
-                "helpful, 1-2 short sentences, address them by name once. Use the context/"
-                "research if relevant; if unsure, be honest and brief. No emojis, no lists. "
-                f"Reply ENTIRELY in {lang} (the viewer's own language).",
-                system="You are a friendly, knowledgeable live trading-stream host. Speak "
-                       "naturally as if talking out loud.", max_tokens=110, timeout=40)
+            # Occasionally DIG DEEP on an interesting topic to keep the live lively —
+            # but space it out so it's a treat, not a monologue every comment.
+            now = time.time()
+            deep = (self._is_interesting(text)
+                    and now - self._last_deep > self.DEEP_COOLDOWN)
+            if deep:
+                self._last_deep = now
+                reply = self.brain.quick(
+                    f"You are the human host of a live gold/XAUUSD trading stream. A viewer "
+                    f"named {user} brought up something juicy: \"{text}\".{grounding}\n\n"
+                    "This is an interesting topic — DIG DEEP and run with it to keep the live "
+                    "lively. Give a longer, passionate, engaging take as the host: share your "
+                    "real opinion, a bit of insight or a quick story, look at it from a couple "
+                    "angles, and pull the chat in. Talk naturally out loud, 4 to 7 sentences, "
+                    f"address {user} by name. No emojis, no lists. Reply ENTIRELY in {lang}.",
+                    system="You are a charismatic, knowledgeable live trading-stream host who "
+                           "loves getting into a good topic. Speak naturally, out loud.",
+                    max_tokens=240, timeout=55)
+            else:
+                reply = self.brain.quick(
+                    f"You are the human host of a live gold/XAUUSD trading stream. A viewer "
+                    f"named {user} asked: \"{text}\".{grounding}\n\n"
+                    "Answer them directly as a real person on the mic — natural, confident, "
+                    "helpful, 1-2 short sentences, address them by name once. Use the context/"
+                    "research if relevant; if unsure, be honest and brief. No emojis, no lists. "
+                    f"Reply ENTIRELY in {lang} (the viewer's own language).",
+                    system="You are a friendly, knowledgeable live trading-stream host. Speak "
+                           "naturally as if talking out loud.", max_tokens=110, timeout=40)
             return self._say(reply)
         except Exception as exc:
             print(f"[COMMENTS] respond error: {exc}")
