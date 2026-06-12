@@ -215,8 +215,20 @@ class AvatarStudio:
 
         root.title("AVATAR STUDIO ◆ neural pipeline")
         root.configure(bg=BG)
-        root.geometry("1240x900")
+        sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
+        _wx = max(0, (sw - 1240) // 2); _wy = max(0, (sh - 900) // 3)
+        root.geometry(f"1240x900+{_wx}+{_wy}")
         root.minsize(1040, 660)
+        # frameless window -> our own futuristic title bar with custom controls
+        self._drag = None
+        self._tb_buttons = {}
+        self._tb_hover = None
+        try:
+            root.overrideredirect(True)
+            root.bind("<Map>", self._restore_override)
+            root.after(80, lambda: (root.lift(), root.focus_force()))
+        except Exception:
+            pass
 
         self._init_style()
         self._build_ui()
@@ -474,12 +486,97 @@ class AvatarStudio:
         self.root.after(60, self._animate)
 
     # -------------------------------------------------------------------------
+    # FRAMELESS TITLE BAR — Mercedes brand, window controls, drag-to-move
+    # -------------------------------------------------------------------------
+    def _draw_mercedes(self, cv, cx, cy, r, tags="tb"):
+        """Draw a chrome Mercedes-Benz three-pointed star with a faint glow."""
+        SIL = "#d2dcea"
+        glow = self._mix(CYAN, BG, 0.5)
+        cv.create_oval(cx-r-2, cy-r-2, cx+r+2, cy+r+2, outline=self._mix(glow, BG, 0.6),
+                       width=1, tags=tags)                       # outer halo
+        cv.create_oval(cx-r, cy-r, cx+r, cy+r, outline=self._mix(SIL, BG, 0.45),
+                       width=3, tags=tags)                       # ring (thick, dim)
+        cv.create_oval(cx-r, cy-r, cx+r, cy+r, outline=SIL, width=1, tags=tags)  # ring rim
+        for ang in (-math.pi / 2, math.pi / 6, math.pi * 5 / 6):  # up, dn-right, dn-left
+            ex = cx + (r - 2) * math.cos(ang)
+            ey = cy + (r - 2) * math.sin(ang)
+            cv.create_line(cx, cy, ex, ey, fill=self._mix(SIL, BG, 0.5), width=3, tags=tags)
+            cv.create_line(cx, cy, ex, ey, fill=SIL, width=1, tags=tags)
+        cv.create_oval(cx-2, cy-2, cx+2, cy+2, fill=SIL, outline="", tags=tags)
+
+    def _draw_winbtn(self, cv, kind, x, y, w, h):
+        """Draw a minimise / exit control; lights up its accent on hover."""
+        hover = (self._tb_hover == kind)
+        accent = RED if kind == "exit" else CYAN
+        self._round_rect(cv, x, y, x + w, y + h, 6,
+                         outline=accent if hover else self._mix(BORDER, accent, 0.35),
+                         fill=self._mix(BG, accent, 0.18 if hover else 0.05),
+                         width=1, tags="tb")
+        cxm, cym = x + w // 2, y + h // 2
+        col = accent if hover else self._mix(FG, BG, 0.4)
+        if kind == "min":
+            cv.create_line(cxm - 6, cym + 4, cxm + 6, cym + 4, fill=col, width=2, tags="tb")
+        else:
+            cv.create_line(cxm - 5, cym - 5, cxm + 5, cym + 5, fill=col, width=2, tags="tb")
+            cv.create_line(cxm - 5, cym + 5, cxm + 5, cym - 5, fill=col, width=2, tags="tb")
+
+    def _tb_hit(self, x, y):
+        for k, (x1, y1, x2, y2) in self._tb_buttons.items():
+            if x1 <= x <= x2 and y1 <= y <= y2:
+                return k
+        return None
+
+    def _tb_motion(self, e):
+        h = self._tb_hit(e.x, e.y)
+        if h != self._tb_hover:
+            self._tb_hover = h
+            try:
+                self._topdraw()
+                self._topcv.config(cursor="hand2" if h else "fleur")
+            except Exception:
+                pass
+
+    def _tb_press(self, e):
+        h = self._tb_hit(e.x, e.y)
+        if h == "min":
+            self._minimise(); return
+        if h == "exit":
+            self._on_close(); return
+        self._drag = (e.x_root - self.root.winfo_x(), e.y_root - self.root.winfo_y())
+
+    def _tb_drag(self, e):
+        if self._drag:
+            self.root.geometry(f"+{e.x_root - self._drag[0]}+{e.y_root - self._drag[1]}")
+
+    def _tb_release(self, e):
+        self._drag = None
+
+    def _minimise(self):
+        """Minimise a frameless window (drop override so it can iconify)."""
+        try:
+            self.root.overrideredirect(False)
+            self.root.iconify()
+        except Exception:
+            pass
+
+    def _restore_override(self, e=None):
+        try:
+            if e is not None and getattr(e, "widget", None) is not self.root:
+                return
+            if self.root.state() == "normal":
+                self.root.overrideredirect(True)
+        except Exception:
+            pass
+
+    # -------------------------------------------------------------------------
     def _build_ui(self):
-        # ===== TOP APP BAR (full-width Canvas — glowing brand + telemetry) ==
-        topcv = tk.Canvas(self.root, bg=BG, height=70, highlightthickness=0, bd=0)
+        # ===== FRAMELESS TITLE BAR (Mercedes star + wordmark + win controls) ==
+        TBH = 68
+        topcv = tk.Canvas(self.root, bg=BG, height=TBH, highlightthickness=0, bd=0)
         topcv.pack(side="top", fill="x")
         self._topcv = topcv
-        self._sweep_y = 56
+        self._tbh = TBH
+        self._sweep_y = TBH - 12
         self._sweep = topcv.create_oval(0, 0, 0, 0, fill=CYAN, outline="")
 
         def _topdraw(_=None):
@@ -487,34 +584,47 @@ class AvatarStudio:
             if w <= 1:
                 return
             topcv.delete("tb")
-            # brand hexagon
-            hx, hy, r = 30, 32, 12
-            pts = []
-            for k in range(6):
-                ang = math.pi / 3 * k - math.pi / 6
-                pts += [hx + r * math.cos(ang), hy + r * math.sin(ang)]
-            topcv.create_polygon(pts, outline=CYAN, fill=self._mix(BG, CYAN, 0.12),
-                                 width=2, tags="tb")
-            topcv.create_oval(hx-3, hy-3, hx+3, hy+3, fill=CYAN, outline="", tags="tb")
-            # wordmark + neon slash
-            self._glow_text(topcv, 56, 32, "AVATAR", FG, ("Consolas", 18, "bold"),
-                            tags="tb")
-            self._glow_text(topcv, 56 + 112, 32, "// STUDIO", CYAN,
-                            ("Consolas", 18, "bold"), tags="tb")
-            # right-side telemetry
-            topcv.create_text(w-26, 24, text="SYS > ONLINE    v2.0", anchor="e",
-                              fill=self._mix(FG, BG, 0.3), font=("Consolas", 9), tags="tb")
-            topcv.create_text(w-26, 42, text="NEURAL AVATAR PIPELINE", anchor="e",
-                              fill=self._mix(CYAN, BG, 0.35), font=("Consolas", 8), tags="tb")
+            cy = TBH // 2 - 2
+            # --- Mercedes three-pointed star, top-left ---
+            self._draw_mercedes(topcv, 32, cy, 17, tags="tb")
+            # --- wordmark + neon slash ---
+            self._glow_text(topcv, 64, cy - 6, "AVATAR", FG, ("Consolas", 17, "bold"), tags="tb")
+            self._glow_text(topcv, 64 + 104, cy - 6, "// STUDIO", CYAN,
+                            ("Consolas", 17, "bold"), tags="tb")
+            # subtitle: live dot + spaced caps
+            topcv.create_oval(66, cy + 9, 72, cy + 15, fill=MINT, outline="", tags="tb")
+            topcv.create_oval(64, cy + 7, 74, cy + 17, outline=self._mix(MINT, BG, 0.4),
+                              width=1, tags="tb")
+            topcv.create_text(80, cy + 12, text="N E U R A L   P I P E L I N E", anchor="w",
+                              fill=self._mix(CYAN, BG, 0.45), font=("Consolas", 8), tags="tb")
+            # --- window controls (minimise + exit), top-right ---
+            bw, bh, gap = 36, 26, 8
+            ex_x = w - 12 - bw
+            mn_x = ex_x - gap - bw
+            by = cy - bh // 2
+            self._tb_buttons = {"min": (mn_x, by, mn_x + bw, by + bh),
+                                "exit": (ex_x, by, ex_x + bw, by + bh)}
+            self._draw_winbtn(topcv, "min", mn_x, by, bw, bh)
+            self._draw_winbtn(topcv, "exit", ex_x, by, bw, bh)
+            # telemetry to the left of the buttons
+            topcv.create_text(mn_x - 16, cy - 5, text="SYS // ONLINE", anchor="e",
+                              fill=self._mix(FG, BG, 0.32), font=("Consolas", 9), tags="tb")
+            topcv.create_text(mn_x - 16, cy + 9, text="v2.0  •  GPU READY", anchor="e",
+                              fill=self._mix(CYAN, BG, 0.4), font=("Consolas", 8), tags="tb")
             # underline rail (fading neon ticks)
             y = self._sweep_y
             span = w - 52
-            for i in range(0, span, 7):
-                topcv.create_line(26+i, y, 26+i+4, y,
-                                  fill=self._mix(CYAN, BG, 0.55 + 0.4*(i/float(span))),
+            for i in range(0, max(1, span), 7):
+                topcv.create_line(26 + i, y, 26 + i + 4, y,
+                                  fill=self._mix(CYAN, BG, 0.5 + 0.45 * (i / float(max(1, span)))),
                                   width=1, tags="tb")
             topcv.tag_raise(self._sweep)
+        self._topdraw = _topdraw
         topcv.bind("<Configure>", _topdraw)
+        topcv.bind("<Motion>", self._tb_motion)
+        topcv.bind("<Button-1>", self._tb_press)
+        topcv.bind("<B1-Motion>", self._tb_drag)
+        topcv.bind("<ButtonRelease-1>", self._tb_release)
         tk.Frame(self.root, bg=self._mix(BG, CYAN, 0.18), height=1).pack(
             side="top", fill="x")
 
@@ -763,11 +873,10 @@ class AvatarStudio:
         self.perf_var = tk.BooleanVar(value=True)
         self._check(c, "Show CPU/GPU monitor  ·  live load + auto-balancing",
                     self.perf_var).pack(fill="x", pady=3)
-        # HD FACE: CodeFormer restore = real skin/eye detail (kills the "mask" look),
-        # but it's heavy (~6fps) since it shares the GPU with the swap — so it's an
-        # opt-in toggle. (The sharp-mouth de-blur is separate + always on, governor-gated.)
-        self.hd_var = tk.BooleanVar(value=False)
-        self._check(c, "HD face restore  ·  CodeFormer (dramatic, heavy ~6fps)",
+        # PRO HD: CodeFormer HD face restore + mouth de-blur, run only when the GPU
+        # has headroom (the governor drops them before they ever cause a stutter).
+        self.hd_var = tk.BooleanVar(value=True)
+        self._check(c, "PRO HD  ·  CodeFormer face + sharp mouth (governor-gated)",
                     self.hd_var).pack(fill="x", pady=3)
         self.obs_var = tk.BooleanVar(value=False)
         self._check(c, "Also send to OBS virtual camera",
