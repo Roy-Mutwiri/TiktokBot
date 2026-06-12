@@ -1,0 +1,21 @@
+ > Training Environment:
+ | > Backend: Torch
+ | > Mixed precision: False
+ | > Precision: float32
+ | > Current device: 0
+ | > Num. of GPUs: 1
+ | > Num. of CPUs: 16
+ | > Num. of Torch Threads: 1
+ | > Torch seed: 1
+ | > Torch CUDNN: True
+ | > Torch CUDNN deterministic: False
+ | > Torch CUDNN benchmark: False
+ | > Torch TF32 MatMul: False
+ > Start Tensorboard: tensorboard --logdir=C:\Users\user\Documents\TiktokBot\voice_train\run\run\training\GPT_XTTS_MOHA-June-12-2026_04+53PM-e254c84
+
+ > Model has 518442047 parameters
+
+[4m[1m > EPOCH: 0/39[0m
+ --> C:\Users\user\Documents\TiktokBot\voice_train\run\run\training\GPT_XTTS_MOHA-June-12-2026_04+53PM-e254c84
+
+[1m > TRAINING (2026-06-12 16:53:05) [0m
