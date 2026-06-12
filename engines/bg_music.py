@@ -291,8 +291,8 @@ class BackgroundMusic:
     def startup_check(self):
         if self._cur is None:
             return False, "music unavailable (synth failed)."
-        return True, (f"generative PHONK playlist — {NUM_SONGS} unique tracks, "
-                      f"~{SONG_SECONDS:.0f}s each, ducks under voice.")
+        return True, (f"generative PHONK playlist — {NUM_SONGS} unique tracks, no "
+                      f"repeat for ~{REPEAT_GAP/86400:.0f} days (persisted), ducks under voice.")
 
     # -------------------------------------------------------------------------
     def _gen_loop(self):
