@@ -270,6 +270,22 @@ class AvatarStudio:
         # to disable). Delayed so the Studio window paints first.
         self.root.after(1500, self._launch_tradingview)
 
+    def _safe_thread(self, method_name, *args):
+        """Start a daemon thread for self.<method_name>, but NEVER let a missing/
+        broken method (e.g. an autosync mid-write) crash startup. Returns the
+        thread or None."""
+        try:
+            fn = getattr(self, method_name, None)
+            if fn is None:
+                print(f"[studio] optional thread {method_name} unavailable — skipping.")
+                return None
+            t = threading.Thread(target=fn, args=args, daemon=True)
+            t.start()
+            return t
+        except Exception as exc:
+            print(f"[studio] could not start {method_name}: {exc}")
+            return None
+
     def _launch_tradingview(self):
         """Open TradingView.com in a browser the AI drives (scroll/zoom/draw)."""
         import subprocess
