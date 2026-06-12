@@ -53,6 +53,16 @@ class CommentResponder:
         self._recent = {}          # text -> last time seen (dedupe)
         self._last_greet = 0.0
         self._last_deep = 0.0      # last time we dug deep into a topic (spacing)
+        self._supporters = {}      # user -> {coins, gifts, follow} cumulative support
+
+    # warm Arab-host voice for the appreciation lines (matches the avatar persona)
+    _ARAB_HOST_SYS = (
+        "You are a warm, charismatic ARAB live-stream host who is genuinely grateful "
+        "to your supporters. Drop a natural Arabic word like habibi, wallahi, mashallah, "
+        "akhi or ya salam. Speak out loud like a real person. No emojis, no markdown.")
+
+    def _support(self, user):
+        return self._supporters.setdefault(user, {"coins": 0, "gifts": 0, "follow": False})
 
     # topics worth digging into (keeps the live lively when one comes up)
     _INTERESTING = re.compile(
