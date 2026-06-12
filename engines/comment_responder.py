@@ -31,6 +31,11 @@ _EMOJI = re.compile(
 _URL = re.compile(r"https?://|www\.|\.com|\.net|t\.me/", re.I)
 _SPAM = re.compile(r"\b(first|follow me|follow back|f4f|sub4sub|check my|free follow|"
                    r"promo|gift me|send gift|join my)\b", re.I)
+# abusive / scam — NEVER read these out on stream (silently ignore)
+_TOXIC = re.compile(r"\b(scam|scammer|fake|kys|kill yourself|idiot|moron|stupid|loser|"
+                    r"bitch|whore|fuck ?you|fuck off|shut up|trash|garbage|telegram|"
+                    r"whatsapp|dm me|inbox me|double your|guaranteed profit|giveaway|"
+                    r"investment plan|signal group|join my channel)\b", re.I)
 # trading words that make a short comment worth answering even without a '?'
 _TOPIC = re.compile(r"\b(gold|xau|xauusd|buy|sell|long|short|price|target|support|"
                     r"resist|trend|entry|stop|tp|sl|forecast|bull|bear|trade|signal|"
@@ -56,8 +61,8 @@ class CommentResponder:
         stripped = _EMOJI.sub("", t).strip()
         if len(stripped) < 2:               # emoji-only
             return True
-        if _URL.search(t) or _SPAM.search(t):
-            return True
+        if _URL.search(t) or _SPAM.search(t) or _TOXIC.search(t):
+            return True        # spam / scam / abuse — never spoken on stream
         # de-dupe identical comments within 60s (spam floods)
         now = time.time()
         self._recent = {k: v for k, v in self._recent.items() if now - v < 60}
