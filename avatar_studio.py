@@ -2114,6 +2114,8 @@ class AvatarStudio:
         except Exception:
             pass
         last = None
+        client = None
+        client_handle = None
         while not getattr(self, "_live_stop", False):
             handle = (self.handle_var.get() or "").strip()
             if not handle:
@@ -2126,8 +2128,13 @@ class AvatarStudio:
                 handle = "@" + handle
             try:
                 from TikTokLive import TikTokLiveClient
+                # reuse ONE client per handle so we don't leak an HTTP session
+                # on every poll over a multi-hour stream.
+                if client is None or handle != client_handle:
+                    client = TikTokLiveClient(unique_id=handle)
+                    client_handle = handle
                 live = bool(asyncio.get_event_loop().run_until_complete(
-                    TikTokLiveClient(unique_id=handle).is_live()))
+                    client.is_live()))
             except Exception:
                 live = False
             self._handle_live = live
