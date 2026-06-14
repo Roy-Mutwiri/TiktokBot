@@ -1627,6 +1627,204 @@ class AvatarStudio:
         if target is not None:
             self._scroll_right_to(target)
 
+    def _build_sidebar_scene_slot(self):
+        if self.scene_slot is None:
+            return
+        for child in self.scene_slot.winfo_children():
+            child.destroy()
+        holder = tk.Frame(
+            self.scene_slot, bg="#0c1016", highlightthickness=1,
+            highlightbackground=self._mix(BORDER, CYAN, 0.42))
+        holder.place(relx=0.5, rely=0.52, anchor="center", relwidth=1.0)
+        if self._scene_capture_image is not None:
+            self.scene_preview_lbl = tk.Label(
+                holder, bg="#050608", bd=0, highlightthickness=1,
+                highlightbackground=self._mix(CYAN, BG, 0.35))
+            self.scene_preview_lbl.pack(fill="x", padx=8, pady=(8, 6))
+            holder.bind("<Configure>", lambda _e: self._refresh_scene_preview())
+            self.scene_preview_lbl.bind(
+                "<Button-1>", lambda _e: self._start_scene_snip())
+        self.scene_add_btn = tk.Button(
+            holder, text="Add Scene", command=self._start_scene_snip,
+            bg=self._mix(CYAN, "#1d7cff", 0.35), fg="#ffffff",
+            activebackground=self._mix(CYAN, "#ffffff", 0.20),
+            activeforeground="#ffffff", relief="flat", bd=0,
+            font=("Segoe UI", 9, "bold"), cursor="hand2",
+            highlightthickness=1, highlightbackground=CYAN, padx=12, pady=7)
+        self.scene_add_btn.pack(anchor="center", pady=(6, 8))
+        if self._scene_capture_image is not None:
+            self._refresh_scene_preview()
+
+    def _refresh_scene_preview(self):
+        if self.scene_preview_lbl is None or self._scene_capture_image is None:
+            return
+        try:
+            width = max(92, self.scene_preview_lbl.winfo_width() or 138)
+            height = max(54, int(width * 9 / 16))
+            img = self._scene_capture_image.copy()
+            img.thumbnail((width, height), Image.LANCZOS)
+            canvas = Image.new("RGB", (width, height), "#050608")
+            canvas.paste(img, ((width - img.width) // 2, (height - img.height) // 2))
+            self._scene_capture_tk = ImageTk.PhotoImage(canvas)
+            self.scene_preview_lbl.configure(image=self._scene_capture_tk)
+        except Exception as exc:
+            self._log_msg(f"[scene] preview failed: {exc}")
+
+    def _list_monitors(self):
+        if sys.platform == "win32":
+            try:
+                import ctypes
+                monitors = []
+
+                class RECT(ctypes.Structure):
+                    _fields_ = [
+                        ("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+                    ]
+
+                def _callback(_hmon, _hdc, rect_ptr, _data):
+                    rect = rect_ptr.contents
+                    monitors.append({
+                        "left": int(rect.left),
+                        "top": int(rect.top),
+                        "width": int(rect.right - rect.left),
+                        "height": int(rect.bottom - rect.top),
+                    })
+                    return 1
+
+                proc = ctypes.WINFUNCTYPE(
+                    ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong,
+                    ctypes.POINTER(RECT), ctypes.c_double)
+                ctypes.windll.user32.EnumDisplayMonitors(0, 0, proc(_callback), 0)
+                if monitors:
+                    return monitors
+            except Exception:
+                pass
+        return [{
+            "left": 0, "top": 0,
+            "width": self.root.winfo_screenwidth(),
+            "height": self.root.winfo_screenheight(),
+        }]
+
+    def _start_scene_snip(self):
+        monitors = self._list_monitors()
+        if len(monitors) > 1:
+            self._choose_scene_monitor(monitors)
+        else:
+            self._open_scene_snipper(monitors[0])
+
+    def _choose_scene_monitor(self, monitors):
+        win = tk.Toplevel(self.root)
+        win.title("Select screen")
+        win.configure(bg=BG)
+        win.transient(self.root)
+        win.attributes("-topmost", True)
+        tk.Label(
+            win, text="Select screen to snip from", bg=BG, fg=FG,
+            font=("Segoe UI", 10, "bold")).pack(padx=18, pady=(14, 8))
+        for i, mon in enumerate(monitors, start=1):
+            tk.Button(
+                win, text=f"Screen {i}  {mon['width']}x{mon['height']}",
+                command=lambda m=mon: (win.destroy(), self._open_scene_snipper(m)),
+                bg=SURFACE2, fg=FG,
+                activebackground=self._mix(SURFACE2, CYAN, 0.25),
+                activeforeground=FG, relief="flat", bd=0, cursor="hand2",
+                font=("Segoe UI", 9), padx=18, pady=8,
+                highlightthickness=1, highlightbackground=BORDER).pack(
+                    fill="x", padx=18, pady=4)
+        tk.Button(
+            win, text="Cancel", command=win.destroy,
+            bg=self._mix(SURFACE2, RED, 0.14), fg=RED,
+            activebackground=self._mix(SURFACE2, RED, 0.24),
+            activeforeground=RED, relief="flat", bd=0, cursor="hand2",
+            font=("Segoe UI", 9, "bold"), padx=18, pady=7).pack(
+                fill="x", padx=18, pady=(8, 14))
+        win.update_idletasks()
+        x = self.root.winfo_x() + max(40, (self.root.winfo_width() - win.winfo_width()) // 2)
+        y = self.root.winfo_y() + 90
+        win.geometry(f"+{x}+{y}")
+
+    def _open_scene_snipper(self, monitor):
+        try:
+            self.root.withdraw()
+            self.root.after(180, lambda: self._show_scene_snipper(monitor))
+        except Exception:
+            self._show_scene_snipper(monitor)
+
+    def _show_scene_snipper(self, monitor):
+        try:
+            bbox = (
+                monitor["left"], monitor["top"],
+                monitor["left"] + monitor["width"],
+                monitor["top"] + monitor["height"],
+            )
+            shot = ImageGrab.grab(bbox=bbox, all_screens=True)
+        except Exception as exc:
+            self.root.deiconify()
+            self._log_msg(f"[scene] screen capture failed: {exc}")
+            return
+
+        overlay = tk.Toplevel(self.root)
+        overlay.overrideredirect(True)
+        overlay.attributes("-topmost", True)
+        overlay.geometry(
+            f"{monitor['width']}x{monitor['height']}+{monitor['left']}+{monitor['top']}")
+        cv = tk.Canvas(overlay, highlightthickness=0, bd=0, cursor="crosshair")
+        cv.pack(fill="both", expand=True)
+        bg = shot.resize((monitor["width"], monitor["height"]), Image.LANCZOS)
+        tk_bg = ImageTk.PhotoImage(bg)
+        overlay._scene_bg = tk_bg
+        cv.create_image(0, 0, image=tk_bg, anchor="nw")
+        cv.create_rectangle(
+            0, 0, monitor["width"], monitor["height"],
+            fill="#000000", stipple="gray50", outline="")
+        cv.create_text(
+            monitor["width"] // 2, 28,
+            text="Drag to select a scene region. Enter confirms. Esc cancels.",
+            fill="#ffffff", font=("Segoe UI", 12, "bold"))
+        state = {"start": None, "rect": None, "box": None}
+
+        def _draw_box(x1, y1, x2, y2):
+            if state["rect"] is not None:
+                cv.delete(state["rect"])
+            state["rect"] = cv.create_rectangle(x1, y1, x2, y2, outline=CYAN, width=3)
+            state["box"] = (min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+
+        def _down(event):
+            state["start"] = (event.x, event.y)
+            _draw_box(event.x, event.y, event.x + 1, event.y + 1)
+
+        def _drag(event):
+            if state["start"] is None:
+                return
+            sx, sy = state["start"]
+            _draw_box(sx, sy, event.x, event.y)
+
+        def _cancel(_event=None):
+            overlay.destroy()
+            self.root.deiconify()
+            self.root.lift()
+
+        def _confirm(_event=None):
+            box = state.get("box")
+            if not box or box[2] - box[0] < 8 or box[3] - box[1] < 8:
+                return
+            crop = shot.crop(box)
+            self._scene_capture_image = crop.convert("RGB")
+            overlay.destroy()
+            self.root.deiconify()
+            self.root.lift()
+            self._build_sidebar_scene_slot()
+            self._log_msg(f"[scene] added screen region {crop.width}x{crop.height}")
+
+        cv.bind("<Button-1>", _down)
+        cv.bind("<B1-Motion>", _drag)
+        cv.bind("<ButtonRelease-1>", _drag)
+        overlay.bind("<Return>", _confirm)
+        overlay.bind("<Escape>", _cancel)
+        overlay.bind("<Double-Button-1>", _confirm)
+        overlay.focus_force()
+
     def _resize_preview_stage(self, event=None):
         wrap = getattr(self, "preview_stage_wrap", None)
         stage = getattr(self, "preview_stage", None)
