@@ -294,6 +294,7 @@ class AvatarStudio:
         self._sess_likes = 0
         self._sess_coins = 0
         self._sess_follows = 0
+        self._viewer_scores = {}
         self._session_started_at = None
         self._coin_goal = int(os.environ.get("AVATAR_COIN_GOAL", "200"))
         self._poll = None                         # active buy/sell poll {buy,sell,end}
@@ -2055,6 +2056,14 @@ class AvatarStudio:
             bg=self._mix(SURFACE2, MINT, 0.18), fg=MINT, relief="flat", bd=0,
             font=("Segoe UI", 9, "bold"), cursor="hand2")
         self.youtube_smooth_btn.pack(side="left", fill="x", expand=True, padx=5, ipady=6)
+        self.viewers_btn = tk.Button(
+            actions, text=f"{ICONS['viewers']}  Viewers",
+            command=self._speak_top_viewers,
+            bg=self._mix(SURFACE2, MAG, 0.18), fg=FG, relief="flat", bd=0,
+            font=("Segoe UI", 9, "bold"), cursor="hand2",
+            activebackground=self._mix(SURFACE2, MAG, 0.30),
+            activeforeground=FG)
+        self.viewers_btn.pack(side="left", fill="x", expand=True, padx=5, ipady=6)
         audio_mutes = tk.Frame(center_col, bg="#090c11", highlightthickness=1,
                                highlightbackground="#202632")
         audio_mutes.pack(fill="x", pady=(8, 0))
@@ -4443,6 +4452,7 @@ class AvatarStudio:
         """Called from the TikTok reader thread for every live comment — queue it
         (or count it as a poll vote if a buy/sell poll is running)."""
         try:
+            self._mark_viewer(user, comments=1)
             self._comment_times.append(time.time())
             self._feed_msg(f"{user}:  {text}", "q")     # show ALL comments live
             poll = self._poll
@@ -4491,6 +4501,7 @@ class AvatarStudio:
             self._log_msg(f"🎁 {user} sent {count}x {gift} ({coins} coins)")
             self._feed_msg(f"\U0001f381 {user} sent {count}x {gift} ({coins} coins)", "ev")
             self._sess_coins += max(0, int(coins))
+            self._mark_viewer(user, gifts=max(1, int(count or 1)), coins=max(0, int(coins or 0)))
             rx = self._reactions()
             if rx is not None:                    # gifts to the FRONT (lead priority)
                 self._stage_urgent_event(
@@ -4510,6 +4521,7 @@ class AvatarStudio:
         try:
             self._sess_follows += 1
             self._feed_msg(f"➕ {user} followed", "ev")
+            self._mark_viewer(user, follows=1)
             self._log_msg(f"[follow] received from {user}")
             self._queue_follow_thanks(user)
         except Exception:
@@ -4548,6 +4560,7 @@ class AvatarStudio:
     def _on_share(self, user):
         try:
             self._feed_msg(f"↪ {user} shared the stream", "ev")
+            self._mark_viewer(user, shares=1)
             rx = self._reactions()
             if rx is not None:
                 self._log_msg(f"[share] received from {user}")
@@ -4584,6 +4597,119 @@ class AvatarStudio:
             return text
         return f"{text} [[CUT]] {ctx}"
 
+    def _viewer_record(self, user):
+        name = (user or "").strip()
+        if not name:
+            return None
+        key = name.lower()
+        rec = self._viewer_scores.get(key)
+        if rec is None:
+            rec = {
+                "name": name, "comments": 0, "coins": 0, "gifts": 0,
+                "follows": 0, "shares": 0, "likes": 0, "joins": 0,
+                "last": time.monotonic(),
+            }
+            self._viewer_scores[key] = rec
+        else:
+            rec["name"] = name
+            rec["last"] = time.monotonic()
+        return rec
+
+    def _mark_viewer(self, user, *, comments=0, coins=0, gifts=0,
+                     follows=0, shares=0, likes=0, joins=0):
+        rec = self._viewer_record(user)
+        if rec is None:
+            return
+        rec["comments"] += int(comments or 0)
+        rec["coins"] += int(coins or 0)
+        rec["gifts"] += int(gifts or 0)
+        rec["follows"] += int(follows or 0)
+        rec["shares"] += int(shares or 0)
+        rec["likes"] += int(likes or 0)
+        rec["joins"] += int(joins or 0)
+
+    @staticmethod
+    def _viewer_score(rec):
+        return (
+            int(rec.get("coins", 0)) * 5
+            + int(rec.get("gifts", 0)) * 90
+            + int(rec.get("shares", 0)) * 45
+            + int(rec.get("follows", 0)) * 35
+            + int(rec.get("comments", 0)) * 18
+            + int(rec.get("likes", 0)) * 2
+            + int(rec.get("joins", 0))
+        )
+
+    def _top_viewers(self, limit=8):
+        rows = list(getattr(self, "_viewer_scores", {}).values())
+        rows.sort(key=lambda rec: (self._viewer_score(rec), rec.get("last", 0.0)),
+                  reverse=True)
+        return [rec for rec in rows if self._viewer_score(rec) > 0][:limit]
+
+    @staticmethod
+    def _join_names(names):
+        names = [str(n).strip() for n in names if str(n).strip()]
+        if not names:
+            return ""
+        if len(names) == 1:
+            return names[0]
+        if len(names) == 2:
+            return f"{names[0]} and {names[1]}"
+        return ", ".join(names[:-1]) + f", and {names[-1]}"
+
+    def _top_viewers_line(self):
+        top = self._top_viewers(8)
+        room = self._live_room_context()
+        if not top:
+            if room:
+                return (f"{room} Big love to everyone watching right now. "
+                        "Stay sharp, stay patient, and keep showing up.")
+            return ("Big love to everyone watching right now. I see the room, "
+                    "I appreciate the support, and the next move belongs to the disciplined.")
+        names = [rec["name"] for rec in top[:5]]
+        extra = len(top) - len(names)
+        joined = self._join_names(names)
+        if extra > 0:
+            joined = f"{joined}, plus {extra} more active legends"
+        top_gifter = next((rec for rec in top if int(rec.get("coins", 0)) > 0), None)
+        gift_part = ""
+        if top_gifter is not None:
+            gift_part = (f" Special respect to {top_gifter['name']} holding it down "
+                         f"with {int(top_gifter.get('coins', 0)):,} coins.")
+        opener = f"{room} " if room else ""
+        return (
+            f"{opener}Shout out to the top viewers right now: {joined}. "
+            f"{gift_part} You are carrying the energy in this live. "
+            "Keep focused, keep supporting each other, and let's make this session count."
+        ).replace("  ", " ").strip()
+
+    def _speak_top_viewers(self):
+        if self.tts is None or not self.running:
+            self._log_msg("[viewers] press START first.")
+            return
+        line = self._top_viewers_line()
+        youtube_state = self._pause_youtube_for_ready_speech()
+        try:
+            self.tts.set_muted(False)
+            self.tts.interrupt_current()
+            self.tts.clear_pending()
+        except Exception:
+            pass
+        accepted = self.tts.speak(line, priority=2)
+        if not accepted:
+            self._restore_youtube_after_ready_speech(youtube_state)
+            self._log_msg("[viewers] TTS rejected viewer shout-out")
+            return
+        self._log_msg("[viewers] top viewers shout-out queued")
+        self._log_msg("avatar> " + line)
+        self._last_spoke_t = time.monotonic()
+        self._user_active_until = time.monotonic() + 5.0
+        if youtube_state is not None:
+            threading.Thread(
+                target=self._wait_and_restore_youtube,
+                args=(youtube_state,), daemon=True
+            ).start()
+
     def _live_stream_ctx(self):
         market = ""
         try:
@@ -4610,6 +4736,7 @@ class AvatarStudio:
     def _on_like(self, user, total):
         # celebrate only when we CROSS a milestone (likes fire constantly otherwise)
         try:
+            self._mark_viewer(user, likes=1)
             self._sess_likes = max(self._sess_likes, int(total or 0))
             if total and total >= self._next_like_ms:
                 rx = self._reactions()
@@ -4626,6 +4753,12 @@ class AvatarStudio:
         """Receive TikTok's concurrent room count immediately when it changes."""
         try:
             self._sess_viewers = max(0, int(total or 0))
+        except Exception:
+            pass
+
+    def _on_join(self, user):
+        try:
+            self._mark_viewer(user, joins=1)
         except Exception:
             pass
 
