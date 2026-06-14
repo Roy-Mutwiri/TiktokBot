@@ -5118,6 +5118,7 @@ class AvatarStudio:
             "was_paused": bool(getattr(player, "_paused", None)
                                and player._paused.is_set()),
             "was_muted": bool(getattr(player, "muted", False)),
+            "duck_gain": getattr(player, "_target_output_gain", 1.0),
             "tts_was_muted": bool(getattr(self.tts, "muted", False)),
             "tts_voice_match": getattr(self.tts, "_playback_match_persona", None),
         }
@@ -5125,9 +5126,13 @@ class AvatarStudio:
             persona = getattr(player, "persona", None)
             if self.tts is not None and persona:
                 self.tts.set_playback_voice_match(persona)
-            player.set_muted(True)
-            player.pause()
-            self._log_msg("[ready] YouTube audio paused; matching acknowledgement voice")
+            if hasattr(player, "set_ducked"):
+                player.set_ducked(True)
+                self._log_msg("[ready] YouTube voice ducked under bot speech")
+            else:
+                player.set_muted(True)
+                player.pause()
+                self._log_msg("[ready] YouTube audio paused; matching acknowledgement voice")
         except Exception as exc:
             self._log_msg(f"[ready] could not pause YouTube audio: {exc}")
         return state
@@ -5149,14 +5154,19 @@ class AvatarStudio:
         if player is None or player is not self._youtube_audio:
             return
         try:
-            player.set_muted(bool(state.get("was_muted", False)))
-            if (state.get("was_running") and not state.get("was_paused")
-                    and self._youtube_mode == "youtube"):
-                player.resume()
+            if hasattr(player, "set_ducked"):
+                player.set_ducked(False)
+                player._target_output_gain = float(state.get("duck_gain", 1.0))
+                player.set_muted(bool(state.get("was_muted", False)))
+            else:
+                player.set_muted(bool(state.get("was_muted", False)))
+                if (state.get("was_running") and not state.get("was_paused")
+                        and self._youtube_mode == "youtube"):
+                    player.resume()
             if self.tts is not None:
                 self.tts.set_playback_voice_match(state.get("tts_voice_match"))
                 self.tts.set_muted(bool(state.get("tts_was_muted", False)))
-            self._log_msg("[ready] YouTube audio restored")
+            self._log_msg("[ready] YouTube voice blend restored")
         except Exception as exc:
             self._log_msg(f"[ready] could not restore YouTube audio: {exc}")
 
