@@ -1630,6 +1630,7 @@ class AvatarStudio:
     def _build_sidebar_scene_slot(self):
         if self.scene_slot is None:
             return
+        self.scene_preview_lbl = None
         for child in self.scene_slot.winfo_children():
             child.destroy()
         holder = tk.Frame(
@@ -1694,7 +1695,7 @@ class AvatarStudio:
 
                 proc = ctypes.WINFUNCTYPE(
                     ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong,
-                    ctypes.POINTER(RECT), ctypes.c_double)
+                    ctypes.POINTER(RECT), ctypes.c_longlong)
                 ctypes.windll.user32.EnumDisplayMonitors(0, 0, proc(_callback), 0)
                 if monitors:
                     return monitors
