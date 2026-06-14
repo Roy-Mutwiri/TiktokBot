@@ -65,6 +65,9 @@ class YouTubeAudioPlayer:
         self.gain = float(os.environ.get("AVATAR_YOUTUBE_GAIN", "1.10"))
         self.fade_blocks = max(1, int(os.environ.get("AVATAR_YOUTUBE_FADE_BLOCKS", "8")))
         self.noise_floor = float(os.environ.get("AVATAR_YOUTUBE_NOISE_FLOOR", "0.00018"))
+        self.duck_gain = float(os.environ.get("AVATAR_YOUTUBE_DUCK_GAIN", "0.22"))
+        self._output_gain = 1.0
+        self._target_output_gain = 1.0
 
         self._running = False
         self._paused = threading.Event()
@@ -75,6 +78,8 @@ class YouTubeAudioPlayer:
         self._fade_pos = 0
         self._last_styled = None
         self._pause_release_pending = False
+        self._output_gain = 1.0
+        self._target_output_gain = 1.0
 
     def start(self, url, start_seconds=None, end_seconds=None):
         if self._running:
@@ -160,6 +165,13 @@ class YouTubeAudioPlayer:
         except Exception:
             pass
 
+    def set_ducked(self, ducked, gain=None):
+        """Lower monitor output under bot speech without pausing playback."""
+        if gain is not None:
+            self.duck_gain = max(0.0, min(1.0, float(gain)))
+        self._target_output_gain = self.duck_gain if ducked else 1.0
+        self._set_status("ducking youtube voice" if ducked else "restoring youtube voice")
+
     @property
     def position_seconds(self):
         return self.start_seconds + self.position_blocks * BLOCK / float(SAMPLE_RATE)
@@ -234,7 +246,8 @@ class YouTubeAudioPlayer:
                     pass
                 if self._out is not None and not self.muted:
                     try:
-                        self._out.write(styled.reshape(-1, 1))
+                        monitor = self._apply_output_duck(styled)
+                        self._out.write(monitor.reshape(-1, 1))
                     except Exception:
                         pass
             self._set_status("ended")
@@ -276,6 +289,22 @@ class YouTubeAudioPlayer:
                 out += np.random.normal(
                     0.0, self.noise_floor, out.size).astype(np.float32)
         return np.clip(out, -1.0, 1.0).astype(np.float32)
+
+    def _apply_output_duck(self, samples):
+        out = np.asarray(samples, dtype=np.float32).copy()
+        if out.size == 0:
+            return out
+        target = float(getattr(self, "_target_output_gain", 1.0))
+        current = float(getattr(self, "_output_gain", 1.0))
+        if abs(target - current) < 0.002:
+            self._output_gain = target
+            return (out * target).astype(np.float32)
+        # Ramp over about 180 ms so the listener hears a blend, not a cut.
+        step = max(0.02, min(0.22, out.size / float(MONITOR_RATE) / 0.18))
+        next_gain = current + (target - current) * step
+        env = np.linspace(current, next_gain, out.size, dtype=np.float32)
+        self._output_gain = float(next_gain)
+        return (out * env).astype(np.float32)
 
     def _emit_release_tail(self):
         if not self.smooth_transition:
