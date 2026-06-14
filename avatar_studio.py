@@ -277,7 +277,9 @@ class AvatarStudio:
         self._prio_events = _c.deque(maxlen=10)
         # follows arrive in BURSTS — buffer the names and thank them in one batched
         # line (so a burst is one quick shout-out, not 8 slow separate ones).
-        self._pending_follows = _c.deque(maxlen=20)
+        self._pending_follows = _c.deque(maxlen=60)
+        self._follow_batch_after = None
+        self._follow_batch_first_t = 0.0
         self._ready_speech_lock = threading.Lock()
         self._ready_speech = None
         self._ready_speech_deferred = None
