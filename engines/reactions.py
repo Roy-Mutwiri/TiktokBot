@@ -21,6 +21,7 @@ _FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reactions.json
 _LOCK = threading.Lock()
 _DATA = None
 _RECENT = {}          # category -> list of recently used indices (anti-repeat)
+_READY_USED = {}      # category -> set of used intro/ending combinations
 
 _FALLBACK = {
     "follow": "Welcome to the family, {user}, thank you for the follow!",
@@ -127,6 +128,197 @@ _READY = {
 }
 
 
+def _extend_unique(pool, lines):
+    seen = set(pool)
+    for line in lines:
+        line = str(line or "").strip()
+        if line and line not in seen:
+            pool.append(line)
+            seen.add(line)
+
+
+_extend_unique(_READY["intro"], [
+    "Respect to",
+    "Real one alert for",
+    "Let me shout out",
+    "Chat, welcome",
+    "Big respect for",
+    "I appreciate",
+    "Massive love to",
+    "Quick shout-out to",
+    "The room sees",
+    "Family, say welcome to",
+    "Much love and respect to",
+    "Wallahi, big love to",
+    "Mashallah, welcome",
+    "Strong support from",
+    "I have to thank",
+    "Do not miss",
+    "Energy just came from",
+    "We have love from",
+    "Special respect to",
+    "All eyes on",
+    "Let us recognize",
+    "The family welcomes",
+    "This room appreciates",
+    "A real supporter just arrived",
+    "Big moment for",
+    "Nothing but respect for",
+    "I see the support from",
+    "Give it up for",
+    "Welcome to the room",
+    "Appreciation going to",
+    "Love in the chat for",
+    "A proper shout-out for",
+    "Strong entrance from",
+    "The stream appreciates",
+    "Right now I see",
+    "That support came from",
+])
+
+_extend_unique(_READY["follow"], [
+    "for the follow. You are locked in with us now!",
+    "for following. Welcome to the room, stay close!",
+    "for tapping follow. That support keeps the family growing!",
+    "for joining us. The next chart move is coming soon!",
+    "for the follow. Good to have sharp eyes in here!",
+    "for becoming part of the stream. I appreciate the trust!",
+    "for following. You came at a good time, stay with us!",
+    "for joining the gold room. Much respect and welcome!",
+    "for that follow. You just made the room stronger!",
+    "for coming in and following. Make yourself comfortable!",
+    "for the follow. We are building something serious here!",
+    "for supporting the live. Welcome to the trading family!",
+    "for joining. Watch the levels with us, it is getting interesting!",
+    "for hitting that follow. I appreciate you more than you know!",
+    "for stepping into the family. Welcome, stay active!",
+    "for the follow. The room is better with you in it!",
+    "for following. You are early for the next setup!",
+    "for the support. Welcome in, let us keep the energy high!",
+    "for joining us live. Your follow means real support!",
+    "for the follow. I see you and I appreciate you!",
+    "for following. Stay close, the next signal needs focus!",
+    "for joining the squad. Big respect and welcome!",
+    "for that follow. You are officially part of the room!",
+    "for supporting the stream. We move together here!",
+    "for following. That is the kind of support I notice!",
+    "for joining. Let us read this market together!",
+    "for the follow. Fresh energy just entered the live!",
+    "for stepping in. Welcome to the family, enjoy the action!",
+    "for following. You are not just watching, you are with us now!",
+    "for the follow. I appreciate the love and the timing!",
+    "for joining the live. Stay with us, the room is warming up!",
+    "for that follow. You helped push this live forward!",
+])
+
+_extend_unique(_READY["share"], [
+    "for sharing the live. That helps more than you think!",
+    "for sending the stream out. You just brought more energy in!",
+    "for the share. That is how the family grows!",
+    "for sharing us. Real support, and I notice it!",
+    "for putting the live in front of more people!",
+    "for backing the stream with a share. Much respect!",
+    "for the share. You helped the room get louder!",
+    "for spreading the live. That support is not small!",
+    "for sharing this with your people. I appreciate that!",
+    "for the share. More eyes, more energy, better room!",
+    "for pushing the live forward with that share!",
+    "for sharing. You are helping the whole community grow!",
+    "for sending people this way. That is a real supporter move!",
+    "for the share. I see who is helping the stream!",
+    "for spreading the word. You just opened the door for new people!",
+    "for sharing the stream. That is family behavior!",
+    "for the share. You helped bring fresh eyes to the charts!",
+    "for sending the live out. I appreciate that kind of support!",
+    "for sharing. That is how we keep the room alive!",
+    "for backing us with a share. Big respect to you!",
+    "for the share. You are helping this live travel!",
+    "for spreading this stream. The room appreciates you!",
+    "for the share. That support carries the live further!",
+    "for helping more traders find us. Thank you!",
+])
+
+_extend_unique(_READY["gift_small"], [
+    "for the gift. Small gift, real support!",
+    "for sending that gift. I see the love!",
+    "for the support. Every gift adds energy here!",
+    "for the gift. You just lifted the room a little higher!",
+    "for showing love. That means something to me!",
+    "for that gift. I appreciate every bit of support!",
+    "for the gift. You are helping keep this live moving!",
+    "for coming through. The room sees your support!",
+    "for that support. Big heart, much respect!",
+    "for the gift. You did not have to, and I appreciate it!",
+    "for sending love to the stream. Thank you!",
+    "for the gift. That support never goes unnoticed!",
+    "for backing the live. Much respect to you!",
+    "for the support. You added good energy to the room!",
+    "for that gift. Real support from a real one!",
+    "for showing up with love. I appreciate you!",
+    "for the gift. You helped make this live better!",
+    "for that support. I see you clearly!",
+    "for the gift. The energy just went up!",
+    "for supporting the room. Thank you from the heart!",
+])
+
+_extend_unique(_READY["gift_mid"], [
+    "for that generous gift. You really came through!",
+    "for the strong support. The room feels that!",
+    "for that gift. You just raised the energy in here!",
+    "for supporting like that. I truly appreciate it!",
+    "for the generous love. That is a serious supporter move!",
+    "for that gift. You are helping carry this live!",
+    "for the support. Everybody can see the love!",
+    "for backing the stream. That means a lot to me!",
+    "for that generous gift. You are officially family here!",
+    "for showing up strong. Big respect and thank you!",
+    "for the gift. That is the kind of support I remember!",
+    "for supporting the room like that. Much love!",
+    "for that strong gift. You just changed the mood!",
+    "for the generosity. I appreciate you deeply!",
+    "for the gift. Chat sees the support you are showing!",
+    "for backing us. You brought real momentum!",
+    "for that gift. You are moving like a regular already!",
+    "for the support. That was clean, generous, and appreciated!",
+])
+
+_extend_unique(_READY["gift_big"], [
+    "for the big gift. You just woke the whole room up!",
+    "for the massive support. That is VIP energy!",
+    "for that big gift. Everybody needs to show you love!",
+    "for coming through so strong. I will remember that!",
+    "for the huge support. You just made a moment!",
+    "for that big gift. The room felt that immediately!",
+    "for backing this live like a legend!",
+    "for the serious support. That is not normal, thank you!",
+    "for the big gift. You just became a name in this room!",
+    "for that massive gift. I appreciate you from the heart!",
+    "for the huge love. Chat, show respect right now!",
+    "for supporting on that level. Absolute legend behavior!",
+    "for the big gift. You just gave the stream a new pulse!",
+    "for that support. VIP respect to you, seriously!",
+    "for the gift. You changed the energy in one second!",
+    "for backing us that hard. That is unforgettable!",
+])
+
+_extend_unique(_READY["gift_huge"], [
+    "for that incredible gift. The whole live has to stop for you!",
+    "for the unbelievable support. That is top supporter energy!",
+    "for that enormous gift. You just made stream history!",
+    "for blessing the room like that. I am honestly grateful!",
+    "for that legendary gift. Everybody show respect right now!",
+    "for the massive support. You are VIP in this room!",
+    "for that huge gift. I will remember your name here!",
+    "for lifting the entire stream. That was a serious moment!",
+    "for the incredible support. You just made the room explode!",
+    "for that gift. This is the kind of support people remember!",
+    "for showing love on another level. Absolute top supporter!",
+    "for the huge blessing. You just owned this moment!",
+    "for that legendary support. The whole family sees you!",
+    "for the massive gift. That is not regular support, that is special!",
+])
+
+
 def ready_lines():
     """All reusable response pieces that should be synthesized before going live."""
     return list(dict.fromkeys(
@@ -155,9 +347,34 @@ def _ready_pick(category):
     return pool[idx]
 
 
+def _ready_combo(category):
+    """Pick a complete intro+ending pair without repeating until the pair space
+    is exhausted. This makes long lives feel much less looped than independently
+    shuffling the two chunks."""
+    intros = _READY["intro"]
+    endings = _READY[category]
+    total = len(intros) * len(endings)
+    if total <= 0:
+        return "", ""
+    with _LOCK:
+        used = _READY_USED.setdefault(category, set())
+        if len(used) >= total:
+            used.clear()
+        for _ in range(32):
+            combo = random.randrange(total)
+            if combo not in used:
+                break
+        else:
+            fresh = [i for i in range(total) if i not in used]
+            combo = random.choice(fresh) if fresh else random.randrange(total)
+        used.add(combo)
+    intro = intros[combo // len(endings)]
+    ending = endings[combo % len(endings)]
+    return intro, ending
+
+
 def _personal(user, category):
-    intro = _ready_pick("intro")
-    ending = _ready_pick(category)
+    intro, ending = _ready_combo(category)
     return f"{intro} [[CUT]] {_spoken_name(user)}. [[CUT]] {ending}"
 
 
@@ -176,6 +393,182 @@ def ready_gift(user, gift_name="", coins=0):
     return _personal(user, tier)
 
 
+def _make_lines(openers, endings):
+    return [f"{opener} {ending}" for opener in openers for ending in endings]
+
+
+def _expand_template_data(data):
+    """Add a large generated template corpus without storing thousands of JSON lines."""
+    banks = {
+        "follow": _make_lines([
+            "{user}, welcome in!",
+            "Big love {user}.",
+            "Respect to {user}.",
+            "I see you {user}.",
+            "Welcome to the family, {user}.",
+            "{user}, good to have you here.",
+            "Chat, welcome {user}.",
+            "Mashallah {user}, welcome.",
+            "Strong entrance from {user}.",
+            "The room sees you, {user}.",
+            "Appreciation to {user}.",
+            "Fresh energy from {user}.",
+        ], [
+            "Thank you for the follow and stay close.",
+            "That follow means real support.",
+            "You joined at the right time.",
+            "We move together in this room.",
+            "The family just got stronger.",
+            "Keep your eyes on the next setup.",
+            "I appreciate you being part of the live.",
+            "Make yourself at home here.",
+            "That support helps the stream grow.",
+            "You are locked in with us now.",
+            "Thanks for backing the live.",
+            "The chart room welcomes you.",
+        ]),
+        "follow_batch": _make_lines([
+            "Welcome {names}.",
+            "Big love to {names}.",
+            "Chat, welcome {names}.",
+            "Respect to {names}.",
+            "Fresh follows from {names}.",
+            "The family just grew with {names}.",
+        ], [
+            "Thank you all for following.",
+            "Appreciate every one of those follows.",
+            "You are all part of the room now.",
+            "Stay close, the next move is coming.",
+            "That is real support from the chat.",
+            "Welcome in, the energy is climbing.",
+        ]),
+        "share": _make_lines([
+            "{user}, thank you for sharing.",
+            "Big respect {user}.",
+            "I see that share, {user}.",
+            "{user} just helped the stream travel.",
+            "Real support from {user}.",
+            "Appreciation to {user}.",
+            "The room sees your share, {user}.",
+            "Much love {user}.",
+        ], [
+            "You helped bring more people into the room.",
+            "That is how this family grows.",
+            "The stream moves further because of that.",
+            "More eyes on the charts means more energy.",
+            "That support is never small to me.",
+            "You are helping the live breathe.",
+            "That is a real supporter move.",
+            "I appreciate you spreading the word.",
+        ]),
+        "gift_small": _make_lines([
+            "Thank you for the {gift}, {user}.",
+            "I see the {gift}, {user}.",
+            "Big love for the {gift}, {user}.",
+            "{user}, that {gift} is appreciated.",
+            "Respect for the {gift}, {user}.",
+            "{user}, thank you for backing the live.",
+        ], [
+            "Small gift, real support.",
+            "That adds energy to the room.",
+            "I appreciate every bit of love.",
+            "You did not have to, and I notice it.",
+            "That helps keep the live moving.",
+            "The room sees your support.",
+            "That is a kind supporter move.",
+            "Much respect from me.",
+        ]),
+        "gift_mid": _make_lines([
+            "Mashallah {user}, thank you for the {gift}.",
+            "Strong support from {user} with the {gift}.",
+            "{user}, that {gift} is generous.",
+            "Big respect for the {gift}, {user}.",
+            "The room sees that {gift}, {user}.",
+            "{user}, you came through with the {gift}.",
+        ], [
+            "You just lifted the energy in here.",
+            "That is real generosity.",
+            "I appreciate that from the heart.",
+            "You are moving like family now.",
+            "That support keeps the room alive.",
+            "Everybody can see the love.",
+            "That is the kind of support I remember.",
+            "You brought momentum to the live.",
+        ]),
+        "gift_big": _make_lines([
+            "Wallahi {user}, the {gift}.",
+            "Huge support from {user} with the {gift}.",
+            "{user}, that {gift} is a big moment.",
+            "Chat, show love to {user} for the {gift}.",
+            "VIP energy from {user} with the {gift}.",
+            "{user}, you just dropped the {gift}.",
+        ], [
+            "You changed the energy in the whole room.",
+            "That is serious support, thank you.",
+            "I will remember that one.",
+            "Everybody needs to respect that.",
+            "You just made the stream louder.",
+            "That is not regular support.",
+            "Absolute legend behavior.",
+            "You just became a name in this room.",
+        ]),
+        "gift_huge": _make_lines([
+            "Stop everything, {user} with the {gift}.",
+            "Wallahi {user}, that {gift} is unbelievable.",
+            "Chat, {user} just made a huge moment with the {gift}.",
+            "{user}, that {gift} is legendary.",
+            "Top supporter energy from {user} with the {gift}.",
+            "Ya salam {user}, the {gift}.",
+        ], [
+            "The whole live has to recognize you.",
+            "You just made stream history.",
+            "I am genuinely grateful for that.",
+            "That is VIP support on another level.",
+            "Everybody show respect right now.",
+            "That support is unforgettable.",
+            "You just owned this moment.",
+            "The room will remember that.",
+        ]),
+        "likes": _make_lines([
+            "We just passed {total} likes.",
+            "{total} likes in the room.",
+            "Mashallah, {total} likes.",
+            "Look at that, {total} likes.",
+            "The room pushed us to {total} likes.",
+            "Big milestone, {total} likes.",
+        ], [
+            "Thank you everyone, keep the pressure on.",
+            "Smash like if you are watching this move.",
+            "The energy is climbing, thank you family.",
+            "Every tap helps the live reach more people.",
+            "Keep it going, the room is waking up.",
+            "I appreciate every single one of you.",
+            "That support keeps the stream moving.",
+            "Let us push the next milestone together.",
+        ]),
+        "goal": _make_lines([
+            "We smashed the {coins}-coin goal.",
+            "Goal complete at {coins} coins.",
+            "{coins} coins hit, family.",
+            "The {coins}-coin goal is done.",
+            "Chat, the {coins}-coin goal just fell.",
+            "Mashallah, {coins} coins reached.",
+        ], [
+            "Thank you legends, next signal coming.",
+            "You unlocked the next gold breakdown.",
+            "That support means the next setup is live.",
+            "I appreciate the whole room for that.",
+            "You earned the next market read.",
+            "Now let us get into the next level.",
+            "The room delivered, and I appreciate it.",
+            "Next analysis is loading because of you.",
+        ]),
+    }
+    for category, lines in banks.items():
+        pool = data.setdefault(category, [])
+        _extend_unique(pool, lines)
+
+
 def _load():
     global _DATA
     if _DATA is None:
@@ -185,6 +578,7 @@ def _load():
         except Exception as exc:
             print(f"[REACTIONS] could not load {_FILE} ({exc}) — using fallbacks.")
             _DATA = {}
+        _expand_template_data(_DATA)
     return _DATA
 
 
@@ -194,6 +588,7 @@ def reload():
     with _LOCK:
         _DATA = None
         _RECENT.clear()
+        _READY_USED.clear()
     return _load()
 
 
@@ -211,9 +606,6 @@ def _pick(category, **kw):
                 recent.clear()
             idx = random.choice(fresh)
             recent.append(idx)
-            # remember up to half the pool so it doesn't repeat soon
-            while len(recent) > max(1, len(pool) // 2):
-                recent.pop(0)
         tmpl = pool[idx]
     if tmpl is None:
         tmpl = _FALLBACK.get(category, "Thank you {user}!")

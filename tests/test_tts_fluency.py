@@ -67,7 +67,7 @@ class TTSFluencyTests(unittest.TestCase):
 
     def test_supporter_response_bank_has_no_dynamic_placeholders(self):
         lines = reactions.ready_lines()
-        self.assertGreaterEqual(len(lines), 60)
+        self.assertGreaterEqual(len(lines), 220)
         self.assertTrue(all("{" not in line and "}" not in line for line in lines))
         self.assertIn("Thank you", lines)
         self.assertIn("Maya", reactions.ready_follow("Maya"))
@@ -78,11 +78,19 @@ class TTSFluencyTests(unittest.TestCase):
 
     def test_ready_reactions_shuffle_without_immediate_repeats(self):
         reactions.reload()
-        follow_lines = [reactions.ready_follow("Maya") for _ in range(6)]
-        share_lines = [reactions.ready_share("Maya") for _ in range(6)]
+        follow_lines = [reactions.ready_follow("Maya") for _ in range(100)]
+        share_lines = [reactions.ready_share("Maya") for _ in range(100)]
 
         self.assertEqual(len(follow_lines), len(set(follow_lines)))
         self.assertEqual(len(share_lines), len(set(share_lines)))
+
+    def test_generated_event_templates_do_not_repeat_until_exhausted(self):
+        reactions.reload()
+        follow_lines = [reactions.follow("Maya") for _ in range(120)]
+        gift_lines = [reactions.gift("Ahmed", "Rose", 1, 100) for _ in range(50)]
+
+        self.assertEqual(len(follow_lines), len(set(follow_lines)))
+        self.assertEqual(len(gift_lines), len(set(gift_lines)))
 
     def test_mass_follow_batch_mentions_extra_followers_once(self):
         line = reactions.follow_many(

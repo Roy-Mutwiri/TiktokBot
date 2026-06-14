@@ -993,7 +993,7 @@ class TTSStreamEngine:
 
     def _match_youtube_playback_voice(self, audio, rate):
         """Light post-filter so acknowledgements sit closer to YouTube voice mode."""
-        persona = self._playback_match_persona
+        persona = getattr(self, "_playback_match_persona", None)
         if not persona or os.environ.get("AVATAR_READY_MATCH_YOUTUBE", "1") != "1":
             return audio
         y = np.asarray(audio, dtype=np.float32).flatten()
