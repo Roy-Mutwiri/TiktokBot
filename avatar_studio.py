@@ -5407,6 +5407,7 @@ class AvatarStudio:
             try:
                 self._prio_events.clear()
                 self._pending_follows.clear()
+                self._viewer_scores.clear()
             except Exception:
                 pass
             self._clear_ready_speech()
@@ -5450,7 +5451,8 @@ class AvatarStudio:
                 self.tiktok = TikTokComments(handle, self._on_comment,
                                              on_gift=self._on_gift, on_follow=self._on_follow,
                                              on_like=self._on_like, on_share=self._on_share,
-                                             on_viewers=self._on_viewers)
+                                             on_viewers=self._on_viewers,
+                                             on_join=self._on_join)
                 self.tiktok.start()
             note = "" if self.brain is not None else " (answers begin after START)"
             self._log_msg(f"[comments] reading {handle} — comments + gifts/follows{note}")
