@@ -4510,15 +4510,40 @@ class AvatarStudio:
         try:
             self._sess_follows += 1
             self._feed_msg(f"➕ {user} followed", "ev")
-            # The fixed line was rendered at boot, so this event is ready immediately.
-            rx = self._reactions()
-            if rx is not None:
-                self._log_msg(f"[follow] received from {user}")
-                self._stage_urgent_event(
-                    self._with_live_room_context(rx.ready_follow(user)),
-                    f"follow from {user}")
+            self._log_msg(f"[follow] received from {user}")
+            self._queue_follow_thanks(user)
         except Exception:
             pass
+
+    def _queue_follow_thanks(self, user):
+        """Debounce follows so bursty follow spam becomes one human thank-you."""
+        name = (user or "").strip()
+        if not name:
+            return
+        now = time.monotonic()
+        if not self._pending_follows:
+            self._follow_batch_first_t = now
+        if name not in self._pending_follows:
+            self._pending_follows.append(name)
+        try:
+            pending = getattr(self, "_follow_batch_after", None)
+            if pending is not None:
+                self.root.after_cancel(pending)
+        except Exception:
+            pass
+        elapsed = now - float(getattr(self, "_follow_batch_first_t", now) or now)
+        delay_ms = 80 if elapsed >= 2.2 or len(self._pending_follows) >= 10 else 1100
+        try:
+            self._follow_batch_after = self.root.after(
+                delay_ms, self._flush_follow_batch)
+        except Exception:
+            self._follow_batch_after = None
+            self._live_response_event.set()
+
+    def _flush_follow_batch(self):
+        self._follow_batch_after = None
+        self._follow_batch_first_t = 0.0
+        self._live_response_event.set()
 
     def _on_share(self, user):
         try:
