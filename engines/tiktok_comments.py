@@ -28,7 +28,7 @@ class TikTokComments:
     """Background TikTok-Live comment reader -> on_comment(user, text)."""
 
     def __init__(self, username, on_comment, on_gift=None, on_follow=None,
-                 on_like=None, on_share=None, on_viewers=None):
+                 on_like=None, on_share=None, on_viewers=None, on_join=None):
         u = (username or "").strip()
         self.unique_id = u.lstrip("@")
         self.username = "@" + self.unique_id
@@ -38,6 +38,7 @@ class TikTokComments:
         self.on_like = on_like          # (user, total_likes)
         self.on_share = on_share        # (user)
         self.on_viewers = on_viewers    # (concurrent_viewers)
+        self.on_join = on_join          # (user)
         self.connected = False
         self.status = "idle"
         self._stop = False
@@ -131,7 +132,7 @@ class TikTokComments:
         from TikTokLive import TikTokLiveClient
         from TikTokLive.events import (ConnectEvent, DisconnectEvent, CommentEvent,
                                        GiftEvent, FollowEvent, LikeEvent, ShareEvent,
-                                       SocialEvent, RoomUserSeqEvent)
+                                       SocialEvent, RoomUserSeqEvent, JoinEvent)
         client = TikTokLiveClient(unique_id=self.unique_id)
         self._client = client
         self.status = "connecting"
@@ -167,6 +168,14 @@ class TikTokComments:
                     self.on_comment(self._name(event), str(text))
             except Exception:
                 pass
+
+        if self.on_join is not None:
+            @client.on(JoinEvent)
+            async def _on_join(event):
+                try:
+                    self.on_join(self._name(event))
+                except Exception:
+                    pass
 
         if self.on_gift is not None:
             @client.on(GiftEvent)
