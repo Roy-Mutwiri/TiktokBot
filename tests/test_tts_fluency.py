@@ -84,6 +84,13 @@ class TTSFluencyTests(unittest.TestCase):
         self.assertEqual(len(follow_lines), len(set(follow_lines)))
         self.assertEqual(len(share_lines), len(set(share_lines)))
 
+    def test_mass_follow_batch_mentions_extra_followers_once(self):
+        line = reactions.follow_many(
+            ["Maya", "Ahmed", "Sara", "Omar", "Nora", "Ali"])
+
+        self.assertIn("Maya", line)
+        self.assertIn("plus 2 more", line)
+
     def test_personalized_reaction_forces_name_into_its_own_chunk(self):
         engine = bare_engine()
         chunks = engine._split_for_tts(reactions.ready_follow("Muhammad Fajar"))

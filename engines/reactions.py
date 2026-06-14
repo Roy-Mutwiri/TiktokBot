@@ -235,9 +235,13 @@ def follow_many(names):
         return None
     if len(names) == 1:
         return follow(names[0])
+    total = len(names)
     names = names[:4]                       # name at most 4 so the line stays short
     joined = (f"{names[0]} and {names[1]}" if len(names) == 2
               else ", ".join(names[:-1]) + f" and {names[-1]}")
+    if total > len(names):
+        extra = total - len(names)
+        joined = f"{joined}, plus {extra} more"
     return _pick("follow_batch", names=joined)
 
 
