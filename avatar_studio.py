@@ -52,7 +52,7 @@ import numpy as np
 import cv2
 import tkinter as tk
 from tkinter import ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageGrab, ImageTk
 
 from realtime_avatar import _character_path, _open_webcam, FRAME_SIZE, FPS
 from tts_stream_engine import MALE_VOICES
@@ -337,6 +337,11 @@ class AvatarStudio:
         self._youtube_duration = 0.0
         self._youtube_progress_value = 0.0
         self._youtube_progress_text = "Idle"
+        self._scene_capture_image = None
+        self._scene_capture_tk = None
+        self.scene_slot = None
+        self.scene_preview_lbl = None
+        self.scene_add_btn = None
         self._mohammed_voice_ready = False
         self._mohammed_voice_warming = False
         self._worker = None
