@@ -4650,12 +4650,19 @@ class AvatarStudio:
                     )
             # 1b) BATCHED follows — thank a burst of follows in one quick line
             if self._pending_follows:
+                if getattr(self, "_follow_batch_after", None) is not None:
+                    return False
                 names = []
-                while self._pending_follows and len(names) < 4:
+                seen = set()
+                while self._pending_follows:
                     try:
-                        names.append(self._pending_follows.popleft())
+                        name = self._pending_follows.popleft()
                     except IndexError:
                         break
+                    key = str(name).strip().lower()
+                    if key and key not in seen:
+                        seen.add(key)
+                        names.append(name)
                 rx = self._reactions()
                 txt = rx.follow_many(names) if rx is not None else None
                 if txt:
