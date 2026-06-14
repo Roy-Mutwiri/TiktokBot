@@ -1884,6 +1884,9 @@ class AvatarStudio:
                     r, rail, icon_lbl, text_lbl, self.nav_comments_badge)
                 self.nav_comments_badge.bind(
                     "<Button-1>", lambda _e, name=label: self._nav_go(name))
+        self.scene_slot = tk.Frame(sidebar, bg="#07090d")
+        self.scene_slot.pack(side="top", fill="both", expand=True, padx=12, pady=(14, 8))
+        self._build_sidebar_scene_slot()
         profile = tk.Frame(sidebar, bg="#0c1016",
                            highlightthickness=1, highlightbackground=BORDER)
         profile.pack(side="bottom", fill="x", padx=12, pady=12, ipady=8)
