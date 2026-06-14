@@ -54,6 +54,14 @@ def _resolve_ffmpeg():
         os.path.join(winget, "*FFmpeg*", "*", "bin", "ffmpeg.exe"),
         r"C:\ffmpeg\bin\ffmpeg.exe",
     ]
+    try:
+        import imageio_ffmpeg
+        found = imageio_ffmpeg.get_ffmpeg_exe()
+        if found and os.path.exists(found):
+            print(f"[TTS] using bundled ffmpeg at {found}")
+            return found
+    except Exception:
+        pass
     for pat in patterns:
         hits = glob.glob(pat)
         if hits:
@@ -91,8 +99,9 @@ except ImportError:
 # -----------------------------------------------------------------------------
 VOICE = "en-US-ChristopherNeural"      # deep confident male (default)
 SAMPLE_RATE = 16000
+PLAYBACK_RATE = 24000
 FEED_CHUNK_SAMPLES = 640               # 40 ms at 16 kHz — one video frame's worth
-TAIL_SILENCE = 0.30                    # keep "speaking" this long after audio ends
+TAIL_SILENCE = float(os.environ.get("AVATAR_TTS_TAIL_SILENCE", "0.10"))
 # The on-screen mouth lags the audio by the render+display pipeline latency, so we
 # DELAY audio playback by this to line the voice up with the visible mouth. The
 # pipeline is heavier with after-mouth CodeFormer, so default ~150ms. Tune via
@@ -119,7 +128,7 @@ MALE_VOICES = [
 # Default = chatterbox: the male English-in-Arabic-accent cloned voice (it clones
 # voice_refs/arabic_accent.wav). Set AVATAR_TTS=kokoro/edge/maya1/multilingual to
 # change. The studio's voice dropdown also defaults to this.
-TTS_BACKEND = os.environ.get("AVATAR_TTS", "xtts").lower()
+TTS_BACKEND = os.environ.get("AVATAR_TTS", "kokoro").lower()
 KOKORO_VOICE = os.environ.get("AVATAR_KOKORO_VOICE", "am_michael")  # natural US male
 KOKORO_LANG = os.environ.get("AVATAR_KOKORO_LANG", "a")             # 'a' = American Eng
 KOKORO_SPEED = float(os.environ.get("AVATAR_KOKORO_SPEED", "1.0"))
@@ -131,6 +140,7 @@ KOKORO_SR = 24000                                                  # Kokoro nati
 TTS_CACHE = os.environ.get("AVATAR_TTS_CACHE", "1") == "1"
 CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                          "tts_cache")
+CACHE_VERSION = "fluent-v2"
 
 
 class TTSStreamEngine:
@@ -168,12 +178,22 @@ class TTSStreamEngine:
         self._eleven = None              # ElevenLabs cloud voice (high quality)
         self._eleven_tried = False
         self._hifi = {}                  # feed-pcm hash -> (hi-fi 24k pcm, sr) for playback
+        self._prepared_audio = {}        # chunk text -> PCM, ready for instant playback
+        self._prepared_lock = threading.Lock()
+        self._interrupt_serial = 0
+        self._audio_stream = None
+        self._audio_lock = threading.Lock()
+        try:
+            self._resample(np.zeros(32, np.float32), SAMPLE_RATE, PLAYBACK_RATE)
+        except Exception:
+            pass
         self.backend = "edge-tts"
         # Active backend (switchable at runtime via set_backend) — starts from
         # the AVATAR_TTS env default.
         self.tts_backend = TTS_BACKEND
         self.synthesizing = False        # True while a line is being generated
         self.speaking = False            # True while the bot is ACTUALLY talking
+        self.audio_level = 0.0           # current playback RMS for UI meters
         # Serializes model loading so a SPEAK fired during a (slow) warm waits
         # for the model instead of racing in, seeing it half-loaded, and silently
         # falling back to a different voice.
@@ -382,11 +402,37 @@ class TTSStreamEngine:
         except Exception:
             pass
 
+    def interrupt_current(self):
+        """Stop the active line immediately so urgent speech can take over."""
+        self._interrupt_serial += 1
+        stream = self._audio_stream
+        self._audio_stream = None
+        if stream is not None:
+            try:
+                stream.abort()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
+        if HAVE_WINSOUND:
+            try:
+                winsound.PlaySound(None, winsound.SND_PURGE)
+            except Exception:
+                pass
+        try:
+            self.mouth.end_audio()
+        except Exception:
+            pass
+        self.synthesizing = False
+        self._set_speaking(False)
+
     def speak(self, text, priority=0):
         """Queue text to be spoken (priority: 0 filler, 1 comment, 2 appreciation)."""
         text = (text or "").strip()
         if not text:
-            return
+            return False
         if self.behavior is not None:
             try:
                 self.behavior.scan_text_for_reactions(text)
@@ -394,13 +440,42 @@ class TTSStreamEngine:
                 pass
         self.words_spoken += len(text.split())
         self.lines_spoken += 1
-        if self._loop is not None:
-            asyncio.run_coroutine_threadsafe(
+        if self._loop is None or self.speech_queue is None or not self._running:
+            return False
+        try:
+            future = asyncio.run_coroutine_threadsafe(
                 self.speech_queue.put((int(priority), text)), self._loop)
+            future.result(timeout=2)
+            print(f"[TTS] queued priority={int(priority)}: {text[:80]}")
+            return True
+        except Exception as exc:
+            print(f"[TTS] queue failed: {exc}")
+            return False
 
     def set_muted(self, muted):
         """Mute/unmute audio output (mouth still moves when muted)."""
         self.muted = bool(muted)
+        if not self.muted:
+            return
+        # Discard audio already queued in the device. The playback worker checks
+        # `muted` per block and exits without cancelling the mouth timeline.
+        stream = self._audio_stream
+        self._audio_stream = None
+        if stream is not None:
+            try:
+                stream.abort()
+            except Exception:
+                pass
+            try:
+                stream.close()
+            except Exception:
+                pass
+        if HAVE_WINSOUND:
+            try:
+                winsound.PlaySound(None, winsound.SND_PURGE)
+            except Exception:
+                pass
+        self.audio_level = 0.0
 
     def set_voice(self, voice_name):
         """Switch the edge-tts voice for subsequent lines."""
@@ -433,7 +508,7 @@ class TTSStreamEngine:
     # -------------------------------------------------------------------------
     def _cache_key(self, text):
         """Stable filename for (backend, voice/identity, text)."""
-        ident = self.tts_backend
+        ident = f"{CACHE_VERSION}|{self.tts_backend}|chunk={self._TTS_CHUNK_CHARS}"
         if self.tts_backend == "maya1":
             ident += "|" + os.environ.get("AVATAR_MAYA_DESC", "default")
         elif self.tts_backend == "chatterbox":
@@ -459,6 +534,14 @@ class TTSStreamEngine:
 
     def _cache_load(self, text):
         """Return cached 16 kHz PCM for text, or None."""
+        try:
+            with self._prepared_lock:
+                prepared = self._prepared_audio.get(text)
+            if prepared is not None:
+                return prepared
+        except Exception:
+            pass
+
         if not TTS_CACHE or sf is None:
             return None
         path = self._cache_key(text)
@@ -466,11 +549,25 @@ class TTSStreamEngine:
             return None
         try:
             data, _ = sf.read(path, dtype="float32")
-            return np.asarray(data, dtype=np.float32).flatten()
+            data = np.asarray(data, dtype=np.float32).flatten()
+            if not len(data) or len(data) > SAMPLE_RATE * 45:
+                return None
+            if not np.all(np.isfinite(data)):
+                return None
+            with self._prepared_lock:
+                self._prepared_audio[text] = data
+            return data
         except Exception:
             return None
 
     def _cache_save(self, text, pcm):
+        try:
+            with self._prepared_lock:
+                self._prepared_audio[text] = np.asarray(pcm, dtype=np.float32)
+                while len(self._prepared_audio) > 48:
+                    self._prepared_audio.pop(next(iter(self._prepared_audio)))
+        except Exception:
+            pass
         if not TTS_CACHE or sf is None:
             return
         try:
@@ -480,6 +577,41 @@ class TTSStreamEngine:
         except Exception:
             pass
 
+    def prepare(self, text, timeout=120):
+        """Synthesize every playback chunk without speaking it.
+
+        This returns only after the exact chunks used by ``speak`` are cached in
+        memory, allowing the UI to signal that playback is genuinely ready.
+        """
+        chunks = self._split_for_tts(text)
+        if not chunks or self._loop is None:
+            return False
+
+        async def _prepare_chunk(chunk):
+            cached = self._cache_load(chunk)
+            if cached is not None:
+                return True
+            loop = asyncio.get_event_loop()
+            pcm = await loop.run_in_executor(None, self._synthesize_blocking, chunk)
+            if pcm is None:
+                pcm = await self._synthesize(chunk)
+            return pcm is not None and len(pcm) > 0
+
+        for chunk in chunks:
+            fut = asyncio.run_coroutine_threadsafe(_prepare_chunk(chunk), self._loop)
+            try:
+                if not fut.result(timeout=timeout):
+                    return False
+            except Exception as exc:
+                print(f"[TTS] prepare failed for {chunk[:30]!r}: {exc}")
+                return False
+        return True
+
+    def is_prepared(self, text):
+        """Return True when every playback chunk for this line is in memory."""
+        chunks = self._split_for_tts(text)
+        return bool(chunks) and all(self._cache_load(chunk) is not None for chunk in chunks)
+
     def prerender(self, texts, progress=None):
         """Synthesize + cache a list of lines NOW (blocking), so they later play
         with zero GPU work. Call at startup for known lines (greeting, demo set)
@@ -487,8 +619,12 @@ class TTSStreamEngine:
         instead of freezing the live video mid-stream."""
         if self._loop is None:
             return
-        todo = [t for t in {(t or "").strip() for t in texts}
-                if t and self._cache_load(t) is None]
+        chunks = {
+            chunk
+            for text in texts
+            for chunk in self._split_for_tts((text or "").strip())
+        }
+        todo = [chunk for chunk in chunks if self._cache_load(chunk) is None]
         for i, text in enumerate(todo):
             if progress:
                 progress(i + 1, len(todo), text)
@@ -520,14 +656,20 @@ class TTSStreamEngine:
                 pcm = await loop.run_in_executor(None, self._synthesize_blocking, chunks[0])
                 if pcm is None:                          # backend needs the async path
                     pcm = await self._synthesize(chunks[0])
+                self._set_speaking(True)
                 for idx in range(len(chunks)):
+                    serial = self._interrupt_serial
                     nxt = None
                     if idx + 1 < len(chunks) and self._running:
                         nxt = loop.run_in_executor(
                             None, self._synthesize_blocking, chunks[idx + 1])
                     if pcm is not None and len(pcm) > 0:
                         self.synthesizing = False
-                        await self._play_and_feed(pcm)   # plays + feeds the mouth
+                        await self._play_and_feed(
+                            pcm, final_chunk=(idx == len(chunks) - 1)
+                        )
+                    if serial != self._interrupt_serial:
+                        break
                     if nxt is not None:
                         self.synthesizing = True
                         pcm = await nxt
@@ -536,6 +678,7 @@ class TTSStreamEngine:
                     else:
                         pcm = None
                 self.synthesizing = False
+                self._set_speaking(False)
             except Exception as exc:
                 print(f"[TTS] speak error: {exc}")
                 self.synthesizing = False
@@ -543,7 +686,7 @@ class TTSStreamEngine:
 
     # Max characters per TTS chunk. XTTS-v2 distorts / rushes on long inputs, so we
     # keep each synth call to roughly a sentence or two. Tunable.
-    _TTS_CHUNK_CHARS = int(os.environ.get("AVATAR_TTS_CHUNK_CHARS", "190"))
+    _TTS_CHUNK_CHARS = int(os.environ.get("AVATAR_TTS_CHUNK_CHARS", "150"))
 
     def _split_for_tts(self, text):
         """Split a line into sentence-ish chunks no longer than _TTS_CHUNK_CHARS, so
@@ -554,11 +697,21 @@ class TTSStreamEngine:
         if not text:
             return []
         target = max(60, self._TTS_CHUNK_CHARS)
-        parts = re.split(r"(?<=[.!?…])\s+", text)        # keep sentence boundaries
+        parts = re.split(
+            r"(\[\[CUT\]\])|(?<=[.!?…])\s+", text,
+            flags=re.IGNORECASE
+        )
         chunks, cur = [], ""
         for p in parts:
+            if p is None:
+                continue
             p = p.strip()
             if not p:
+                continue
+            if p.upper() == "[[CUT]]":
+                if cur:
+                    chunks.append(cur)
+                    cur = ""
                 continue
             while len(p) > target:                       # giant sentence -> hard split
                 cut = p.rfind(",", 0, target)
@@ -750,17 +903,28 @@ class TTSStreamEngine:
             chunks.append(a.astype(np.float32).flatten())
         if not chunks:
             return None
-        wav = np.concatenate(chunks)
+        wav = np.concatenate(chunks).astype(np.float32)
         if KOKORO_SR != SAMPLE_RATE:               # 24k -> 16k for the mel/feed path
-            wav = self._resample(wav, KOKORO_SR, SAMPLE_RATE)
-        return np.asarray(wav, dtype=np.float32)
+            feed = self._resample(wav, KOKORO_SR, SAMPLE_RATE)
+            try:
+                key = hash(feed[:512].tobytes())
+                self._hifi[key] = (wav, KOKORO_SR)
+                if len(self._hifi) > 8:
+                    self._hifi.pop(next(iter(self._hifi)))
+            except Exception:
+                pass
+            return np.asarray(feed, dtype=np.float32)
+        return wav
 
     @staticmethod
     def _resample(wav, src_sr, dst_sr):
-        """Resample mono float audio. Uses librosa if present, else linear interp."""
+        """Resample mono float audio without first-call JIT initialization."""
         try:
-            import librosa
-            return librosa.resample(wav, orig_sr=src_sr, target_sr=dst_sr)
+            from scipy.signal import resample_poly
+            divisor = np.gcd(int(src_sr), int(dst_sr))
+            return resample_poly(
+                wav, int(dst_sr) // divisor, int(src_sr) // divisor
+            ).astype(np.float32)
         except Exception:
             n_dst = int(round(len(wav) * dst_sr / src_sr))
             if n_dst <= 1:
@@ -809,12 +973,60 @@ class TTSStreamEngine:
                 except OSError:
                     pass
 
-    async def _play_and_feed(self, pcm):
-        """Play audio and feed the mouth engine 40 ms at a time, paced to playback.
+    @staticmethod
+    def _condition_playback(pcm):
+        """Sanitize and peak-limit speech without adding saturation."""
+        audio = np.asarray(pcm, dtype=np.float32).flatten()
+        if not len(audio):
+            return audio
+        audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
+        audio = audio - float(np.mean(audio))
+        peak = float(np.max(np.abs(audio))) or 1.0
+        if peak > 0.94:
+            audio = audio * (0.94 / peak)
+        return audio.astype(np.float32)
+
+    def _play_direct(self, pcm, rate):
+        """Write speech through one persistent float stream."""
+        import sounddevice as sd
+
+        audio = self._condition_playback(pcm)
+        if rate != PLAYBACK_RATE:
+            audio = self._resample(audio, rate, PLAYBACK_RATE)
+        try:
+            with self._audio_lock:
+                if self.muted:
+                    return
+                if self._audio_stream is None:
+                    self._audio_stream = sd.OutputStream(
+                        samplerate=PLAYBACK_RATE,
+                        channels=1,
+                        dtype="float32",
+                        blocksize=960,
+                        latency="low",
+                    )
+                    self._audio_stream.start()
+                stream = self._audio_stream
+                for start in range(0, len(audio), 960):
+                    if self.muted or stream is not self._audio_stream:
+                        break
+                    block = audio[start:start + 960]
+                    self.audio_level = float(
+                        np.sqrt(np.mean(block * block)) + 1e-9)
+                    stream.write(block.reshape(-1, 1))
+        finally:
+            self.audio_level = 0.0
+
+    async def _play_and_feed(self, pcm, final_chunk=True):
+        """Play audio and drive the mouth from the same monotonic clock.
+
+        Modern mouth engines receive the full utterance once and choose their
+        current mel window by elapsed time. Older/live streaming implementations
+        retain the 40 ms paced feed fallback.
+
         Playback uses the stashed HI-FI (24 kHz) version when available so the
         listener hears full fidelity; the mouth is always fed the 16 kHz pcm."""
-        self._set_speaking(True)
-        wav_holder = {}
+        serial = self._interrupt_serial
         # find the matching hi-fi (24k) buffer for playback; fall back to the 16k pcm
         play_pcm, play_sr = pcm, SAMPLE_RATE
         try:
@@ -829,39 +1041,62 @@ class TTSStreamEngine:
         async def _delayed_play():
             if MOUTH_SYNC_DELAY > 0:
                 await asyncio.sleep(MOUTH_SYNC_DELAY)
-            if HAVE_WINSOUND and not self.muted and self._running:
-                wav = self._write_temp_wav(play_pcm, play_sr)
-                if wav:
-                    try:
-                        winsound.PlaySound(wav, winsound.SND_FILENAME | winsound.SND_ASYNC)
-                    except Exception:
-                        pass
-                    wav_holder["p"] = wav
+            if (serial == self._interrupt_serial and not self.muted
+                    and self._running):
+                loop = asyncio.get_running_loop()
+                try:
+                    await loop.run_in_executor(
+                        None, self._play_direct, play_pcm, play_sr
+                    )
+                except Exception as exc:
+                    if not self.muted:
+                        print(f"[TTS] direct playback failed ({exc}); using winsound.")
+                    if (serial == self._interrupt_serial and not self.muted
+                            and HAVE_WINSOUND):
+                        wav = self._write_temp_wav(play_pcm, play_sr)
+                        if wav:
+                            try:
+                                winsound.PlaySound(
+                                    wav, winsound.SND_FILENAME | winsound.SND_SYNC
+                                )
+                            finally:
+                                try:
+                                    os.remove(wav)
+                                except OSError:
+                                    pass
+        start = time.monotonic()
+        clocked = callable(getattr(self.mouth, "start_audio", None))
+        if clocked:
+            try:
+                self.mouth.start_audio(pcm, start_time=start)
+            except Exception:
+                clocked = False
+
         play_task = asyncio.ensure_future(_delayed_play())
 
-        # b) feed the mouth engine immediately, paced to wall-clock (the playback delay
-        #    above closes the gap so the lips track what WILL be audible).
-        start = time.monotonic()
+        # b) Keep the utterance alive for its exact duration. Clocked engines read
+        #    directly from the timeline; legacy engines receive paced 40 ms chunks.
         n = len(pcm)
         pos = 0
         idx = 0
-        while pos < n and self._running:
-            try:
-                self.mouth.feed_audio(pcm[pos:pos + FEED_CHUNK_SAMPLES])
-            except Exception:
-                pass
+        while pos < n and self._running and serial == self._interrupt_serial:
+            if not clocked:
+                try:
+                    self.mouth.feed_audio(pcm[pos:pos + FEED_CHUNK_SAMPLES])
+                except Exception:
+                    pass
             pos += FEED_CHUNK_SAMPLES
             idx += 1
             target = start + idx * (FEED_CHUNK_SAMPLES / SAMPLE_RATE)
             await asyncio.sleep(max(0.0, target - time.monotonic()))
 
         await play_task
-        await asyncio.sleep(TAIL_SILENCE)
-        self._set_speaking(False)
-        if wav_holder.get("p"):
+        if final_chunk and serial == self._interrupt_serial:
+            await asyncio.sleep(TAIL_SILENCE)
+        if clocked and final_chunk and serial == self._interrupt_serial:
             try:
-                os.remove(wav_holder["p"])
-            except OSError:
+                self.mouth.end_audio()
+            except Exception:
                 pass
 
     def _set_speaking(self, speaking):
@@ -869,6 +1104,8 @@ class TTSStreamEngine:
         `self.speaking` — the authoritative 'the bot is ACTUALLY talking' flag
         (unpolluted by any idle silence keep-alive the studio may feed the mouth)."""
         self.speaking = bool(speaking)
+        if not self.speaking:
+            self.audio_level = 0.0
         if self.behavior is not None:
             try:
                 self.behavior.set_speaking(speaking)
@@ -896,6 +1133,14 @@ class TTSStreamEngine:
     def shutdown(self):
         """Stop the worker loop cleanly (wake the queue, then stop)."""
         self._running = False
+        with self._audio_lock:
+            try:
+                if self._audio_stream is not None:
+                    self._audio_stream.stop()
+                    self._audio_stream.close()
+            except Exception:
+                pass
+            self._audio_stream = None
         if self._loop is not None and not self._loop.is_closed():
             try:
                 asyncio.run_coroutine_threadsafe(self.speech_queue.put(None), self._loop)

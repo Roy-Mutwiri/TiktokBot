@@ -26,6 +26,8 @@
 import os
 import sys
 import collections
+import threading
+import time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -56,7 +58,7 @@ MOUTH_SAT = float(os.environ.get("AVATAR_MOUTH_SAT", "0.0"))       # off (was ga
 MOUTH_CLAHE = float(os.environ.get("AVATAR_MOUTH_CLAHE", "0.3"))    # eased: high CLAHE deepened mouth/nose shadows
 # HI-RES crisp: sharpen the talking mouth at 2x then resample back. OFF — on top of
 # the existing sharpen + the final enhance it over-crunches the 96px mouth.
-MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.5"))
+MOUTH_HIRES = float(os.environ.get("AVATAR_MOUTH_HIRES", "0.0"))
 # CLEAN-then-crisp: bilateral denoise the mouth BEFORE sharpening so the crisp defines
 # real lip/teeth edges instead of amplifying 96px sensor noise (the "crunch"). 0 = off.
 # EASED to 0.4 — at 1.0 it over-smoothed the moving/open mouth = "more blur".
@@ -66,7 +68,7 @@ MOUTH_DENOISE = float(os.environ.get("AVATAR_MOUTH_DENOISE", "0.0"))
 MOUTH_INTERIOR = float(os.environ.get("AVATAR_MOUTH_INTERIOR", "0.6"))
 # TEMPORAL: blend this much of the PREVIOUS mouth into the current one to kill
 # frame-to-frame shimmer/jitter. Kept LOW so the lips still open crisply (high = smear).
-MOUTH_TEMPORAL = float(os.environ.get("AVATAR_MOUTH_TEMPORAL", "0.12"))
+MOUTH_TEMPORAL = float(os.environ.get("AVATAR_MOUTH_TEMPORAL", "0.04"))
 # MOVE GAIN: amplify the lip movement (deviation from the resting mouth) so the mouth
 # OPENS clearly instead of "barely opening". 1.0 = off; ~1.5 = clearly more open.
 MOUTH_MOVE_GAIN = float(os.environ.get("AVATAR_MOUTH_MOVE", "1.0"))
@@ -79,6 +81,7 @@ AUDIO_WINDOW_MS = 200
 AUDIO_WINDOW = int(SAMPLE_RATE * AUDIO_WINDOW_MS / 1000)   # 3200 samples
 MIN_AUDIO = 1600                # need >=100ms of audio to drive the mouth
 SILENCE_FRAMES = 8              # frames with no fresh audio before is_speaking=False
+STREAM_TIMEOUT = SILENCE_FRAMES / 25.0
 
 
 class MuseTalkEngine:
@@ -92,6 +95,10 @@ class MuseTalkEngine:
         self.is_speaking = False
 
         self.audio_buffer = collections.deque(maxlen=SAMPLE_RATE * 2)   # 2 s
+        self._audio_lock = threading.Lock()
+        self._timeline_audio = None
+        self._timeline_start = 0.0
+        self._last_audio_feed = 0.0
         self._silence = 0
         self._err_printed = False
         self._w2l = None          # Wav2Lip fallback engine (if used)
@@ -155,15 +162,50 @@ class MuseTalkEngine:
     # AUDIO FEED  (shared by both modes)
     # -------------------------------------------------------------------------
     def feed_audio(self, audio_chunk):
-        """Append TTS audio (float32 mono 16 kHz) and mark speaking."""
+        """Append live/streaming audio and mark the mouth active."""
         try:
-            self.audio_buffer.extend(np.asarray(audio_chunk, dtype=np.float32).flatten())
+            chunk = np.asarray(audio_chunk, dtype=np.float32).flatten()
+            with self._audio_lock:
+                self._timeline_audio = None
+                self.audio_buffer.extend(chunk)
+                self._last_audio_feed = time.monotonic()
             self.is_speaking = True
             self._silence = 0
             if self._w2l is not None:
-                self._w2l.feed_audio(audio_chunk)     # keep fallback buffer in sync
+                self._w2l.feed_audio(chunk)     # keep fallback buffer in sync
         except Exception as exc:
             print(f"[MUSETALK] feed_audio error: {exc}")
+
+    def start_audio(self, audio, start_time=None):
+        """Start a generated utterance on a monotonic playback timeline."""
+        pcm = np.asarray(audio, dtype=np.float32).flatten().copy()
+        start = float(start_time or time.monotonic())
+        with self._audio_lock:
+            self.audio_buffer.clear()
+            self._timeline_audio = pcm
+            self._timeline_start = start
+            self._last_audio_feed = start
+        self.is_speaking = bool(len(pcm))
+        self._silence = 0
+        self._reset_temporal_state()
+        if self._w2l is not None:
+            self._w2l.start_audio(pcm, start)
+
+    def end_audio(self):
+        """End an utterance so old phonemes cannot leak into the next line."""
+        with self._audio_lock:
+            self._timeline_audio = None
+            self.audio_buffer.clear()
+        self.is_speaking = False
+        self._silence = 0
+        self._reset_temporal_state()
+        if self._w2l is not None:
+            self._w2l.end_audio()
+
+    def _reset_temporal_state(self):
+        self._prev_mouth = None
+        self._neutral = None
+        self._mt_last = None
 
     def _get_upscaler(self):
         """Lazy Real-ESRGAN (used to de-blur the speaking mouth crop). None if absent."""
@@ -227,14 +269,36 @@ class MuseTalkEngine:
             return mouth
 
     def _update_speaking(self):
-        """Decay is_speaking after SILENCE_FRAMES with no fresh audio. Returns
-        True if there is enough buffered audio to drive the mouth this frame."""
-        if len(self.audio_buffer) < MIN_AUDIO:
-            self._silence += 1
-            if self._silence > SILENCE_FRAMES:
-                self.is_speaking = False
-            return False
+        """Return whether clocked or streaming audio is current."""
+        now = time.monotonic()
+        with self._audio_lock:
+            timeline = self._timeline_audio
+            start = self._timeline_start
+            last_feed = self._last_audio_feed
+            buffered = len(self.audio_buffer)
+        if timeline is not None:
+            active = 0.0 <= now - start < (len(timeline) / SAMPLE_RATE)
+        else:
+            active = buffered >= MIN_AUDIO and (now - last_feed) <= STREAM_TIMEOUT
+        self.is_speaking = bool(active)
         return self.is_speaking
+
+    def _current_audio_window(self, now=None):
+        """Return audio ending at the current timeline cursor or stream head."""
+        now = time.monotonic() if now is None else float(now)
+        with self._audio_lock:
+            timeline = self._timeline_audio
+            start = self._timeline_start
+            if timeline is None:
+                window = np.array(list(self.audio_buffer)[-AUDIO_WINDOW:], dtype=np.float32)
+            else:
+                end = min(len(timeline), int(max(0.0, now - start) * SAMPLE_RATE))
+                begin = max(0, end - AUDIO_WINDOW)
+                window = timeline[begin:end].copy()
+        if len(window) < AUDIO_WINDOW:
+            window = np.pad(window, (AUDIO_WINDOW - len(window), 0))
+        return window
+
 
     # -------------------------------------------------------------------------
     # FRAME PROCESSING
@@ -277,7 +341,10 @@ class MuseTalkEngine:
                 self._mt_last = mouth
                 return mouth
             if self._w2l is not None:
-                synced_full = self._w2l.process_frame(lp_face_frame)
+                # Return the raw generated face crop here. The outer compositor
+                # performs the only blend; blending inside Wav2Lip first softened
+                # the mouth twice and spread blur into the beard.
+                synced_full = self._w2l.process_frame(lp_face_frame, raw_output=True)
                 mouth = synced_full[y1:y2, x1:x2].copy()
                 mouth = self._pop_mouth(mouth)
                 # DE-BLUR the SPEAKING mouth with Real-ESRGAN — but ONLY when the
@@ -320,7 +387,7 @@ class MuseTalkEngine:
         x1, y1, x2, y2 = bbox
 
         # 1) audio conditioning for the CURRENT moment from the recent window
-        window = np.array(list(self.audio_buffer)[-AUDIO_WINDOW:], dtype=np.float32)
+        window = self._current_audio_window()
         audio_feat = self._audio_features(window)        # (1, 50, 384) on device
         if audio_feat is None:
             return base_crop

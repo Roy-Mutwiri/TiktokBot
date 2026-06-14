@@ -84,6 +84,30 @@ class TradingView:
         """Re-anchor the day-open to 'now' (called when the scene re-activates)."""
         self.day_open = self.price - _random.uniform(-8, 8)
 
+    def set_market(self, symbol, price):
+        """Switch instruments and rebuild scale-appropriate visual history."""
+        symbol = str(symbol)
+        price = float(price)
+        if symbol == self.symbol and abs(price - self.price) < max(1.0, price * 0.02):
+            self.price = price
+            return
+        self.symbol = symbol
+        self.price = price
+        self.day_open = price
+        self._ema = price
+        self.candles.clear()
+        step = max(price * 0.00035, 0.15)
+        p = price
+        for _ in range(MAX_CANDLES):
+            o = p
+            c = max(0.01, o + _random.uniform(-step, step))
+            hi = max(o, c) + _random.uniform(0, step * 0.7)
+            lo = min(o, c) - _random.uniform(0, step * 0.7)
+            self.candles.append([o, hi, lo, c, _random.uniform(0.3, 1.0)])
+            p = c
+        self.price = price
+        self._cur = [price, price, price, price, 0.0]
+
     # -------------------------------------------------------------------------
     def _tick(self):
         """Advance the price one step and update the forming candle."""

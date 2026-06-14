@@ -121,6 +121,38 @@ def _synth_scene():
     return _finish(out)
 
 
+def _synth_live_online():
+    """Ascending confirmation when the monitored TikTok account goes live."""
+    import numpy as np
+    total = int(0.78 * SR)
+    out = np.zeros(total, dtype=np.float64)
+    for freq, start in ((523.25, 0.00), (659.25, 0.16), (783.99, 0.32)):
+        n = int(0.38 * SR)
+        t = np.arange(n) / SR
+        tone = (np.sin(2 * np.pi * freq * t)
+                + 0.22 * np.sin(2 * np.pi * 2 * freq * t))
+        env = np.minimum(1.0, t / 0.012) * np.exp(-7.0 * t)
+        s = int(start * SR)
+        out[s:s + n] += 0.48 * tone * env
+    return _finish(out)
+
+
+def _synth_live_offline():
+    """Descending alert when the monitored TikTok live goes offline."""
+    import numpy as np
+    total = int(0.92 * SR)
+    out = np.zeros(total, dtype=np.float64)
+    for freq, start in ((659.25, 0.00), (440.0, 0.24), (293.66, 0.48)):
+        n = int(0.36 * SR)
+        t = np.arange(n) / SR
+        tone = (np.sin(2 * np.pi * freq * t)
+                + 0.18 * np.sin(2 * np.pi * 1.5 * freq * t))
+        env = np.minimum(1.0, t / 0.008) * np.exp(-6.0 * t)
+        s = int(start * SR)
+        out[s:s + n] += 0.5 * tone * env
+    return _finish(out)
+
+
 # ---------------------------------------------------------------------------
 # playback / dispatch
 # ---------------------------------------------------------------------------
@@ -205,11 +237,28 @@ def play_scene_sound(blocking=False):
     _cue("scene", _synth_scene, blocking)
 
 
+def play_live_online_sound(blocking=False):
+    """ONLINE cue - when the monitored TikTok account starts a live."""
+    _cue("live_online", _synth_live_online, blocking,
+         extra_off_env="AVATAR_LIVE_STATUS_SOUNDS")
+
+
+def play_live_offline_sound(blocking=False):
+    """OFFLINE cue - when the monitored TikTok live ends."""
+    _cue("live_offline", _synth_live_offline, blocking,
+         extra_off_env="AVATAR_LIVE_STATUS_SOUNDS")
+
+
 if __name__ == "__main__":
     import sys, time
     which = sys.argv[1] if len(sys.argv) > 1 else "all"
-    fns = {"boot": play_startup_sound, "camera": play_camera_sound,
-           "scene": play_scene_sound}
+    fns = {
+        "boot": play_startup_sound,
+        "camera": play_camera_sound,
+        "scene": play_scene_sound,
+        "online": play_live_online_sound,
+        "offline": play_live_offline_sound,
+    }
     if which == "all":
         for name, fn in fns.items():
             print(f"playing {name}..."); fn(blocking=True); time.sleep(0.35)

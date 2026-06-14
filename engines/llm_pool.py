@@ -181,3 +181,11 @@ class BrainPool:
             return line
         except queue.Empty:
             return None
+
+    def clear(self):
+        """Discard prefetched lines after an instrument/session transition."""
+        while True:
+            try:
+                self.ready.get_nowait()
+            except queue.Empty:
+                return

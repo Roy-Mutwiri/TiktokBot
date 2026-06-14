@@ -65,6 +65,15 @@ SHOW_CHART_ON_FACE_LOSS = os.environ.get("AVATAR_CHART_ON_LOSS", "1") == "1"
 NO_FACE_SECONDS = 1.5
 CHART_FADE_STEP = 0.12
 
+# LIVE MIC mode: instead of (or alongside) the AI voice, YOUR mic drives the mouth
+# through a voice changer (engines/voice_changer_engine.py). The render loop is
+# unchanged — it only polls musetalk.is_speaking, which the live engine sets via
+# the same feed_audio() the TTS used. AVATAR_LIVE_MIC=1 turns it on; AVATAR_VC
+# picks the converter (passthrough / dsp / rvc). When live mic is on we suppress
+# the TTS greeting + chart narration so the two don't fight for the mouth.
+LIVE_MIC = os.environ.get("AVATAR_LIVE_MIC", "0") == "1"
+LIVE_MIC_CONVERTER = os.environ.get("AVATAR_VC", "rvc")
+
 # Auto-drop background replacement first if sustained fps falls below this.
 MIN_FPS = 18.0
 STATS_EVERY = 250              # frames between [MAIN] perf lines
@@ -250,6 +259,25 @@ def startup(cam=None, backend=None, hints=True):
     tts = TTSStreamEngine(musetalk)
     print(f"      -> {tts.startup_check()[1]}")
 
+    # LIVE MIC: build the voice-changer engine on the SAME mouth engine the TTS
+    # feeds. Only one source may feed the mouth at a time, so when it's on we mute
+    # the TTS (keeps the object alive for comment/brain features, but no audio).
+    live_mic = None
+    if LIVE_MIC:
+        try:
+            from voice_changer_engine import LiveVoiceEngine, make_converter
+            live_mic = LiveVoiceEngine(musetalk, converter=make_converter(LIVE_MIC_CONVERTER))
+            ok, msg = live_mic.startup_check()
+            print(f"      -> live mic: {msg}")
+            if ok:
+                tts.set_muted(True)    # avatar speaks from YOUR mic, not the AI voice
+                live_mic.start()
+            else:
+                live_mic = None
+        except Exception as exc:
+            print(f"      -> live mic unavailable ({exc}); using AI voice.")
+            live_mic = None
+
     print("[4/5] Webcam opening...")
     cap = _open_webcam()
     if cap is None:
@@ -287,7 +315,7 @@ def startup(cam=None, backend=None, hints=True):
     # or to any custom line to change it.
     greeting = os.environ.get(
         "AVATAR_GREETING", "Good evening. All systems are now online and operational.")
-    if greeting and greeting != "0":
+    if greeting and greeting != "0" and live_mic is None:
         try:
             tts.speak(greeting)
         except Exception:
@@ -314,7 +342,7 @@ def startup(cam=None, backend=None, hints=True):
 
     return {"liveportrait": liveportrait, "musetalk": musetalk,
             "compositor": compositor, "tts": tts, "enhance": enhance_engine,
-            "cap": cap, "cam": cam, "chart": chart}
+            "cap": cap, "cam": cam, "chart": chart, "live_mic": live_mic}
 
 
 # Virtual / non-physical cameras we must NEVER grab as input — feeding the OBS
@@ -412,6 +440,7 @@ def run(eng=None):
     liveportrait = eng["liveportrait"]; musetalk = eng["musetalk"]
     compositor = eng["compositor"]; tts = eng["tts"]; enhance = eng["enhance"]
     cap = eng["cap"]; cam = eng["cam"]; chart = eng["chart"]
+    live_mic = eng.get("live_mic")
 
     state = {"running": True}
 
@@ -425,6 +454,7 @@ def run(eng=None):
     cached_face = None
     cached_bbox = None
     frame_count = 0
+    prev_small = None
     lp_ms = mt_ms = 0.0
     drop_bg = False
     noface = 0                # consecutive no-face frames
@@ -453,6 +483,12 @@ def run(eng=None):
                     driving = cv2.resize(frame, (FRAME_SIZE, FRAME_SIZE))
                     last_frame = driving
 
+            small = cv2.cvtColor(cv2.resize(driving, (64, 64)),
+                                 cv2.COLOR_BGR2GRAY).astype(np.int16)
+            motion = float(np.mean(np.abs(small - prev_small))) \
+                if prev_small is not None else 99.0
+            prev_small = small
+
             # 2) LivePortrait: webcam -> animated AI face (every LP_INTERVAL frames)
             t1 = time.perf_counter()
             lp_fresh = False
@@ -460,7 +496,8 @@ def run(eng=None):
                 if getattr(liveportrait, "fallback_mode", False):
                     ai_face = liveportrait.process_frame(driving)
                     lp_fresh = True
-                elif cached_face is None or (frame_count % LP_INTERVAL) == 0:
+                elif (cached_face is None or (frame_count % LP_INTERVAL) == 0
+                      or motion > 4.0):
                     ai_face = liveportrait.process_frame(driving)
                     cached_face = ai_face
                     lp_fresh = True
@@ -498,7 +535,7 @@ def run(eng=None):
             speaking = bool(getattr(musetalk, "is_speaking", False))
             # While the AI chart is on screen, let the avatar SPEAK its live
             # market read (the ChartPilot paces one line per analysis move).
-            if in_chart and not speaking and hasattr(chart, "next_narration"):
+            if in_chart and not speaking and live_mic is None and hasattr(chart, "next_narration"):
                 _line = chart.next_narration()
                 if _line:
                     try:
@@ -512,7 +549,7 @@ def run(eng=None):
             else:
                 if speaking:
                     try:
-                        if lp_fresh or cached_bbox is None:
+                        if lp_fresh or motion > 4.0 or cached_bbox is None:
                             cached_bbox = compositor.detect_mouth_bbox(ai_face)
                         bbox = cached_bbox
                         mouth = musetalk.process_mouth(ai_face, bbox)
@@ -587,6 +624,7 @@ def _shutdown(eng, control, frame_count, session_start):
     """Graceful shutdown: release webcam, camera, stop TTS, print session stats."""
     runtime = time.perf_counter() - session_start
     for fn in (control.shutdown,
+               (eng.get("live_mic").shutdown if eng.get("live_mic") else (lambda: None)),
                eng["tts"].shutdown,
                lambda: eng["cap"].release() if eng["cap"] else None,
                eng["cam"].close):

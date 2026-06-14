@@ -2,7 +2,7 @@
 # engines/resource_monitor.py — ALWAYS-ON live CPU/GPU/VRAM monitor + adaptive
 # load router, so the avatar never lags.
 #
-# Samples CPU% (psutil), GPU% + VRAM% (NVML) on a background thread every ~0.7s and
+# Samples CPU% (psutil), GPU% + VRAM% (NVML) on a background thread every 100ms and
 # exposes:
 #   .cpu / .gpu / .vram        smoothed live load (%)
 #   .route_filters()           "gpu" or "cpu" — where to run the MOVABLE filter work
@@ -19,7 +19,7 @@ import os
 import time
 import threading
 
-INTERVAL = float(os.environ.get("AVATAR_MONITOR_INTERVAL", "0.7"))
+INTERVAL = max(0.05, float(os.environ.get("AVATAR_MONITOR_INTERVAL", "0.1")))
 
 
 class ResourceMonitor:
@@ -27,6 +27,9 @@ class ResourceMonitor:
         self.cpu = 0.0
         self.gpu = 0.0
         self.vram = 0.0
+        self.cpu_live = 0.0
+        self.gpu_live = 0.0
+        self.vram_live = 0.0
         self.ready = False
         self._light = False          # current degraded state (hysteresis)
         self._stop = False
@@ -55,12 +58,15 @@ class ResourceMonitor:
             try:
                 if self._psutil is not None:
                     c = self._psutil.cpu_percent(interval=None)
+                    self.cpu_live = float(c)
                     self.cpu = 0.5 * self.cpu + 0.5 * c
                 if self._nvml is not None:
                     u = self._nvml.nvmlDeviceGetUtilizationRates(self._h)
                     m = self._nvml.nvmlDeviceGetMemoryInfo(self._h)
+                    self.gpu_live = float(u.gpu)
+                    self.vram_live = m.used / m.total * 100.0
                     self.gpu = 0.5 * self.gpu + 0.5 * float(u.gpu)
-                    self.vram = m.used / m.total * 100.0
+                    self.vram = self.vram_live
                 self.ready = True
             except Exception:
                 pass

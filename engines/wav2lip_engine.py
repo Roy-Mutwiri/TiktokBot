@@ -10,6 +10,8 @@
 import os
 import sys
 import collections
+import threading
+import time
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -41,6 +43,7 @@ AUDIO_WINDOW = 6400            # samples (~400ms) used to build the mel
 MIN_AUDIO = 3200               # need at least this much audio to sync
 DETECT_INTERVAL = 6            # re-run face detection every N frames (cache between)
 MOUTH_REGION_TOP = 0.45        # blend only below this fraction of the face box
+STREAM_TIMEOUT = SILENCE_THRESHOLD / FPS
 
 
 class Wav2LipEngine:
@@ -52,6 +55,10 @@ class Wav2LipEngine:
         self.fallback = False
         self.is_speaking = False
         self.audio_buffer = collections.deque(maxlen=SAMPLE_RATE * 2)   # 2s
+        self._audio_lock = threading.Lock()
+        self._timeline_audio = None
+        self._timeline_start = 0.0
+        self._last_audio_feed = 0.0
         self._silence_frames = 0
         self._face_box = None
         self._frame_counter = 0
@@ -116,29 +123,51 @@ class Wav2LipEngine:
     # AUDIO FEED
     # -------------------------------------------------------------------------
     def feed_audio(self, audio_chunk):
-        """Append TTS audio samples (float32, mono, 16kHz) to the buffer."""
+        """Append live/streaming 16 kHz audio to the rolling buffer."""
         try:
-            self.audio_buffer.extend(np.asarray(audio_chunk, dtype=np.float32).flatten())
+            chunk = np.asarray(audio_chunk, dtype=np.float32).flatten()
+            with self._audio_lock:
+                self._timeline_audio = None
+                self.audio_buffer.extend(chunk)
+                self._last_audio_feed = time.monotonic()
             self.is_speaking = True
             self._silence_frames = 0
         except Exception as exc:
             print(f"[WAV2LIP] feed_audio error: {exc}")
 
+    def start_audio(self, audio, start_time=None):
+        """Start a clocked utterance.
+
+        Generated speech is supplied in full so each rendered frame can select
+        the mel window for its actual wall-clock position instead of repeatedly
+        using whichever chunk most recently reached an append-only buffer.
+        """
+        pcm = np.asarray(audio, dtype=np.float32).flatten().copy()
+        with self._audio_lock:
+            self.audio_buffer.clear()
+            self._timeline_audio = pcm
+            self._timeline_start = float(start_time or time.monotonic())
+            self._last_audio_feed = self._timeline_start
+        self.is_speaking = bool(len(pcm))
+        self._silence_frames = 0
+
+    def end_audio(self):
+        """Finish the current utterance and discard stale phonetic context."""
+        with self._audio_lock:
+            self._timeline_audio = None
+            self.audio_buffer.clear()
+        self.is_speaking = False
+        self._silence_frames = 0
+
     # -------------------------------------------------------------------------
     # FRAME PROCESSING
     # -------------------------------------------------------------------------
-    def process_frame(self, face_frame):
+    def process_frame(self, face_frame, raw_output=False):
         """Return face_frame with the mouth lip-synced to recent audio."""
         if self.fallback or not self.ready:
             return face_frame
 
-        # Decay speaking state when no fresh audio arrives.
-        if len(self.audio_buffer) < MIN_AUDIO:
-            self._silence_frames += 1
-            if self._silence_frames > SILENCE_THRESHOLD:
-                self.is_speaking = False
-            return face_frame
-        if not self.is_speaking:
+        if not self._audio_active():
             return face_frame
 
         try:
@@ -155,6 +184,10 @@ class Wav2LipEngine:
                 return face_frame
 
             synced = self._run_wav2lip(crop, mel)              # uint8, crop size
+            if raw_output:
+                result = face_frame.copy()
+                result[y1:y2, x1:x2] = synced
+                return result
             return self._blend_mouth(face_frame, synced, box)
         except Exception as exc:
             if not self._err_printed:
@@ -179,9 +212,40 @@ class Wav2LipEngine:
         self._face_box = (x1, y1, x2, y2)
         return self._face_box
 
-    def _build_mel(self):
-        """Mel-spectrogram chunk (1,1,80,16) from the most recent audio."""
-        window = np.array(list(self.audio_buffer)[-AUDIO_WINDOW:], dtype=np.float32)
+    def _audio_active(self):
+        """Update and return whether timeline/stream audio is still current."""
+        now = time.monotonic()
+        with self._audio_lock:
+            timeline = self._timeline_audio
+            start = self._timeline_start
+            last_feed = self._last_audio_feed
+            buffered = len(self.audio_buffer)
+        if timeline is not None:
+            active = 0.0 <= now - start < (len(timeline) / SAMPLE_RATE)
+        else:
+            active = buffered >= MIN_AUDIO and (now - last_feed) <= STREAM_TIMEOUT
+        self.is_speaking = bool(active)
+        return self.is_speaking
+
+    def _current_audio_window(self, now=None):
+        """Return the audio ending at the current utterance playback cursor."""
+        now = time.monotonic() if now is None else float(now)
+        with self._audio_lock:
+            timeline = self._timeline_audio
+            start = self._timeline_start
+            if timeline is None:
+                return np.array(list(self.audio_buffer)[-AUDIO_WINDOW:], dtype=np.float32)
+            end = int(max(0.0, now - start) * SAMPLE_RATE)
+            end = min(len(timeline), end)
+            begin = max(0, end - AUDIO_WINDOW)
+            window = timeline[begin:end].copy()
+        if len(window) < AUDIO_WINDOW:
+            window = np.pad(window, (AUDIO_WINDOW - len(window), 0))
+        return window
+
+    def _build_mel(self, now=None):
+        """Build the mel chunk at the current clocked audio position."""
+        window = self._current_audio_window(now)
         if len(window) < MIN_AUDIO:
             return None
         mel = self._audio.melspectrogram(window)              # (80, T)
@@ -280,6 +344,7 @@ class Wav2LipEngine:
             self.process_frame(face)
 
         self.audio_buffer.clear()
+        self._timeline_audio = None
         self.is_speaking = False
         self._face_box = None
         self._frame_counter = 0

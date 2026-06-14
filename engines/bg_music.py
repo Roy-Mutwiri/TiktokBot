@@ -38,17 +38,18 @@ SR = 44100
 BASE_VOL = float(os.environ.get("AVATAR_MUSIC_VOL", "0.17"))   # idle (pause) bed level
 # While the bot talks the music drops to this fraction so the VOICE clearly sits
 # on top (0.15 -> bed ~5-6x quieter than the voice). Lower = voice more dominant.
-DUCK = float(os.environ.get("AVATAR_MUSIC_DUCK", "0.15"))
-SONG_SECONDS = float(os.environ.get("AVATAR_MUSIC_SONG_SECONDS", "26"))  # per track
+DUCK = float(os.environ.get("AVATAR_MUSIC_DUCK", "0.08"))
+SONG_SECONDS = float(os.environ.get("AVATAR_MUSIC_SONG_SECONDS", "90"))  # per track
 # HUGE pool of procedurally-unique tracks so we can go a long time with no repeat.
 # 5000 tracks x ~26s = ~36 hours of music before the pool could even be exhausted.
-NUM_SONGS = int(os.environ.get("AVATAR_MUSIC_SONGS", "5000"))
+NUM_SONGS = int(os.environ.get("AVATAR_MUSIC_SONGS", "20000"))
 # Don't replay a track until this many DAYS have passed (persisted across sessions).
 REPEAT_GAP = float(os.environ.get("AVATAR_MUSIC_REPEAT_DAYS", "2")) * 86400.0
 # Persistent play history (seed -> last-played unix time) so "heard today, not
 # again for ~2 days" survives restarts.
 _PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HISTORY_FILE = os.path.join(_PROJECT, "_music_history.json")
+MUSIC_DIR = os.path.join(_PROJECT, "music", "streambeats")
 
 # Dark scales only — phonk lives in minor/phrygian/harmonic-minor.
 DARK_SCALES = {
@@ -89,8 +90,81 @@ def _osc(f, t, kind):
 
 
 # Distinct phonk "vibes" so the 50 tracks don't all sound the same.
-STYLES = ["aggressive", "melodic", "classic", "dark"]
+STYLE_PROFILES = {
+    "aggressive": dict(bpms=[145, 150, 155, 160], distort=2.2, hats=4, cow=0.12,
+                       drums=1.15, lead=0.30, pad=0.20, groove="phonk",
+                       voice="cow", bass=0.58),
+    "melodic": dict(bpms=[118, 124, 128, 132], distort=1.0, hats=2, cow=0.07,
+                    drums=0.85, lead=0.95, pad=0.90, groove="trap",
+                    voice="bell", bass=0.42),
+    "classic": dict(bpms=[128, 132, 138, 140], distort=1.5, hats=2, cow=0.17,
+                    drums=1.00, lead=0.55, pad=0.45, groove="phonk",
+                    voice="cow", bass=0.50),
+    "dark": dict(bpms=[108, 116, 124, 132], distort=1.2, hats=2, cow=0.05,
+                 drums=0.75, lead=0.55, pad=1.00, groove="halftime",
+                 voice="pluck", bass=0.48),
+    "synthwave": dict(bpms=[96, 104, 110, 118], distort=0.8, hats=2, cow=0.0,
+                      drums=0.72, lead=1.00, pad=1.00, groove="four",
+                      voice="arp", bass=0.34),
+    "drill": dict(bpms=[138, 142, 146, 150], distort=1.8, hats=4, cow=0.0,
+                  drums=1.10, lead=0.38, pad=0.35, groove="drill",
+                  voice="pluck", bass=0.60),
+    "lofi": dict(bpms=[78, 84, 90, 96], distort=0.55, hats=2, cow=0.0,
+                 drums=0.52, lead=0.90, pad=0.90, groove="boombap",
+                 voice="keys", bass=0.28),
+    "cyber": dict(bpms=[148, 156, 164, 172], distort=1.7, hats=4, cow=0.0,
+                  drums=1.00, lead=0.95, pad=0.55, groove="breakbeat",
+                  voice="arp", bass=0.48),
+    "house": dict(bpms=[120, 124, 126, 130], distort=0.75, hats=4, cow=0.0,
+                  drums=0.90, lead=0.70, pad=0.75, groove="four",
+                  voice="chord", bass=0.32),
+    "ambient": dict(bpms=[72, 78, 84, 90], distort=0.45, hats=1, cow=0.0,
+                    drums=0.12, lead=0.65, pad=1.35, groove="ambient",
+                    voice="air", bass=0.16),
+}
+STYLES = list(STYLE_PROFILES)
 LEAD_KINDS = ["bell", "saw", "square", "tri"]
+
+
+def _style_for_seed(seed):
+    rng = np.random.RandomState(seed * 2654435761 % (2**31))
+    return STYLES[rng.randint(len(STYLES))]
+
+
+def _discover_music_files():
+    if not os.path.isdir(MUSIC_DIR):
+        return []
+    extensions = (".mp3", ".wav", ".flac", ".ogg")
+    return sorted(
+        os.path.join(MUSIC_DIR, name)
+        for name in os.listdir(MUSIC_DIR)
+        if name.lower().endswith(extensions)
+    )
+
+
+def _file_track_id(path):
+    return "file:" + os.path.basename(path)
+
+
+def _load_music_file(path):
+    import soundfile as sf
+
+    audio, sample_rate = sf.read(path, dtype="float32", always_2d=True)
+    mono = audio.mean(axis=1)
+    if sample_rate != SR:
+        from scipy.signal import resample_poly
+        divisor = np.gcd(sample_rate, SR)
+        mono = resample_poly(mono, SR // divisor, sample_rate // divisor)
+    peak = float(np.max(np.abs(mono))) or 1.0
+    if peak > 0.98:
+        mono = mono * (0.98 / peak)
+    title = os.path.splitext(os.path.basename(path))[0].replace("_", " ")
+    return mono.astype(np.float32), {
+        "title": title,
+        "style": "StreamBeats",
+        "source": "file",
+        "seconds": len(mono) / SR,
+    }
 
 
 def _make_track(seed):
@@ -99,9 +173,10 @@ def _make_track(seed):
     (A/B halves) so it has its own character — not a clone of the others."""
     rng = np.random.RandomState(seed * 2654435761 % (2**31))
     style = STYLES[rng.randint(len(STYLES))]
-    bpm = float(rng.choice([128, 132, 138, 140, 145, 150, 155, 160]))
+    profile = STYLE_PROFILES[style]
+    bpm = float(rng.choice(profile["bpms"]))
     beat = 60.0 / bpm
-    beats = 16                                     # longer loop = far less repetitive
+    beats = 48
     n = int(SR * beat * beats)
     out = np.zeros(n, np.float32)
     root = float(rng.choice([48.99, 51.91, 55.0, 58.27, 61.74, 65.41]))   # G1..C2
@@ -110,12 +185,13 @@ def _make_track(seed):
     scale = DARK_SCALES[sc_name]
     prog = PROGRESSIONS[rng.randint(len(PROGRESSIONS))]
     # per-style character
-    distort = {"aggressive": 2.2, "melodic": 1.0, "classic": 1.5, "dark": 1.2}[style]
-    hat_div = {"aggressive": 4, "melodic": 2, "classic": 2, "dark": 2}[style]   # subdivisions/beat
-    cow_gain = {"aggressive": 0.11, "melodic": 0.12, "classic": 0.17, "dark": 0.10}[style]
-    has_lead = style != "aggressive" and rng.rand() < 0.85
+    distort = profile["distort"]
+    hat_div = profile["hats"]
+    cow_gain = profile["cow"]
+    drum_gain = profile["drums"]
+    has_lead = rng.rand() < profile["lead"]
     lead_kind = LEAD_KINDS[rng.randint(len(LEAD_KINDS))]
-    has_pad = style in ("dark", "melodic") or rng.rand() < 0.5
+    has_pad = rng.rand() < min(1.0, profile["pad"])
 
     def at(sec):
         return int(sec * SR)
@@ -145,6 +221,21 @@ def _make_track(seed):
         s = np.sign(np.sin(2*np.pi*f*tk)) + np.sign(np.sin(2*np.pi*f*1.48*tk))
         return s * np.exp(-tk*15)
 
+    def pluck(f, ln):
+        tk = np.arange(ln) / SR
+        s = _osc(f, tk, "tri") + 0.25 * np.sin(2*np.pi*f*2.0*tk)
+        return s * np.exp(-tk * 7.0)
+
+    def keys(f, ln):
+        tk = np.arange(ln) / SR
+        s = np.sin(2*np.pi*f*tk) + 0.28*np.sin(2*np.pi*f*2.0*tk)
+        return s * _env(ln, 0.02, 0.18, 0.55, 0.38, 0.48)
+
+    def chord(f, ln):
+        tk = np.arange(ln) / SR
+        s = sum(_osc(f * (2.0 ** (iv / 12.0)), tk, "saw") for iv in (0, 3, 7))
+        return (s / 3.0) * _env(ln, 0.01, 0.10, 0.45, 0.24, 0.42)
+
     def lead(f, ln, kind):
         tk = np.arange(ln) / SR
         if kind == "bell":
@@ -164,39 +255,77 @@ def _make_track(seed):
         return rng.randn(ln) * np.exp(-tk*150)
 
     # --- A/B melodic motifs (scale-degree offsets) so the two halves differ --
-    motifA = [int(rng.choice([0, 0, 2, 3, 4, 5, 6, 7])) for _ in range(8)]
-    motifB = [int(rng.choice([0, 0, 2, 3, 4, 5, 6, 7])) for _ in range(8)]
-    half = beats // 2
+    motifs = [
+        [int(rng.choice([0, 0, 2, 3, 4, 5, 6, 7])) for _ in range(8)]
+        for _ in range(4)
+    ]
 
     # --- drums: kick pattern (repeats each 8-beat half, fill in the 2nd) ------
-    base_kick = [[0, 2, 3, 5, 6], [0, 3, 4, 6, 7], [0, 2, 4, 6], [0, 1.5, 4, 5.5]][rng.randint(4)]
-    for hh in (0, 8):
-        for b in base_kick:
-            add(at((hh + b) * beat), kick(at(0.2)), 0.7)
-    for bar in range(beats // 4):                  # snare on beats 2 & 4 of each bar
-        add(at((bar*4 + 2) * beat), snare(at(0.14)), 0.30)
-    for k in range(beats * hat_div):               # hats (style density)
-        add(at(k * beat / hat_div), hat(at(0.03)), 0.06 if k % 2 else 0.09)
-    for j in range(3):                             # one triplet hat roll near the end
-        add(at((beats - 0.5) * beat + j*beat/3.0), hat(at(0.03)), 0.07)
+    groove = profile["groove"]
+    kick_patterns = {
+        "phonk": [0, 2, 3, 5, 6],
+        "trap": [0, 2.5, 4, 6.75],
+        "halftime": [0, 3.5, 6],
+        "drill": [0, 1.75, 4.5, 6.25],
+        "boombap": [0, 2.75, 4, 6.5],
+        "breakbeat": [0, 1.5, 3, 4.75, 6.5],
+        "four": list(range(8)),
+        "ambient": [0],
+    }
+    snare_beats = {
+        "phonk": [2, 6], "trap": [2, 6], "halftime": [4],
+        "drill": [3, 7], "boombap": [2, 6], "breakbeat": [2, 5.5],
+        "four": [2, 6], "ambient": [],
+    }
+    for block in range(0, beats, 8):
+        for b in kick_patterns[groove]:
+            add(at((block + b) * beat), kick(at(0.2)), 0.7 * drum_gain)
+        for b in snare_beats[groove]:
+            add(at((block + b) * beat), snare(at(0.14)), 0.30 * drum_gain)
+    if groove == "four":
+        hat_times = [k + 0.5 for k in range(beats)]
+    elif groove == "ambient":
+        hat_times = [k for k in range(0, beats, 4)]
+    else:
+        hat_times = [k / hat_div for k in range(beats * hat_div)]
+    for index, b in enumerate(hat_times):
+        gain = (0.045 if index % 2 else 0.075) * drum_gain
+        add(at(b * beat), hat(at(0.03)), gain)
+    if groove in ("phonk", "drill", "breakbeat"):
+        for j in range(3):
+            add(at((beats - 0.5) * beat + j*beat/3.0), hat(at(0.03)), 0.07)
 
     # --- cowbell melody (the hook) — A motif first half, B motif second -------
     step = beat / 2.0
     nsteps = beats * 2
     for k in range(nsteps):
-        if rng.rand() < 0.28:
+        voice = profile["voice"]
+        skip_chance = 0.62 if voice in ("air", "chord", "keys") else 0.28
+        if rng.rand() < skip_chance:
             continue
-        m = motifA if k < nsteps // 2 else motifB
+        m = motifs[min(3, (k * 4) // nsteps)]
         deg = (prog[(k // 4) % len(prog)] + m[k % len(m)]) % len(scale)
         f = _semi(root, scale[deg] + int(rng.choice([24, 24, 26])))
-        add(at(k*step), cowbell(f, at(step*0.9)), cow_gain)
+        if voice == "cow":
+            hook, hook_gain = cowbell(f, at(step*0.9)), cow_gain
+        elif voice in ("pluck", "arp"):
+            hook, hook_gain = pluck(f, at(step*0.9)), 0.10
+        elif voice == "keys":
+            hook, hook_gain = keys(f / 2.0, at(beat*1.8)), 0.11
+        elif voice == "chord":
+            hook, hook_gain = chord(f / 2.0, at(beat*0.9)), 0.09
+        elif voice == "air":
+            hook, hook_gain = keys(f / 2.0, at(beat*3.5)), 0.055
+        else:
+            hook, hook_gain = lead(f, at(step*0.9), "bell"), 0.08
+        add(at(k*step), hook, hook_gain)
 
     # --- optional lead melody (quarter notes) — gives melodic tracks identity -
     if has_lead:
         for k in range(beats):
             if rng.rand() < 0.45:
                 continue
-            m = motifA if k < half else motifB
+            m = motifs[min(3, (k * 4) // beats)]
             deg = (prog[(k // 4) % len(prog)] + m[k % len(m)]) % len(scale)
             f = _semi(root, scale[deg] + int(rng.choice([12, 12, 24])))
             add(at(k*beat), lead(f, at(beat*0.85), lead_kind), 0.07)
@@ -205,7 +334,7 @@ def _make_track(seed):
     for b in range(0, beats, 2):
         deg = prog[(b // 2) % len(prog)]
         f = _semi(root, scale[deg % len(scale)])
-        add(at(b*beat), b808(f, at(beat*1.85)), 0.5)
+        add(at(b*beat), b808(f, at(beat*1.85)), profile["bass"])
 
     # --- dark atmosphere pad -------------------------------------------------
     if has_pad:
@@ -214,7 +343,7 @@ def _make_track(seed):
         for iv in (0, 3, 7):
             pad += np.sin(2*np.pi*_semi(root*2, scale[iv % len(scale)])*t).astype(np.float32)
         pad *= (0.5 + 0.5*np.sin(2*np.pi*0.2*t)).astype(np.float32)
-        out += pad * 0.03
+        out += pad * (0.03 * profile["pad"])
 
     # --- master: tape saturation glue + normalise + click-free loop seam -----
     out = np.tanh(out * 1.15)
@@ -223,7 +352,13 @@ def _make_track(seed):
     xf = at(0.012)
     out[:xf] *= np.linspace(0, 1, xf)
     out[-xf:] *= np.linspace(1, 0, xf)
-    return out.astype(np.float32), dict(bpm=int(bpm), style=style, scale=sc_name)
+    return out.astype(np.float32), dict(
+        bpm=int(bpm),
+        style=style,
+        scale=sc_name,
+        groove=profile["groove"],
+        voice=profile["voice"],
+    )
 
 
 class BackgroundMusic:
@@ -234,18 +369,47 @@ class BackgroundMusic:
         self.active = False
         self._speaking = False
         self._gain = 0.0
+        self.audio_level = 0.0
         self._pos = 0
         self._stream = None
         self._alive = True
+        self._state_lock = threading.Lock()
+        self._history_lock = threading.Lock()
+        self._rng = random.SystemRandom()
+        self._library = _discover_music_files()
         # Persistent play history -> pick a track NOT heard in the last ~2 days, so
         # every session opens on a different song and repeats are spaced far apart.
         self._hist = self._load_history()
         try:
-            seed = self._pick_seed()
-            self._cur, self.meta = _make_track(seed)
-            self._cur_seed = seed
+            if self._library:
+                path = self._pick_file()
+                if path is not None:
+                    self._cur, self.meta = _load_music_file(path)
+                    self._cur_seed = _file_track_id(path)
+                    self._pos = 0
+                else:
+                    seed = self._pick_seed()
+                    if seed is None:
+                        raise RuntimeError("all music is inside the repeat cooldown")
+                    self._cur, self.meta = _make_track(seed)
+                    self._cur_seed = seed
+                    self._pos = self._random_start_position(self._cur)
+            else:
+                recent_styles = self._recent_styles(limit=4)
+                previous_seed = self._most_recent_seed()
+                seed = self._pick_seed(
+                    exclude=(() if previous_seed is None else (previous_seed,)),
+                    avoid_styles=recent_styles,
+                )
+                if seed is None:
+                    raise RuntimeError("all music seeds are inside the repeat cooldown")
+                self._cur, self.meta = _make_track(seed)
+                self._cur_seed = seed
+                self._pos = self._random_start_position(self._cur)
+            self._mark_played(self._cur_seed)
             self._next = None
             self._next_seed = None
+            self._played_pending = None
             self._song_until = None
             self._gen = threading.Thread(target=self._gen_loop, daemon=True)
             self._gen.start()
@@ -263,47 +427,138 @@ class BackgroundMusic:
 
     def _save_history(self):
         try:
-            with open(HISTORY_FILE, "w", encoding="utf-8") as f:
+            temp_file = HISTORY_FILE + ".tmp"
+            with open(temp_file, "w", encoding="utf-8") as f:
                 json.dump(self._hist, f)
+            os.replace(temp_file, HISTORY_FILE)
         except Exception:
             pass
 
-    def _pick_seed(self):
-        """Pick a track seed not played in REPEAT_GAP; if all were (heavy use),
-        pick the LEAST-recently played. Marks it played + persists. Thread-safe-ish
-        (called only from __init__ and the generator thread, never the audio cb)."""
+    def _most_recent_seed(self):
+        with self._history_lock:
+            if not self._hist:
+                return None
+            key = max(self._hist, key=lambda item: float(self._hist[item]))
+        try:
+            return int(key)
+        except (TypeError, ValueError):
+            return None
+
+    def _recent_styles(self, limit=4):
+        with self._history_lock:
+            recent = sorted(
+                self._hist.items(),
+                key=lambda item: float(item[1]),
+                reverse=True,
+            )
+        styles = []
+        for key, _ in recent:
+            try:
+                style = _style_for_seed(int(key))
+            except (TypeError, ValueError):
+                continue
+            if style not in styles:
+                styles.append(style)
+            if len(styles) >= limit:
+                break
+        return tuple(styles)
+
+    def _pick_seed(self, exclude=(), avoid_styles=()):
+        """Choose randomly without marking a queued track as played."""
         now = time.time()
-        eligible = [s for s in range(1, NUM_SONGS + 1)
-                    if now - self._hist.get(str(s), 0.0) > REPEAT_GAP]
-        if eligible:
-            seed = random.choice(eligible)
-        else:
-            seed = min(range(1, NUM_SONGS + 1),
-                       key=lambda s: self._hist.get(str(s), 0.0))
-        self._hist[str(seed)] = now
-        # prune ancient entries so the file stays small
-        if len(self._hist) > NUM_SONGS:
+        excluded = set(exclude)
+        avoided = set(avoid_styles)
+        with self._history_lock:
+            eligible = [
+                seed for seed in range(1, NUM_SONGS + 1)
+                if seed not in excluded
+                and now - float(self._hist.get(str(seed), 0.0)) >= REPEAT_GAP
+            ]
+        if avoided:
+            different_style = [
+                seed for seed in eligible if _style_for_seed(seed) not in avoided
+            ]
+            if different_style:
+                eligible = different_style
+        return self._rng.choice(eligible) if eligible else None
+
+    def _pick_file(self, exclude=()):
+        now = time.time()
+        excluded = set(exclude)
+        with self._history_lock:
+            eligible = [
+                path for path in self._library
+                if _file_track_id(path) not in excluded
+                and now - float(self._hist.get(_file_track_id(path), 0.0)) >= REPEAT_GAP
+            ]
+        return self._rng.choice(eligible) if eligible else None
+
+    def _random_start_position(self, track):
+        """Open at a random musical section so every app launch sounds fresh."""
+        if track is None or len(track) < 8:
+            return 0
+        section = len(track) // 8
+        return self._rng.randrange(8) * section
+
+    def _mark_played(self, seed, played_at=None):
+        """Persist a play only when the track becomes audible."""
+        now = time.time() if played_at is None else float(played_at)
+        with self._history_lock:
+            self._hist[str(seed)] = now
             cutoff = now - REPEAT_GAP * 2
-            self._hist = {k: v for k, v in self._hist.items() if v > cutoff}
-        self._save_history()
-        return seed
+            self._hist = {
+                key: value for key, value in self._hist.items()
+                if float(value) >= cutoff
+            }
+            self._save_history()
 
     def startup_check(self):
         if self._cur is None:
             return False, "music unavailable (synth failed)."
+        if self._library:
+            return True, (
+                f"real StreamBeats playlist - {len(self._library)} local songs, "
+                f"random order, {REPEAT_GAP/3600:.0f}-hour cooldown."
+            )
         return True, (f"generative PHONK playlist — {NUM_SONGS} unique tracks, no "
                       f"repeat for ~{REPEAT_GAP/86400:.0f} days (persisted), ducks under voice.")
 
     # -------------------------------------------------------------------------
     def _gen_loop(self):
         while self._alive:
-            if self._cur is not None and self._next is None:
+            with self._state_lock:
+                played_pending = self._played_pending
+                self._played_pending = None
+                needs_track = self._cur is not None and self._next is None
+                current_seed = self._cur_seed
+            if played_pending is not None:
+                seed, played_at = played_pending
+                self._mark_played(seed, played_at)
+            if needs_track:
                 try:
-                    seed = self._pick_seed()        # history-aware (no repeat ~2 days)
-                    self._next = _make_track(seed)
-                    self._next_seed = seed
+                    if self._library:
+                        path = self._pick_file(exclude=(current_seed,))
+                        if path is not None:
+                            track_id = _file_track_id(path)
+                            generated = _load_music_file(path)
+                        else:
+                            track_id = self._pick_seed(exclude=(current_seed,))
+                            generated = (
+                                None if track_id is None else _make_track(track_id)
+                            )
+                    else:
+                        track_id = self._pick_seed(
+                            exclude=(current_seed,),
+                            avoid_styles=(self.meta["style"],),
+                        )
+                        generated = None if track_id is None else _make_track(track_id)
+                    if generated is not None:
+                        with self._state_lock:
+                            if self._next is None:
+                                self._next = generated
+                                self._next_seed = track_id
                 except Exception:
-                    self._next = None
+                    pass
             time.sleep(0.25)
 
     def start(self):
@@ -315,14 +570,37 @@ class BackgroundMusic:
                                            blocksize=1024, dtype="float32",
                                            callback=self._callback)
             self._stream.start()
-            self._song_until = time.monotonic() + SONG_SECONDS
+            self._song_until = time.monotonic() + self._current_song_seconds()
         except Exception as exc:
             print(f"[MUSIC] could not open audio stream ({exc}).")
             self._stream = None
 
     def _callback(self, outdata, frames, time_info, status):
+        now = time.monotonic()
+        switched_seed = None
+        with self._state_lock:
+            if (self._song_until is not None and now >= self._song_until
+                    and self._next is not None):
+                self._cur, self.meta = self._next
+                self._cur_seed = self._next_seed
+                switched_seed = self._cur_seed
+                self._next = None
+                self._next_seed = None
+                self._played_pending = (switched_seed, time.time())
+                self._pos = (
+                    0 if self.meta.get("source") == "file"
+                    else self._random_start_position(self._cur)
+                )
+                self._song_until = now + self._current_song_seconds()
         cur = self._cur
+        if switched_seed is not None:
+            label = self.meta.get("title", switched_seed)
+            details = self.meta.get("style", "unknown")
+            if "bpm" in self.meta:
+                details += f" {self.meta['bpm']} bpm"
+            print(f"[MUSIC] now playing {label} ({details})")
         if cur is None:
+            self.audio_level = 0.0
             outdata.fill(0); return
         target = self.base_vol * (DUCK if self._speaking else 1.0) if self.active else 0.0
         # Duck FAST (so the voice is never masked at the start of a line) but let
@@ -338,22 +616,28 @@ class BackgroundMusic:
         else:
             buf = np.concatenate([cur[self._pos:], cur[:end - len(cur)]])
             self._pos = end - len(cur)
-            if (self._song_until and time.monotonic() >= self._song_until
-                    and self._next is not None):
-                self._cur, self.meta = self._next
-                self._cur_seed = self._next_seed
-                self._next = None                  # gen thread picks + marks the next
-                self._pos = 0
-                self._song_until = time.monotonic() + SONG_SECONDS
-                buf = self._cur[:frames]
-        outdata[:, 0] = buf * gains
+        output = buf * gains
+        outdata[:, 0] = output
+        self.audio_level = float(
+            np.sqrt(np.mean(output * output)) + 1e-9)
 
     def skip(self):
-        self._song_until = 0.0
+        self._song_until = time.monotonic() - 1.0
+
+    def _current_song_seconds(self):
+        meta = getattr(self, "meta", {})
+        if meta.get("source") == "file" and self._cur is not None:
+            return max(1.0, len(self._cur) / SR)
+        return SONG_SECONDS
 
     # -------------------------------------------------------------------------
     def set_active(self, on):
         self.active = bool(on)
+        if not self.active:
+            # A mute control must be immediate; do not apply the normal musical
+            # fade used when ducking underneath speech.
+            self._gain = 0.0
+            self.audio_level = 0.0
         if self.active and self._stream is None:
             self.start()
 
@@ -379,9 +663,10 @@ if __name__ == "__main__":
     print("[MUSIC]", m.startup_check()[1])
     if m._cur is not None:
         clips = []
-        for s in m._order[:6]:
+        seeds = random.SystemRandom().sample(range(1, NUM_SONGS + 1), 6)
+        for s in seeds:
             trk, meta = _make_track(s)
-            print(f"  phonk track seed={s}: {meta['bpm']} BPM")
+            print(f"  track seed={s}: {meta['style']} / {meta['bpm']} BPM")
             clips.append(trk)
             clips.append(np.zeros(int(SR*0.4), np.float32))
         sf.write(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),

@@ -19,6 +19,7 @@ except Exception:
 
 import numpy as np
 import cv2
+from trading_backgrounds import BACKGROUND_PRESETS, apply_subject_lighting, render_background
 
 # -----------------------------------------------------------------------------
 # CONFIGURATION
@@ -53,6 +54,9 @@ _segmenter_tried = False
 _seg_mask_cache = None
 _seg_counter = 0
 SEG_INTERVAL = 2               # every 2 frames: tracks head, less added latency
+_background_preset = os.environ.get(
+    "AVATAR_BACKGROUND_PRESET", "Wall Street LED / Midnight Blue")
+_background_phase = 0.0
 
 
 # -----------------------------------------------------------------------------
@@ -165,13 +169,26 @@ def set_protect_head(head):
     _protect_head = head
 
 
+def set_background_preset(name):
+    """Select one of the procedural presets, or disable replacement."""
+    global _background_preset, _seg_mask_cache
+    _background_preset = name if name in BACKGROUND_PRESETS else "No Background"
+    _seg_mask_cache = None
+
+
+def get_background_preset():
+    return _background_preset
+
+
 def background_composite(frame):
     """Cut the person out and composite onto the studio background.
 
     The segmentation mask is recomputed only every SEG_INTERVAL frames (the head
     moves slowly), which roughly thirds the per-frame cost of this stage.
     """
-    global _seg_mask_cache, _seg_counter
+    global _seg_mask_cache, _seg_counter, _background_phase
+    if _background_preset == "No Background":
+        return frame
     seg = _get_segmenter()
     if seg is None:
         return frame
@@ -188,9 +205,14 @@ def background_composite(frame):
                 # higher threshold = tighter cut to the person (less light-wall halo);
                 # the face is guaranteed by the protect-ellipse below, so we can be
                 # tight here without risking the face.
-                m = (res.segmentation_mask > 0.62).astype(np.float32)
-                m = cv2.dilate(m, np.ones((3, 3), np.uint8), iterations=1)
-                m = cv2.GaussianBlur(m, (0, 0), EDGE_FEATHER)
+                raw = res.segmentation_mask.astype(np.float32)
+                core = (raw > 0.54).astype(np.uint8)
+                core = cv2.morphologyEx(core, cv2.MORPH_CLOSE,
+                                        np.ones((7, 7), np.uint8), iterations=2)
+                core = cv2.dilate(core, np.ones((5, 5), np.uint8), iterations=1)
+                soft = cv2.GaussianBlur(core.astype(np.float32), (0, 0), 2.2)
+                # Preserve a hard subject interior; softness exists only outside it.
+                m = np.maximum(core.astype(np.float32), soft * 0.96)
                 # light temporal blend only (responsive, not lagging the head)
                 if _seg_mask_cache is not None and _seg_mask_cache.shape[:2] == m.shape[:2]:
                     m = 0.85 * m + 0.15 * _seg_mask_cache[:, :, 0]
@@ -210,10 +232,14 @@ def background_composite(frame):
                         (int(ew * 1.25), int(ew * 1.75)), 0, 0, 360, 1.0, -1)
             prot = cv2.GaussianBlur(prot, (0, 0), ew * 0.3)[:, :, None]
             m = np.maximum(m, prot)
-        bg = _bg_image
-        if bg.shape[:2] != frame.shape[:2]:
-            bg = cv2.resize(bg, (frame.shape[1], frame.shape[0]))
-        return (frame * m + bg * (1.0 - m)).astype(np.uint8)
+        _background_phase += 0.018
+        bg = render_background(
+            _background_preset, (frame.shape[1], frame.shape[0]), _background_phase)
+        if bg is None:
+            return frame
+        foreground = apply_subject_lighting(frame, m, _background_preset)
+        return (foreground.astype(np.float32) * m
+                + bg.astype(np.float32) * (1.0 - m)).astype(np.uint8)
     except Exception:
         return frame
 
@@ -394,7 +420,7 @@ def draw_speaking_indicator(frame, is_speaking):
 ENHANCE_LEVEL = "full"          # "full" | "light"
 # Trading-studio background composite. OFF for now (show the real background) — also
 # saves the per-frame selfie-segmentation cost. Re-enable with AVATAR_BG=1.
-BG_ON = os.environ.get("AVATAR_BG", "0") == "1"
+BG_ON = os.environ.get("AVATAR_BG", "1") == "1"
 
 
 def set_level(level):
@@ -415,9 +441,12 @@ def enhance_frame(frame, is_speaking=False, device="cpu"):
         if frame.shape[0] != FRAME_SIZE or frame.shape[1] != FRAME_SIZE:
             frame = cv2.resize(frame, (FRAME_SIZE, FRAME_SIZE))
         full = ENHANCE_LEVEL == "full"
+        # Background segmentation is the expensive part of this stage. In light
+        # mode keep the avatar responsive and leave the current frame background
+        # intact; full mode keeps the trading-studio replacement.
+        if full and BG_ON and _background_preset != "No Background":
+            frame = background_composite(frame)
         if full:
-            if BG_ON:                             # trading-studio background (off for now)
-                frame = background_composite(frame)
             g = None
             if device == "gpu":                   # GPU path (kornia) — offload from CPU
                 try:

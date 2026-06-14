@@ -61,7 +61,13 @@ from tts_stream_engine import MALE_VOICES
 # CONFIGURATION
 # -----------------------------------------------------------------------------
 PREVIEW_SIZE = 512
+PREVIEW_W = 512
+PREVIEW_H = 512
 TARGET_FRAME_TIME = 1.0 / FPS
+APP_USER_MODEL_ID = "TiktokBot.AvatarStudio"
+APP_ICON_PATH = os.path.join(PROJECT_DIR, "assets", "avatar_studio.ico")
+APP_ICON_PNG_PATH = os.path.join(PROJECT_DIR, "assets", "avatar_studio.png")
+APP_ICON_FALLBACK = os.path.join(PROJECT_DIR, "haddan_white", "wh_00.png")
 
 # Face-loss -> trading-chart scene
 NO_FACE_SECONDS = 1.5          # no face for this long -> switch to charts
@@ -106,10 +112,23 @@ QUICK_PHRASES = [
 # The bot speaks ARABIC + ENGLISH ONLY, via the Coqui XTTS-v2 cloned voice — one
 # Arabic male who code-switches cleanly. No other voice options by request.
 VOICE_MODES = [
+    ("Fluent live - Kokoro", "kokoro"),
     ("Arabic + English · XTTS-v2 (cloned)", "xtts"),
 ]
 VOICE_MODE_LABELS = [m[0] for m in VOICE_MODES]
 VOICE_MODE_KEY = dict(VOICE_MODES)
+YOUTUBE_VOICE_PERSONAS = [
+    ("Marcus - deep male", "deep_male"),
+    ("Omar - warm male", "warm_male"),
+    ("Ethan - young male", "young_male"),
+    ("David - broadcast male", "broadcast_male"),
+    ("Layla - natural woman", "natural_woman"),
+    ("Sofia - warm woman", "warm_woman"),
+    ("Maya - bright woman", "bright_woman"),
+    ("Nora - low woman", "low_woman"),
+]
+YOUTUBE_PERSONA_KEY = dict(YOUTUBE_VOICE_PERSONAS)
+YOUTUBE_PERSONA_LABELS = [item[0] for item in YOUTUBE_VOICE_PERSONAS]
 
 # -----------------------------------------------------------------------------
 # DESIGN TOKENS — a futuristic "HUD / neon" palette on a deep-space canvas.
@@ -121,24 +140,93 @@ VOICE_MODE_KEY = dict(VOICE_MODES)
 # Legacy names (ACCENT*/GREEN*/BG2/ENTRY_BG) are aliases so the rest of the
 # class — and the runtime engine logic — stay byte-for-byte unchanged.
 # -----------------------------------------------------------------------------
-BG       = "#05070e"      # deep-space canvas
-SURFACE  = "#0a0f1a"      # panel fill
-SURFACE2 = "#070b14"      # fields / entries / insets
-BORDER   = "#16243a"      # hairline borders
-FG       = "#e3ecf7"      # cool-white primary text
-MUTED    = "#6f87a0"      # secondary text / control labels
-FAINT    = "#3b4f66"      # captions / dim chrome
+BG       = "#050608"      # near-black application canvas
+SURFACE  = "#0c0f15"      # raised panel face
+SURFACE2 = "#080a0f"      # recessed fields / entries
+BORDER   = "#202632"      # neutral hairline borders
+FG       = "#f4f6fb"      # high-contrast primary text
+MUTED    = "#8a93a5"      # secondary text / control labels
+FAINT    = "#50596b"      # captions / inactive chrome
 
-CYAN     = "#26e8ff"      # primary neon accent
-CYAN_HI  = "#7af2ff"
-CYAN_INK = "#02181f"
-MAG      = "#ff2f9e"      # secondary neon accent
-MAG_HI   = "#ff74bf"
-MINT     = "#27ffb0"      # live / go
-MINT_HI  = "#73ffcb"
+CYAN     = "#58dff8"      # primary interface accent
+CYAN_HI  = "#a3efff"
+CYAN_INK = "#03171c"
+MAG      = "#ff4fa3"      # interaction / comment accent
+MAG_HI   = "#ff91c7"
+MINT     = "#4df0b5"      # live / go
+MINT_HI  = "#9affd8"
 MINT_INK = "#02160e"
-AMBER    = "#ffb43d"      # warnings / recenter
-RED      = "#ff3b5c"      # stopped / error
+AMBER    = "#f5b84b"      # warnings / recenter
+RED      = "#ff526b"      # stopped / error
+
+# Windows Segoe MDL2 icon glyphs. Stored as escapes so the source stays portable
+# while the UI gets real app-style icons on Windows.
+ICONS = {
+    "dashboard": "\ue80f", "live": "\ue768", "comments": "\ue8bd",
+    "voice": "\ue720", "face": "\ue8b2", "lips": "\ue9d9",
+    "scenes": "\ue7c3", "analytics": "\ue9d2", "settings": "\ue713",
+    "play": "\ue768", "pause": "\ue769", "mute": "\ue74f",
+    "record": "\ue7c8", "stop": "\ue71a", "gear": "\ue713",
+    "preview": "\ue714", "cpu": "\ue950", "gpu": "\ue7f4",
+    "ram": "\ue964", "clock": "\ue823", "heart": "\ue00b",
+    "viewers": "\ue716", "link": "\ue71b", "mic": "\ue720",
+}
+
+def _configure_windows_app_identity():
+    """Give the studio its own Windows taskbar group instead of Python's."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            APP_USER_MODEL_ID
+        )
+    except Exception:
+        pass
+
+
+def _set_window_icon(root):
+    """Set both the native Windows icon and Tk's window icon."""
+    try:
+        if os.path.exists(APP_ICON_PATH):
+            root.iconbitmap(default=APP_ICON_PATH)
+    except Exception:
+        pass
+
+    image_path = (
+        APP_ICON_PNG_PATH
+        if os.path.exists(APP_ICON_PNG_PATH)
+        else APP_ICON_FALLBACK
+    )
+    try:
+        if os.path.exists(image_path):
+            root._avatar_taskbar_icon = tk.PhotoImage(file=image_path)
+            root.iconphoto(True, root._avatar_taskbar_icon)
+    except Exception:
+        pass
+
+
+def _show_frameless_window_in_taskbar(root):
+    """Make a Tk overrideredirect window a normal Windows taskbar app."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        root.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(root.winfo_id())
+        gwl_exstyle = -20
+        ws_ex_toolwindow = 0x00000080
+        ws_ex_appwindow = 0x00040000
+        style = ctypes.windll.user32.GetWindowLongW(hwnd, gwl_exstyle)
+        style = (style & ~ws_ex_toolwindow) | ws_ex_appwindow
+        ctypes.windll.user32.SetWindowLongW(hwnd, gwl_exstyle, style)
+
+        # Windows refreshes taskbar registration when the top-level is remapped.
+        root.withdraw()
+        root.after(10, root.deiconify)
+    except Exception:
+        pass
+
 
 # Back-compat aliases (referenced elsewhere in this module + engine glue).
 ACCENT     = CYAN
@@ -161,6 +249,8 @@ class AvatarStudio:
         self.engines = None
         self.swap_engine = None              # lazy inswapper face-swap (real head)
         self.tts = None
+        self.live_mic = None                 # LiveVoiceEngine when Live-Mic mode is on
+        self.ai_mouth_var = tk.BooleanVar(value=True)
         # ALWAYS-ON resource monitor: live CPU/GPU/VRAM -> adaptive load routing so the
         # avatar never lags (movable filter work goes to whoever's free; heavy optional
         # passes drop when both are saturated). Starts now, runs the whole session.
@@ -175,6 +265,7 @@ class AvatarStudio:
         self.tiktok = None                   # LIVE TikTok comment reader
         self._handles_file = os.path.join(PROJECT_DIR, "tiktok_handles.json")
         self._handles = self._load_handles()  # remembered @handles for the dropdown
+        self._handle_text = os.environ.get("AVATAR_TIKTOK_USER", "")
         self.responder = None                # comment filter + answerer (web research)
         self._comment_q = queue.Queue(maxsize=80)
         self._event_q = queue.Queue(maxsize=40)   # market alerts / polls (may use the LLM)
@@ -187,15 +278,29 @@ class AvatarStudio:
         # follows arrive in BURSTS — buffer the names and thank them in one batched
         # line (so a burst is one quick shout-out, not 8 slow separate ones).
         self._pending_follows = _c.deque(maxlen=20)
+        self._ready_speech_lock = threading.Lock()
+        self._ready_speech = None
+        self._ready_speech_deferred = None
+        self._ready_speech_slots = {"urgent": None, "comment": None}
+        self._ready_speech_deferred_slots = {"urgent": None, "comment": None}
+        self._ready_speech_token = 0
+        self._live_response_event = threading.Event()
+        self._comment_times = _c.deque(maxlen=1000)
         self._next_like_ms = 500                  # next likes milestone to celebrate
         # SESSION STATS + gift goal (on-screen bar + CTAs)
+        self._sess_viewers = None
         self._sess_likes = 0
         self._sess_coins = 0
         self._sess_follows = 0
+        self._session_started_at = None
         self._coin_goal = int(os.environ.get("AVATAR_COIN_GOAL", "200"))
         self._poll = None                         # active buy/sell poll {buy,sell,end}
         self._poll_last = 0.0                     # last poll start (monotonic)
-        self.market = None                   # LIVE gold price feed (Binance PAXG)
+        self.market = None                   # currently active live market feed
+        self.market_gold = None              # PAXG proxy while XAUUSD is open
+        self.market_btc = None               # BTCUSDT, active when gold is closed
+        self._market_symbol = None
+        self._market_transition_announced = None
         self._thinking = False               # True while the brain is generating
         self.cap = None
         self.obs_cam = None
@@ -209,6 +314,28 @@ class AvatarStudio:
         self._fps = 0.0
         self._diag = ""                      # per-stage ms readout
         self._speaking = False
+        self._youtube_busy = False
+        self._youtube_mode = "market"         # "market" | "youtube"
+        self._youtube_chunks = []
+        self._youtube_title = ""
+        self._youtube_index = 0
+        self._youtube_pump_started = False
+        self._youtube_audio = None
+        self._youtube_audio_mode = False
+        self._youtube_audio_status = ""
+        self._youtube_muted = False
+        self.youtube_smooth_var = tk.BooleanVar(value=True)
+        self._mic_monitor_muted = False
+        self._audio_meters = {}
+        self._audio_meter_levels = {}
+        self._youtube_mohammed_mode = False
+        self._youtube_start_seconds = 0.0
+        self._youtube_end_seconds = None
+        self._youtube_duration = 0.0
+        self._youtube_progress_value = 0.0
+        self._youtube_progress_text = "Idle"
+        self._mohammed_voice_ready = False
+        self._mohammed_voice_warming = False
         self._worker = None
         if not hasattr(self, "_thinking"):
             self._thinking = False
@@ -225,15 +352,19 @@ class AvatarStudio:
             self.music = None
 
         root.title("AVATAR STUDIO ◆ neural pipeline")
+        _set_window_icon(root)
         root.configure(bg=BG)
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        # tall by default so the comment feed below the avatar has lots of room to
-        # scroll. The avatar panel keeps its natural height; the extra height all
-        # flows into the comments panel (it's the expand=True slave of the column).
-        win_h = min(1400, max(900, sh - 90))
-        _wx = max(0, (sw - 1240) // 2); _wy = max(0, (sh - win_h) // 2)
-        root.geometry(f"1240x{win_h}+{_wx}+{_wy}")
-        root.minsize(1040, 660)
+        # 16:9 desktop control room layout: sidebar, top bar, vertical TikTok
+        # output, live comment reader, controls, and bottom telemetry strip.
+        win_w = min(1500, max(1280, sw - 90))
+        win_h = int(win_w * 9 / 16)
+        if win_h > sh - 70:
+            win_h = max(720, sh - 70)
+            win_w = int(win_h * 16 / 9)
+        _wx = max(0, (sw - win_w) // 2); _wy = max(0, (sh - win_h) // 2)
+        root.geometry(f"{win_w}x{win_h}+{_wx}+{_wy}")
+        root.minsize(1180, 660)
         # frameless window -> our own futuristic title bar with custom controls
         self._drag = None
         self._tb_buttons = {}
@@ -241,6 +372,7 @@ class AvatarStudio:
         try:
             root.overrideredirect(True)
             root.bind("<Map>", self._restore_override)
+            root.after(20, lambda: _show_frameless_window_in_taskbar(root))
             root.after(80, lambda: (root.lift(), root.focus_force()))
         except Exception:
             pass
@@ -255,6 +387,7 @@ class AvatarStudio:
         # green/red light by the SPEECH button. No START needed, never sleeps long.
         self._live_stop = False
         self._safe_thread("_live_status_loop")
+        self._safe_thread("_live_response_loop")
         # ASYNC auto-config: benchmark the GPU AFTER the window paints, with a
         # loading bar; START stays disabled until the chosen model is known (its
         # env must be set before the engines load).
@@ -286,13 +419,19 @@ class AvatarStudio:
             print(f"[studio] could not start {method_name}: {exc}")
             return None
 
-    def _launch_tradingview(self):
+    def _launch_tradingview(self, symbol=None):
         """Open TradingView.com in a browser the AI drives (scroll/zoom/draw)."""
         import subprocess
         if os.environ.get("AVATAR_TV", "1") == "0":
             return
         proj = os.path.dirname(os.path.abspath(__file__))
-        sym = os.environ.get("AVATAR_TV_SYMBOL", "OANDA:XAUUSD")
+        if symbol is None:
+            try:
+                from market_session import xauusd_session
+                symbol = "OANDA:XAUUSD" if xauusd_session().is_open else "BINANCE:BTCUSDT"
+            except Exception:
+                symbol = "OANDA:XAUUSD"
+        sym = os.environ.get("AVATAR_TV_SYMBOL", symbol)
         lang = os.environ.get("AVATAR_TTS_LANG", "en")
         args = [sys.executable, os.path.join(proj, "tradingview_pilot.py"),
                 "--symbol", sym, "--lang", lang if lang in ("en", "ar") else "en"]
@@ -458,14 +597,20 @@ class AvatarStudio:
                       activeforeground=fg, state=state, highlightthickness=1,
                       highlightbackground=border, highlightcolor=border,
                       disabledforeground=FAINT)
+        b._normal_bg = bg
+        b._normal_border = border
+        b._hover_bg = hover
+        b._hover_border = hover_border
 
         def en(_):
             if str(b["state"]) != "disabled":
-                b.configure(bg=hover, highlightbackground=hover_border)
+                b.configure(bg=getattr(b, "_hover_bg", hover),
+                            highlightbackground=getattr(b, "_hover_border", hover_border))
 
         def lv(_):
             if str(b["state"]) != "disabled":
-                b.configure(bg=bg, highlightbackground=border)
+                b.configure(bg=getattr(b, "_normal_bg", bg),
+                            highlightbackground=getattr(b, "_normal_border", border))
         b.bind("<Enter>", en); b.bind("<Leave>", lv)
         return b
 
@@ -517,6 +662,12 @@ class AvatarStudio:
                 x = 26 + ((self._anim * 7) % (w - 200))
                 cvt.coords(self._sweep, x-2, self._sweep_y-2, x+2, self._sweep_y+2)
                 cvt.itemconfig(self._sweep, fill=self._mix(CYAN, BG, 0.2 + 0.6*(1-p)))
+        except Exception:
+            pass
+        try:
+            ready = self._ready_speech_snapshot()
+            if ready and ready.get("status") in ("preparing", "ready"):
+                self._topdraw()
         except Exception:
             pass
         self.root.after(60, self._animate)
@@ -574,6 +725,16 @@ class AvatarStudio:
 
     def _tb_press(self, e):
         h = self._tb_hit(e.x, e.y)
+        if h == "ready_speech":
+            self._play_ready_speech(); return
+        if h == "ready_thanks_speak":
+            self._play_ready_speech("urgent"); return
+        if h == "ready_thanks_skip":
+            self._skip_ready_speech("urgent"); return
+        if h == "ready_comment_speak":
+            self._play_ready_speech("comment"); return
+        if h == "ready_comment_skip":
+            self._skip_ready_speech("comment"); return
         if h == "min":
             self._minimise(); return
         if h == "exit":
@@ -704,6 +865,23 @@ class AvatarStudio:
                                     activeforeground=MAG, highlightthickness=1,
                                     highlightbackground=self._mix(MAG, BG, 0.5))
         self.speech_btn.pack(side="right", padx=(0, 10))
+        self.youtube_smooth_btn = tk.Button(
+            ph, text="SMOOTH VOICE", command=self._toggle_youtube_smooth,
+            bg=self._mix(SURFACE2, MINT, 0.18), fg=MINT,
+            font=("Consolas", 10, "bold"), relief="flat", bd=0,
+            padx=10, cursor="hand2",
+            activebackground=self._mix(SURFACE2, MINT, 0.28),
+            activeforeground=MINT, highlightthickness=1,
+            highlightbackground=self._mix(MINT, BG, 0.45))
+        self.youtube_smooth_btn.pack(side="right", padx=(0, 10))
+        # Switch between voice-driven lip-sync and the avatar's untouched mouth.
+        self.mouth_btn = tk.Button(ph, text="AI MOUTH", command=self._toggle_ai_mouth,
+                                   bg=SURFACE2, fg=MINT, font=("Consolas", 10, "bold"),
+                                   relief="flat", bd=0, padx=10, cursor="hand2",
+                                   activebackground=self._mix(SURFACE2, MINT, 0.2),
+                                   activeforeground=MINT, highlightthickness=1,
+                                   highlightbackground=self._mix(MINT, BG, 0.5))
+        self.mouth_btn.pack(side="right", padx=(0, 10))
         # LIVE light: GREEN = the entered @handle is LIVE on TikTok, RED = offline,
         # grey = no handle. Checked continuously by _live_status_loop (always active).
         self.live_light = tk.Canvas(ph, width=22, height=22, bg=BG, highlightthickness=0)
@@ -736,6 +914,7 @@ class AvatarStudio:
         self.diag_lbl.pack(side="left")
 
         self._show_placeholder()
+        self.root.after(1000, self._youtube_clock_tick)
 
         # ===== LIVE TIKTOK COMMENTS — docked BELOW the avatar ================
         # Moved here from the right rail so the comment feed sits right under the
@@ -768,7 +947,7 @@ class AvatarStudio:
                   activebackground=self._mix(SURFACE2, AMBER, 0.25), activeforeground=AMBER,
                   highlightbackground=self._mix(AMBER, BG, 0.5)).pack(side="left", padx=(6, 0))
         # @handle entry + Answer toggle on the right
-        self.comments_var = tk.BooleanVar(value=False)
+        self.comments_var = tk.BooleanVar(value=True)
         self._check(ch, "Answer", self.comments_var,
                     self._on_comments).pack(side="right")
         self.handle_var = tk.StringVar(value=os.environ.get("AVATAR_TIKTOK_USER", ""))
@@ -982,6 +1161,17 @@ class AvatarStudio:
 
         # ---- SCENE & OUTPUT ------------------------------------------------
         c = self._card(right, "SCENE & OUTPUT")
+        from trading_backgrounds import BACKGROUND_PRESETS
+        self.background_on_var = tk.BooleanVar(value=True)
+        self._check(c, "Trading background", self.background_on_var,
+                    self._on_background_toggle).pack(fill="x", pady=3)
+        r = self._row(c, "Background preset")
+        self.background_var = tk.StringVar(value="Wall Street LED / Midnight Blue")
+        self.background_combo = ttk.Combobox(
+            r, textvariable=self.background_var, values=BACKGROUND_PRESETS,
+            state="readonly", width=31, style="Studio.TCombobox")
+        self.background_combo.pack(side="right")
+        self.background_var.trace_add("write", self._on_background)
         self.chart_var = tk.BooleanVar(value=False)
         self._check(c, "Show live charts when face is lost",
                     self.chart_var).pack(fill="x", pady=3)
@@ -1023,6 +1213,48 @@ class AvatarStudio:
         ttk.Combobox(c, textvariable=self.voice_var, values=MALE_VOICES,
                      state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(3, 9))
         self.voice_var.trace_add("write", self._on_voice)
+
+        # ---- LIVE MIC (voice changer) -------------------------------------
+        # YOU talk into the mic -> voice changer -> the avatar's mouth syncs to
+        # it (instead of the typed/AI voice). Coexists with the AI voice: turning
+        # it ON mutes the AI host so the two never fight for the mouth.
+        tk.Frame(c, bg=BORDER, height=1).pack(fill="x", pady=(2, 6))
+        self.livemic_var = tk.BooleanVar(value=False)
+        self._check(c, "Live Mic — speak as the avatar (voice changer)",
+                    self.livemic_var, self._on_live_mic).pack(fill="x", pady=2)
+        try:
+            from voice_changer_engine import list_input_devices
+            _mics = [f"{i}: {n}" for i, n in list_input_devices()]
+        except Exception:
+            _mics = []
+        tk.Label(c, text="Mic input", bg=SURFACE, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(anchor="w")
+        self.micdev_var = tk.StringVar(value=(_mics[0] if _mics else "default"))
+        ttk.Combobox(c, textvariable=self.micdev_var,
+                     values=(_mics or ["default"]), state="readonly",
+                     style="Studio.TCombobox").pack(fill="x", pady=(3, 6))
+        self.micdev_var.trace_add("write", self._on_micdev)
+        tk.Label(c, text="Voice changer", bg=SURFACE, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(anchor="w")
+        # label -> converter key (see voice_changer_engine.make_converter)
+        self.VC_MODES = [("Persona voice (RVC)", "rvc"),
+                         ("Pitch / formant (DSP)", "dsp"),
+                         ("Passthrough (no change)", "passthrough")]
+        self.vcmode_var = tk.StringVar(value=self.VC_MODES[0][0])
+        ttk.Combobox(c, textvariable=self.vcmode_var,
+                     values=[m[0] for m in self.VC_MODES], state="readonly",
+                     style="Studio.TCombobox").pack(fill="x", pady=(3, 9))
+        self.vcmode_var.trace_add("write", self._on_vcmode)
+        # Mic boost: quiet mics (e.g. the webcam mic) need a software gain so
+        # normal speech clears the gate and the monitor is audible. ~5x suits the
+        # Logi C270 webcam mic; a close headset mic wants ~1x.
+        tk.Label(c, text="Mic boost", bg=SURFACE, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(anchor="w")
+        self.micgain_var = tk.DoubleVar(value=float(os.environ.get("AVATAR_MIC_GAIN", "5.0")))
+        tk.Scale(c, from_=1.0, to=12.0, resolution=0.5, orient="horizontal",
+                 variable=self.micgain_var, command=self._on_micgain,
+                 bg=SURFACE, fg=FG, troughcolor=SURFACE2, highlightthickness=0,
+                 bd=0, font=("Segoe UI", 8)).pack(fill="x", pady=(0, 9))
 
         tk.Label(c, text="Insert emotion tag  (Maya1 performs these)", bg=SURFACE,
                  fg=FAINT, font=("Segoe UI", 8)).pack(anchor="w")
@@ -1081,6 +1313,84 @@ class AvatarStudio:
             self._chip(c, t[:34] + ("…" if len(t) > 34 else ""),
                        lambda x=t: self._speak_text(x), full=True).pack(fill="x", pady=2)
 
+        # ---- YOUTUBE SPEAK -------------------------------------------------
+        c = self._card(right, "YOUTUBE SPEAK")
+        tk.Label(c, text="Paste a YouTube link. The avatar reads captions in our voice.",
+                 bg=SURFACE, fg=FAINT, font=("Segoe UI", 8),
+                 wraplength=300, justify="left").pack(anchor="w", pady=(0, 4))
+        self.youtube_entry = tk.Text(c, height=2, bg=SURFACE2, fg=FG,
+                                     insertbackground=AMBER, font=("Segoe UI", 10),
+                                     relief="flat", wrap="word", padx=9, pady=7,
+                                     highlightthickness=1,
+                                     highlightbackground=BORDER,
+                                     highlightcolor=AMBER)
+        self.youtube_entry.pack(fill="x", pady=(0, 7))
+        self.youtube_entry.bind("<Return>", self._on_youtube_enter)
+        self.youtube_persona_var = tk.StringVar(value=YOUTUBE_PERSONA_LABELS[0])
+        persona_combo = ttk.Combobox(
+            c, textvariable=self.youtube_persona_var,
+            values=YOUTUBE_PERSONA_LABELS, state="readonly",
+            style="Studio.TCombobox",
+        )
+        persona_combo.pack(fill="x", pady=(0, 7))
+        persona_combo.bind("<<ComboboxSelected>>", self._on_youtube_persona_change)
+        range_row = tk.Frame(c, bg=SURFACE); range_row.pack(fill="x", pady=(0, 7))
+        tk.Label(range_row, text="FROM", bg=SURFACE, fg=FAINT,
+                 font=("Consolas", 8, "bold")).pack(side="left")
+        self.youtube_from_var = tk.StringVar(value="")
+        tk.Entry(range_row, textvariable=self.youtube_from_var, width=8,
+                 bg=SURFACE2, fg=FG, insertbackground=AMBER, relief="flat",
+                 font=("Consolas", 9)).pack(side="left", padx=(5, 10), ipady=3)
+        tk.Label(range_row, text="TO", bg=SURFACE, fg=FAINT,
+                 font=("Consolas", 8, "bold")).pack(side="left")
+        self.youtube_to_var = tk.StringVar(value="")
+        tk.Entry(range_row, textvariable=self.youtube_to_var, width=8,
+                 bg=SURFACE2, fg=FG, insertbackground=AMBER, relief="flat",
+                 font=("Consolas", 9)).pack(side="left", padx=(5, 8), ipady=3)
+        tk.Label(range_row, text="min or mm:ss", bg=SURFACE, fg=FAINT,
+                 font=("Consolas", 8)).pack(side="left")
+        self.youtube_btn = self._btn(
+            c, "SPEAK YOUTUBE", self.speak_youtube, bg=AMBER, fg=CYAN_INK,
+            hover=self._mix(AMBER, "#ffffff", 0.18), border=AMBER,
+            hover_border="#ffffff", font=("Consolas", 10, "bold"),
+            state="disabled")
+        self.youtube_btn.pack(fill="x", ipady=6)
+        self.youtube_audio_btn = self._btn(
+            c, "ALTER REAL YOUTUBE VOICE", self.speak_youtube_audio, bg=SURFACE2, fg=AMBER,
+            hover=self._mix(SURFACE2, AMBER, 0.2), border=AMBER,
+            hover_border="#ffffff", font=("Consolas", 10, "bold"),
+            state="disabled")
+        self.youtube_audio_btn.pack(fill="x", pady=(6, 0), ipady=6)
+        ymode = tk.Frame(c, bg=SURFACE); ymode.pack(fill="x", pady=(7, 0))
+        self.youtube_light = tk.Canvas(ymode, width=18, height=18, bg=SURFACE,
+                                       highlightthickness=0)
+        self.youtube_light_dot = self.youtube_light.create_oval(
+            4, 4, 14, 14, fill="#3a3f4a", outline="")
+        self.youtube_light.pack(side="left", padx=(0, 6))
+        self.youtube_status_lbl = tk.Label(
+            ymode, text="MARKET MODE", bg=SURFACE, fg=MUTED,
+            font=("Consolas", 9, "bold"))
+        self.youtube_status_lbl.pack(side="left")
+        self.youtube_time_lbl = tk.Label(
+            c, text="YOUTUBE TIME 00:00", bg=SURFACE, fg=FAINT,
+            font=("Consolas", 9))
+        self.youtube_time_lbl.pack(anchor="w", pady=(5, 0))
+        ybtns = tk.Frame(c, bg=SURFACE); ybtns.pack(fill="x", pady=(7, 0))
+        self.youtube_resume_btn = self._btn(
+            ybtns, "YOUTUBE", self.resume_youtube, bg=SURFACE2, fg=AMBER,
+            hover=self._mix(SURFACE2, AMBER, 0.2), border=AMBER,
+            hover_border="#ffffff", font=("Consolas", 9, "bold"),
+            state="disabled")
+        self.youtube_resume_btn.pack(side="left", fill="x", expand=True, ipady=5)
+        self.market_mode_btn = self._btn(
+            ybtns, "MARKET", self.resume_market, bg=SURFACE2, fg=MINT,
+            hover=self._mix(SURFACE2, MINT, 0.2), border=MINT,
+            hover_border="#ffffff", font=("Consolas", 9, "bold"),
+            state="disabled")
+        self.market_mode_btn.pack(side="left", fill="x", expand=True,
+                                  padx=(7, 0), ipady=5)
+        self._sync_youtube_buttons()
+
         # ---- ACTIVITY LOG --------------------------------------------------
         c = self._card(right, "ACTIVITY LOG")
         self.log = tk.Text(c, height=8, bg=SURFACE2, fg=MUTED, relief="flat",
@@ -1090,9 +1400,1213 @@ class AvatarStudio:
         self.log.pack(fill="both", expand=True)
 
     # -------------------------------------------------------------------------
+    # POLISHED DASHBOARD UI (overrides the older cockpit layout above)
+    # -------------------------------------------------------------------------
+    def _dash_panel(self, parent, title, accent=CYAN, *, fill="both", expand=False,
+                    padx=0, pady=0):
+        outer = tk.Frame(parent, bg=BG)
+        outer.pack(fill=fill, expand=expand, padx=padx, pady=pady)
+        cv = tk.Canvas(outer, bg=BG, height=80, highlightthickness=0, bd=0)
+        cv.pack(fill="both", expand=True)
+        body = tk.Frame(cv, bg=SURFACE)
+        win = cv.create_window(14, 44, anchor="nw", window=body)
+        body._dash_outer = outer
+        body._dash_canvas = cv
+        icon_map = {
+            "Comment Reader": ICONS["comments"], "Live Preview": ICONS["preview"],
+            "AI Voice": ICONS["voice"], "Face Swap": ICONS["face"],
+            "Lip Sync": ICONS["mic"], "Stream Output": ICONS["link"],
+            "Session & Performance": ICONS["cpu"], "Realism": ICONS["face"],
+            "Scene & Output": ICONS["scenes"], "Ask The Avatar": ICONS["comments"],
+            "Speak": ICONS["voice"], "YouTube Speak": ICONS["play"],
+            "Activity Log": ICONS["analytics"],
+        }
+
+        def redraw(_=None):
+            w, h = cv.winfo_width(), cv.winfo_height()
+            if w <= 2 or h <= 2:
+                return
+            if not expand:
+                body.update_idletasks()
+                want_h = max(80, body.winfo_reqheight() + 56)
+                if abs(want_h - h) > 2:
+                    cv.configure(height=want_h)
+                    h = want_h
+            cv.delete("panel")
+            # One-pixel drop shadow and neutral shell. Accent is reserved for a
+            # short top rail and the module icon, matching the MotionSites style.
+            self._round_rect(
+                cv, 2, 3, w - 1, h - 1, 8, fill="#020305",
+                outline="", tags="panel")
+            self._round_rect(
+                cv, 1, 1, w - 2, h - 3, 8, fill=SURFACE,
+                outline=BORDER, width=1, tags="panel")
+            cv.create_rectangle(
+                2, 2, w - 3, 37, fill="#0e1219", outline="", tags="panel")
+            cv.create_rectangle(
+                14, 1, min(w - 18, 76), 2, fill=accent,
+                outline="", tags="panel")
+            cv.create_line(
+                14, 38, w - 14, 38, fill="#171c26", width=1, tags="panel")
+            self._round_rect(
+                cv, 13, 10, 31, 28, 5,
+                fill=self._mix(SURFACE2, accent, 0.12),
+                outline=self._mix(BORDER, accent, 0.28), width=1, tags="panel")
+            cv.create_text(
+                22, 19, text=icon_map.get(title, ICONS["settings"]),
+                fill=accent, font=("Segoe MDL2 Assets", 9), tags="panel")
+            cv.create_text(
+                39, 19, text=title, anchor="w", fill=FG,
+                font=("Segoe UI", 9, "bold"), tags="panel")
+            cv.create_oval(
+                w - 23, 16, w - 17, 22,
+                fill=self._mix(SURFACE, accent, 0.65), outline="", tags="panel")
+            cv.itemconfigure(win, width=max(40, w - 28), height=max(20, h - 56))
+            cv.tag_lower("panel")
+
+        cv.bind("<Configure>", redraw)
+        body.bind("<Configure>", redraw)
+        return body
+
+    def _metric_tile(self, parent, label, value, change="", accent=CYAN):
+        if not hasattr(self, "_metric_value_labels"):
+            self._metric_value_labels = {}
+            self._metric_change_labels = {}
+            self._metric_tiles = {}
+            self._metric_sparks = {}
+            self._metric_accents = {}
+            self._metric_targets = {}
+            self._metric_anim_tokens = {}
+        metric_icons = {
+            "Viewers": ICONS["viewers"], "Likes": ICONS["heart"],
+            "Comments / min": ICONS["comments"], "CPU": ICONS["cpu"],
+            "GPU": ICONS["gpu"], "VRAM": ICONS["ram"], "Uptime": ICONS["clock"],
+        }
+        f = tk.Frame(
+            parent, bg="#090c11", highlightthickness=1,
+            highlightbackground="#151a23")
+        header = tk.Frame(f, bg="#090c11"); header.pack(fill="x", padx=10, pady=(8, 0))
+        tk.Label(header, text=metric_icons.get(label, ICONS["analytics"]),
+                 bg="#090c11", fg=accent, font=("Segoe MDL2 Assets", 9)).pack(side="left")
+        tk.Label(header, text=label, bg="#090c11", fg=MUTED,
+                 font=("Segoe UI", 8)).pack(side="left", padx=(5, 0))
+        row = tk.Frame(f, bg="#090c11"); row.pack(fill="x", padx=10)
+        value_lbl = tk.Label(row, text=value, bg="#090c11", fg=FG, font=("Segoe UI", 13, "bold"))
+        value_lbl.pack(side="left")
+        self._metric_value_labels[label] = value_lbl
+        change_lbl = tk.Label(
+            row, text=change, bg="#090c11", fg=accent,
+            font=("Segoe UI", 8, "bold"))
+        change_lbl.pack(side="left", padx=(8, 0))
+        self._metric_change_labels[label] = change_lbl
+        mini = tk.Canvas(f, height=18, bg="#090c11", highlightthickness=0)
+        mini.pack(fill="x", padx=10, pady=(3, 7))
+        pts = [(0, 15), (12, 11), (24, 14), (36, 7), (48, 12), (60, 5), (72, 9),
+               (84, 3), (96, 8), (108, 4), (120, 10)]
+        spark_items = []
+        for i in range(len(pts) - 1):
+            spark_items.append(mini.create_line(
+                *pts[i], *pts[i + 1], fill=accent, width=1))
+        self._metric_tiles[label] = f
+        self._metric_sparks[label] = (mini, spark_items, pts)
+        self._metric_accents[label] = accent
+        self._metric_targets[label] = str(value)
+        return f
+
+    def _mini_row(self, parent, label, value, color=FG):
+        if not hasattr(self, "_row_value_labels"):
+            self._row_value_labels = {}
+        r = tk.Frame(parent, bg=SURFACE)
+        r.pack(fill="x", pady=3)
+        tk.Label(r, text=label, bg=SURFACE, fg=MUTED, font=("Segoe UI", 8)).pack(side="left")
+        value_lbl = tk.Label(r, text=value, bg=SURFACE, fg=color, font=("Segoe UI", 8, "bold"))
+        value_lbl.pack(side="right")
+        self._row_value_labels[label] = value_lbl
+        return r
+
+    def _range_row(self, parent, label, var, command=None, frm=0, to=100):
+        r = tk.Frame(parent, bg=SURFACE)
+        r.pack(fill="x", pady=4)
+        tk.Label(r, text=label, bg=SURFACE, fg=MUTED, font=("Segoe UI", 8)).pack(side="left")
+        ttk.Scale(r, from_=frm, to=to, variable=var, length=135,
+                  style="Studio.Horizontal.TScale", command=command).pack(side="right")
+        return r
+
+    def _thumb(self, parent, label, accent, live=False):
+        wrap = tk.Frame(parent, bg=SURFACE)
+        cv = tk.Canvas(wrap, width=72, height=72, bg=SURFACE2, highlightthickness=1,
+                       highlightbackground=self._mix(BORDER, accent, 0.35))
+        cv.pack()
+        cv.create_rectangle(0, 0, 72, 72, fill=self._mix(SURFACE2, accent, 0.12), outline="")
+        cv.create_oval(23, 12, 49, 38, fill=self._mix("#f1c7b7", accent, 0.08), outline="")
+        cv.create_arc(18, 20, 54, 64, start=20, extent=140, fill="#171018", outline="")
+        cv.create_oval(28, 25, 31, 28, fill="#151515", outline="")
+        cv.create_oval(41, 25, 44, 28, fill="#151515", outline="")
+        cv.create_line(32, 43, 42, 43, fill=MAG, width=2)
+        if live:
+            cv.create_oval(56, 56, 64, 64, fill=MINT, outline="")
+        tk.Label(wrap, text=label, bg=SURFACE, fg=MUTED, font=("Segoe UI", 8)).pack(pady=(4, 0))
+        return wrap
+
+    def _bind_mousewheel_tree(self, widget, callback):
+        widget.bind("<MouseWheel>", callback, add="+")
+        for child in widget.winfo_children():
+            self._bind_mousewheel_tree(child, callback)
+
+    def _flash_widget(self, widget, color=None):
+        color = color or CYAN
+        try:
+            old = widget.cget("highlightbackground")
+            widget.configure(highlightthickness=2, highlightbackground=color)
+            self.root.after(650, lambda: widget.configure(highlightthickness=1,
+                                                          highlightbackground=old))
+        except Exception:
+            pass
+
+    def _set_nav_active(self, label):
+        for name, parts in getattr(self, "_nav_items", {}).items():
+            active = name == label
+            bg = "#11151d" if active else "#07090d"
+            fg = MAG if active else FG
+            icon_fg = MAG if active else MUTED
+            for w in parts.get("widgets", ()):
+                try:
+                    w.configure(bg=bg)
+                except Exception:
+                    pass
+            try:
+                parts["icon"].configure(bg=bg, fg=icon_fg)
+                parts["label"].configure(bg=bg, fg=fg)
+                parts["rail"].configure(bg=MAG if active else bg)
+                parts["frame"].configure(highlightthickness=1 if active else 0,
+                                         highlightbackground=self._mix(MAG, BG, 0.35))
+            except Exception:
+                pass
+
+    def _scroll_right_to(self, target):
+        canvas = getattr(self, "_right_canvas", None)
+        frame = getattr(self, "_right_frame", None)
+        if canvas is None or frame is None or target is None:
+            return
+        self.root.update_idletasks()
+        outer = getattr(target, "_dash_outer", target)
+        total = canvas.bbox("all")
+        if not total:
+            return
+        y = max(0, outer.winfo_y() - 4)
+        span = max(1, total[3] - total[1])
+        canvas.yview_moveto(min(1.0, y / span))
+        self._flash_widget(outer, MAG)
+
+    def _nav_go(self, label):
+        self._set_nav_active(label)
+        targets = getattr(self, "_nav_targets", {})
+        if label == "Dashboard":
+            try:
+                self._right_canvas.yview_moveto(0)
+            except Exception:
+                pass
+            self._flash_widget(getattr(self, "preview_stage_wrap", self.root), CYAN)
+            return
+        if label == "Comments":
+            try:
+                self.handle_combo.focus_set()
+            except Exception:
+                pass
+            self._flash_widget(getattr(self, "_comments_outer", self.root), MAG)
+            return
+        target = targets.get(label)
+        if target is not None:
+            self._scroll_right_to(target)
+
+    def _resize_preview_stage(self, event=None):
+        wrap = getattr(self, "preview_stage_wrap", None)
+        stage = getattr(self, "preview_stage", None)
+        if wrap is None or stage is None:
+            return
+        w = max(1, wrap.winfo_width() - 20)
+        h = max(1, wrap.winfo_height() - 20)
+        target_ratio = PREVIEW_W / PREVIEW_H
+        if w / h > target_ratio:
+            ph = h
+            pw = int(ph * target_ratio)
+        else:
+            pw = w
+            ph = int(pw / target_ratio)
+        pw = max(320, pw)
+        ph = max(320, ph)
+        old_size = getattr(self, "_preview_draw_size", None)
+        self._preview_draw_size = (pw, ph)
+        stage.configure(width=pw, height=ph)
+        stage.place(relx=0.5, rely=0.5, anchor="center")
+        if getattr(self, "preview_overlay", None) is not None:
+            self.preview_overlay.place_configure(width=pw)
+        if old_size != (pw, ph) and not getattr(self, "running", False):
+            try:
+                self._show_placeholder()
+            except Exception:
+                pass
+
+    def _build_ui(self):
+        self.root.configure(bg=BG)
+
+        # Top app bar.
+        TBH = 54
+        topcv = tk.Canvas(self.root, bg=BG, height=TBH, highlightthickness=0, bd=0)
+        topcv.pack(side="top", fill="x")
+        self._topcv = topcv
+        self._sweep_y = TBH - 5
+        self._sweep = topcv.create_oval(0, 0, 0, 0, fill=CYAN, outline="")
+
+        def _topdraw(_=None):
+            w = topcv.winfo_width()
+            if w <= 1:
+                return
+            topcv.delete("tb")
+            topcv.create_rectangle(0, 0, w, TBH, fill="#07080b", outline="", tags="tb")
+            topcv.create_line(0, 0, w, 0, fill="#242936", width=1, tags="tb")
+            topcv.create_oval(17, 14, 43, 40, fill="#0d1016",
+                              outline=self._mix(BORDER, CYAN, 0.48), width=1, tags="tb")
+            topcv.create_text(29, 27, text="♪", fill=CYAN,
+                              font=("Segoe UI", 19, "bold"), tags="tb")
+            topcv.create_text(33, 27, text="♪", fill=MAG,
+                              font=("Segoe UI", 17, "bold"), tags="tb")
+            topcv.create_text(31, 26, text="♪", fill="#ffffff",
+                              font=("Segoe UI", 16, "bold"), tags="tb")
+            topcv.create_text(50, 20, text="TikTok Live Bot", anchor="w", fill=FG,
+                              font=("Segoe UI", 13, "bold"), tags="tb")
+            topcv.create_text(50, 36, text="local build", anchor="w", fill=MUTED,
+                              font=("Segoe UI", 7), tags="tb")
+            live_color = RED if self.running else self._mix(SURFACE2, RED, 0.22)
+            live_text = "LIVE" if self.running else "IDLE"
+            timer = self._format_duration(self._uptime_seconds())
+            chat_on = bool(getattr(self, "tiktok", None) is not None)
+            chat_live = bool(getattr(self, "_handle_live", False))
+            chat_text = "Chat Connected" if chat_on else ("TikTok Live" if chat_live else "Chat Offline")
+            chat_dot = MINT if chat_on else (AMBER if chat_live else FAINT)
+            self._round_rect(topcv, 190, 16, 236, 38, 6, fill=live_color, outline="", tags="tb")
+            topcv.create_text(213, 27, text=live_text, fill="#ffffff",
+                              font=("Segoe UI", 9, "bold"), tags="tb")
+            topcv.create_text(248, 27, text=timer, anchor="w", fill=FG,
+                              font=("Consolas", 10), tags="tb")
+            self._round_rect(topcv, 314, 14, 426, 40, 6, fill=SURFACE, outline=BORDER, tags="tb")
+            topcv.create_oval(324, 23, 332, 31, fill=chat_dot, outline="", tags="tb")
+            topcv.create_text(340, 23, text=("Connected" if chat_on else "Waiting"),
+                              anchor="w", fill=FG,
+                              font=("Segoe UI", 8), tags="tb")
+            topcv.create_text(340, 34, text=chat_text, anchor="w", fill=MUTED,
+                              font=("Segoe UI", 7), tags="tb")
+            ready = self._ready_speech_snapshot()
+            ready_x1 = 442
+            ready_x2 = min(w - 244, 650)
+            if ready_x2 > ready_x1 + 80:
+                status = ready.get("status") if ready else None
+                is_ready = status == "ready"
+                is_preparing = status == "preparing"
+                kind = ready.get("kind") if ready else None
+                pulse = 0.5 + 0.5 * math.sin(
+                    time.monotonic() * (9.0 if is_ready else 5.5))
+                if is_ready:
+                    action = "SPEAK THANKS" if kind == "urgent" else "SPEAK COMMENT"
+                    ready_text = f"READY  •  {action}"
+                    ready_fill = self._mix("#075f36", "#72ff67", pulse)
+                    ready_outline = self._mix(MINT, "#ffffff", pulse * 0.9)
+                    ready_fg = "#041009" if pulse > 0.42 else "#ffffff"
+                elif is_preparing:
+                    ready_text = "PREPARING VOICE"
+                    ready_fill = self._mix("#472400", "#ff8a00", pulse)
+                    ready_outline = self._mix(AMBER, "#fff36b", pulse)
+                    ready_fg = "#fffdf2"
+                else:
+                    ready_text = "NOTHING READY"
+                    ready_fill, ready_outline, ready_fg = SURFACE, BORDER, MUTED
+                if is_ready or is_preparing:
+                    halo = MINT if is_ready else AMBER
+                    self._round_rect(
+                        topcv, ready_x1 - 3, 11, ready_x2 + 3, 43, 8,
+                        fill="", outline=self._mix(BG, halo, 0.35 + pulse * 0.6),
+                        width=2, tags="tb")
+                self._round_rect(topcv, ready_x1, 14, ready_x2, 40, 6,
+                                 fill=ready_fill, outline=ready_outline,
+                                 width=2 if is_ready or is_preparing else 1,
+                                 tags="tb")
+                topcv.create_oval(ready_x1 + 10, 23, ready_x1 + 18, 31,
+                                  fill=(
+                                      self._mix(MINT, "#ffffff", pulse)
+                                      if is_ready else
+                                      self._mix(AMBER, "#fff36b", pulse)
+                                      if is_preparing else FAINT),
+                                  outline="", tags="tb")
+                topcv.create_text((ready_x1 + ready_x2) // 2 + 6, 27, text=ready_text,
+                                  fill=ready_fg,
+                                  font=("Segoe UI", 9 if is_ready else 8, "bold"),
+                                  tags="tb")
+                self._tb_buttons["ready_speech"] = (ready_x1, 14, ready_x2, 40)
+            ready_hits = []
+            split_x1 = 442
+            split_x2 = min(w - 244, 930)
+
+            def _draw_ready_lane(slot, label, x1, x2):
+                item = self._ready_speech_snapshot(slot)
+                status = item.get("status") if item else None
+                is_ready = status == "ready"
+                is_preparing = status == "preparing"
+                pulse = 0.5 + 0.5 * math.sin(
+                    time.monotonic() * (9.0 if is_ready else 5.5))
+                skip_w = 46
+                speak_x2 = max(x1 + 58, x2 - skip_w - 4)
+                if is_ready:
+                    text = f"{label} READY"
+                    fill = self._mix("#075f36", "#72ff67", pulse)
+                    outline = self._mix(MINT, "#ffffff", pulse * 0.9)
+                    fg = "#041009" if pulse > 0.42 else "#ffffff"
+                    dot = self._mix(MINT, "#ffffff", pulse)
+                    width = 2
+                elif is_preparing:
+                    text = f"{label} PREP"
+                    fill = self._mix("#472400", "#ff8a00", pulse)
+                    outline = self._mix(AMBER, "#fff36b", pulse)
+                    fg = "#fffdf2"
+                    dot = self._mix(AMBER, "#fff36b", pulse)
+                    width = 2
+                else:
+                    text = f"{label} WAIT"
+                    fill, outline, fg, dot, width = SURFACE, BORDER, MUTED, FAINT, 1
+                self._round_rect(topcv, x1 - 2, 12, x2 + 2, 42, 8,
+                                 fill="#07080b", outline="", tags="tb")
+                if is_ready or is_preparing:
+                    halo = MINT if is_ready else AMBER
+                    self._round_rect(
+                        topcv, x1 - 3, 11, x2 + 3, 43, 8,
+                        fill="", outline=self._mix(BG, halo, 0.35 + pulse * 0.6),
+                        width=2, tags="tb")
+                self._round_rect(topcv, x1, 14, speak_x2, 40, 6,
+                                 fill=fill, outline=outline, width=width, tags="tb")
+                topcv.create_oval(x1 + 8, 23, x1 + 16, 31,
+                                  fill=dot, outline="", tags="tb")
+                topcv.create_text((x1 + speak_x2) // 2 + 6, 27, text=text,
+                                  fill=fg, font=("Segoe UI", 8, "bold"),
+                                  tags="tb")
+                skip_fill = self._mix(SURFACE2, RED, 0.26 if item else 0.08)
+                self._round_rect(topcv, speak_x2 + 4, 14, x2, 40, 6,
+                                 fill=skip_fill, outline=RED if item else BORDER,
+                                 width=1, tags="tb")
+                topcv.create_text((speak_x2 + 4 + x2) // 2, 27, text="SKIP",
+                                  fill=RED if item else FAINT,
+                                  font=("Segoe UI", 7, "bold"), tags="tb")
+                key = "comment" if slot == "comment" else "thanks"
+                ready_hits.append((f"ready_{key}_speak", (x1, 14, speak_x2, 40)))
+                ready_hits.append((f"ready_{key}_skip", (speak_x2 + 4, 14, x2, 40)))
+
+            if split_x2 > split_x1 + 190:
+                split_gap = 8
+                lane_w = (split_x2 - split_x1 - split_gap) // 2
+                _draw_ready_lane("urgent", "THANKS", split_x1, split_x1 + lane_w)
+                _draw_ready_lane(
+                    "comment", "COMMENT", split_x1 + lane_w + split_gap,
+                    split_x1 + lane_w + split_gap + lane_w)
+            self._round_rect(topcv, w - 226, 14, w - 116, 40, 6, fill=SURFACE, outline=BORDER, tags="tb")
+            topcv.create_text(w - 210, 27, text="Default Profile", anchor="w", fill=FG,
+                              font=("Segoe UI", 8), tags="tb")
+            topcv.create_text(w - 133, 27, text="v", anchor="w", fill=MUTED,
+                              font=("Segoe UI", 8), tags="tb")
+            bw, bh, gap = 31, 24, 8
+            ex_x = w - 12 - bw
+            mn_x = ex_x - gap - bw
+            by = 15
+            self._tb_buttons = {"min": (mn_x, by, mn_x + bw, by + bh),
+                                "exit": (ex_x, by, ex_x + bw, by + bh)}
+            if ready_x2 > ready_x1 + 80 and not ready_hits:
+                self._tb_buttons["ready_speech"] = (ready_x1, 14, ready_x2, 40)
+            for name, bounds in ready_hits:
+                self._tb_buttons[name] = bounds
+            self._draw_winbtn(topcv, "min", mn_x, by, bw, bh)
+            self._draw_winbtn(topcv, "exit", ex_x, by, bw, bh)
+            topcv.create_line(0, TBH - 1, w, TBH - 1, fill=BORDER, tags="tb")
+            topcv.tag_raise(self._sweep)
+
+        self._topdraw = _topdraw
+        topcv.bind("<Configure>", _topdraw)
+        topcv.bind("<Motion>", self._tb_motion)
+        topcv.bind("<Button-1>", self._tb_press)
+        topcv.bind("<B1-Motion>", self._tb_drag)
+        topcv.bind("<ButtonRelease-1>", self._tb_release)
+
+        # Main shell.
+        shell = tk.Frame(self.root, bg=BG)
+        shell.pack(fill="both", expand=True)
+
+        sidebar = tk.Frame(shell, bg="#07090d", width=178)
+        sidebar.pack(side="left", fill="y")
+        sidebar.pack_propagate(False)
+        nav = [(ICONS["dashboard"], "Dashboard"), (ICONS["live"], "Live Control"),
+               (ICONS["comments"], "Comments"), (ICONS["voice"], "Voice"),
+               (ICONS["face"], "Face Swap"), (ICONS["lips"], "Lip Sync"),
+               (ICONS["scenes"], "Scenes"), (ICONS["analytics"], "Analytics"),
+               (ICONS["settings"], "Settings")]
+        self._nav_items = {}
+        for i, (ico, label) in enumerate(nav):
+            active = label == "Live Control"
+            r = tk.Frame(sidebar, bg="#11151d" if active else "#07090d",
+                         highlightthickness=1 if active else 0,
+                         highlightbackground=self._mix(MAG, BG, 0.35))
+            r.pack(fill="x", padx=10, pady=(14 if i == 0 else 4, 0), ipady=9)
+            r.configure(cursor="hand2")
+            rail = tk.Frame(r, bg=MAG if active else r["bg"], width=3)
+            rail.pack(side="left", fill="y")
+            icon_lbl = tk.Label(r, text=ico, bg=r["bg"], fg=MAG if active else MUTED,
+                                font=("Segoe MDL2 Assets", 13), width=4,
+                                cursor="hand2")
+            icon_lbl.pack(side="left", padx=(7, 2))
+            text_lbl = tk.Label(r, text=label, bg=r["bg"], fg=MAG if active else FG,
+                                font=("Segoe UI", 9), cursor="hand2")
+            text_lbl.pack(side="left")
+            self._nav_items[label] = {
+                "frame": r, "rail": rail, "icon": icon_lbl, "label": text_lbl,
+                "widgets": (r, rail, icon_lbl, text_lbl),
+            }
+            for w in (r, rail, icon_lbl, text_lbl):
+                w.bind("<Button-1>", lambda _e, name=label: self._nav_go(name))
+            if label == "Comments":
+                self.nav_comments_badge = tk.Label(r, text="0", bg=RED, fg="#ffffff",
+                                                   font=("Segoe UI", 7, "bold"),
+                                                   padx=5, pady=1, cursor="hand2")
+                self.nav_comments_badge.pack(side="right", padx=8)
+                self._nav_items[label]["widgets"] = (
+                    r, rail, icon_lbl, text_lbl, self.nav_comments_badge)
+                self.nav_comments_badge.bind(
+                    "<Button-1>", lambda _e, name=label: self._nav_go(name))
+        profile = tk.Frame(sidebar, bg="#0c1016",
+                           highlightthickness=1, highlightbackground=BORDER)
+        profile.pack(side="bottom", fill="x", padx=12, pady=12, ipady=8)
+        self._thumb(profile, "Profile", MINT, live=True).pack(side="left", padx=(8, 4))
+        tk.Label(profile, text=os.environ.get("USERNAME", "Local Profile"), bg="#0c1016", fg=FG,
+                 font=("Segoe UI", 8, "bold")).pack(anchor="w", pady=(14, 0))
+        tk.Label(profile, text="Local", bg="#111721", fg=CYAN,
+                 font=("Segoe UI", 7), padx=5).pack(anchor="w", pady=(3, 0))
+
+        main = tk.Frame(shell, bg=BG)
+        main.pack(side="left", fill="both", expand=True, padx=12, pady=10)
+
+        content = tk.Frame(main, bg=BG)
+        content.pack(fill="both", expand=True)
+
+        left_col = tk.Frame(content, bg=BG, width=250)
+        left_col.pack(side="left", fill="both", padx=(0, 10))
+        left_col.pack_propagate(False)
+
+        # Pack fixed rails before the expanding preview. Tk's packer allocates
+        # space in declaration order; packing center first can starve this rail.
+        right_col = tk.Frame(content, bg=BG, width=430)
+        right_col.pack(side="right", fill="both")
+        right_col.pack_propagate(False)
+
+        center_col = tk.Frame(content, bg=BG)
+        center_col.pack(side="left", fill="both", expand=True, padx=(0, 10))
+
+        right_canvas = tk.Canvas(right_col, bg=BG, highlightthickness=0, bd=0)
+        right_vsb = ttk.Scrollbar(right_col, orient="vertical",
+                                  command=right_canvas.yview,
+                                  style="Studio.Vertical.TScrollbar")
+        right_canvas.configure(yscrollcommand=right_vsb.set)
+        right_vsb.pack(side="right", fill="y")
+        right_canvas.pack(side="left", fill="both", expand=True)
+        right = tk.Frame(right_canvas, bg=BG)
+        right_win = right_canvas.create_window((0, 0), window=right, anchor="nw")
+        self._right_canvas = right_canvas
+        self._right_frame = right
+
+        def _sync_right_scroll(_=None):
+            right_canvas.configure(scrollregion=right_canvas.bbox("all"))
+            right_canvas.itemconfigure(right_win, width=right_canvas.winfo_width())
+        right.bind("<Configure>", _sync_right_scroll)
+        right_canvas.bind("<Configure>", _sync_right_scroll)
+
+        def _right_wheel(e):
+            right_canvas.yview_scroll(int(-(e.delta or 0) / 120), "units")
+            return "break"
+        right_canvas.bind("<Enter>", lambda e: right_canvas.bind_all("<MouseWheel>", _right_wheel))
+        right_canvas.bind("<Leave>", lambda e: right_canvas.unbind_all("<MouseWheel>"))
+        self._right_wheel = _right_wheel
+
+        # Comment Reader.
+        comments = self._dash_panel(left_col, "Comment Reader", MAG, expand=True)
+        self._comments_outer = getattr(comments, "_dash_outer", comments)
+        top = tk.Frame(comments, bg=SURFACE); top.pack(fill="x")
+        tk.Label(top, text="Auto-read", bg=SURFACE, fg=FG, font=("Segoe UI", 8)).pack(side="left")
+        self.comments_var = tk.BooleanVar(value=True)
+        self._check(top, "", self.comments_var, self._on_comments).pack(side="right")
+        self.handle_var = tk.StringVar(value=os.environ.get("AVATAR_TIKTOK_USER", ""))
+        self.handle_combo = ttk.Combobox(comments, textvariable=self.handle_var, width=18,
+                                         values=self._handles, style="Studio.TCombobox",
+                                         font=("Segoe UI", 8))
+        self.handle_combo.pack(fill="x", pady=(8, 6))
+        self.handle_combo.bind("<<ComboboxSelected>>", lambda e: self._on_handle_pick())
+        self.handle_var.trace_add("write", lambda *_: setattr(
+            self, "_handle_text", self.handle_var.get()))
+        lang = tk.Frame(comments, bg=SURFACE); lang.pack(fill="x", pady=(0, 7))
+        tk.Label(lang, text="Language", bg=SURFACE, fg=MUTED, font=("Segoe UI", 8)).pack(side="left")
+        ttk.Combobox(lang, values=["English (US)", "Arabic", "Auto"], state="readonly",
+                     width=13, style="Studio.TCombobox").pack(side="right")
+        self.feed_light = tk.Canvas(comments, width=1, height=1, bg=SURFACE, highlightthickness=0)
+        self._feed_dot = self.feed_light.create_oval(0, 0, 1, 1, fill="#3a3f4a", outline="")
+        self.feed_status = tk.Label(comments, text="no handle", bg=SURFACE, fg=MUTED,
+                                    font=("Segoe UI", 8))
+        self.feed_status.pack(anchor="w")
+        self._answer_bar = tk.Frame(comments, bg=self._mix(SURFACE, MAG, 0.16))
+        self._answer_bar.pack(fill="x", pady=(6, 5))
+        self.answering_lbl = tk.Label(self._answer_bar, text="idle - waiting for a question",
+                                      bg=self._answer_bar["bg"], fg=MUTED, font=("Segoe UI", 8),
+                                      anchor="w", justify="left", wraplength=210)
+        self.answering_lbl.pack(fill="x", padx=8, pady=5)
+        fb = tk.Frame(comments, bg=SURFACE); fb.pack(fill="both", expand=True)
+        fsb = tk.Scrollbar(fb); fsb.pack(side="right", fill="y")
+        self.feed = tk.Text(fb, height=11, bg="#090e17", fg=FG, relief="flat", bd=0,
+                            font=("Segoe UI", 8), wrap="word", padx=8, pady=6,
+                            state="disabled", yscrollcommand=fsb.set)
+        self.feed.pack(side="left", fill="both", expand=True)
+        fsb.config(command=self.feed.yview)
+        self.feed.tag_config("q", foreground=CYAN)
+        self.feed.tag_config("a", foreground=MINT)
+        self.feed.tag_config("ev", foreground=AMBER)
+        self.feed.tag_config("sys", foreground=MUTED)
+        self._feed_msg("enter your @handle and go live - real comments appear here.", "sys")
+        graph = tk.Canvas(comments, height=36, bg=SURFACE, highlightthickness=0)
+        graph.pack(fill="x", pady=(8, 0))
+        graph.create_text(2, 8, text="Comments / min", anchor="w", fill=MUTED, font=("Segoe UI", 7))
+        self.comments_min_item = graph.create_text(2, 27, text="0", anchor="w", fill=FG,
+                                                   font=("Segoe UI", 10, "bold"))
+        self.comments_graph = graph
+
+        # Live Preview.
+        preview_panel = self._dash_panel(center_col, "Live Preview", CYAN, expand=True)
+        controls = tk.Frame(preview_panel, bg=SURFACE); controls.pack(fill="x", pady=(0, 8))
+        self.status_canvas = tk.Canvas(controls, width=22, height=22, bg=SURFACE, highlightthickness=0)
+        self.status_canvas.pack(side="left")
+        self.status_glow = self.status_canvas.create_oval(3, 3, 19, 19, outline=SURFACE, width=2)
+        self.status_dot = self.status_canvas.create_oval(7, 7, 15, 15, fill=RED, outline="")
+        self.status_lbl = tk.Label(controls, text="OFFLINE", bg=SURFACE, fg=FG,
+                                   font=("Segoe UI", 9, "bold"))
+        self.status_lbl.pack(side="left", padx=(6, 12))
+        self.info_lbl = tk.Label(controls, text="benchmarking GPU...", bg=SURFACE, fg=AMBER,
+                                 font=("Segoe UI", 8))
+        self.info_lbl.pack(side="left")
+        self.bench_bar = ttk.Progressbar(controls, mode="indeterminate", length=95)
+        self.bench_bar.pack(side="left", padx=(8, 0))
+        self.bench_bar.start(14)
+        self.fps_lbl = tk.Label(controls, text="", bg=SURFACE, fg=CYAN,
+                                font=("Consolas", 9))
+        self.fps_lbl.pack(side="right")
+        tk.Label(controls, text=f"{FRAME_SIZE}x{FRAME_SIZE}", bg=SURFACE2, fg=MUTED,
+                 font=("Segoe UI", 8), padx=10, pady=3,
+                 highlightthickness=1, highlightbackground=BORDER).pack(side="right", padx=(0, 8))
+        tk.Label(controls, text="Source (1:1)", bg=SURFACE2, fg=MUTED,
+                 font=("Segoe UI", 8), padx=10, pady=3,
+                 highlightthickness=1, highlightbackground=BORDER).pack(side="right", padx=(0, 6))
+        self.live_light = tk.Canvas(controls, width=18, height=18, bg=SURFACE, highlightthickness=0)
+        self._live_glow = self.live_light.create_oval(1, 1, 17, 17, fill="", outline="")
+        self._live_dot = self.live_light.create_oval(5, 5, 13, 13, fill="#3a3f4a", outline="")
+        self.live_light.pack(side="right", padx=(0, 10))
+
+        stage_wrap = tk.Frame(
+            preview_panel, bg="#030406", highlightthickness=1,
+            highlightbackground="#202633")
+        stage_wrap.pack(fill="both", expand=True)
+        stage = tk.Frame(stage_wrap, bg="#000000", width=PREVIEW_W, height=PREVIEW_H)
+        stage.place(relx=0.5, rely=0.5, anchor="center")
+        stage.pack_propagate(False)
+        self.preview_stage = stage
+        self.preview_stage_wrap = stage_wrap
+        self._preview_draw_size = (PREVIEW_W, PREVIEW_H)
+        self.preview = tk.Label(stage, bg="#000000", bd=0)
+        self.preview.pack(fill="both", expand=True)
+        overlay = tk.Frame(stage_wrap, bg="#080b10")
+        overlay.place(relx=0.5, rely=0.98, anchor="s", width=PREVIEW_W, height=38)
+        self.preview_overlay = overlay
+        self.diag_lbl = tk.Label(overlay, text="// ready", bg="#080b10",
+                                 fg=self._mix(CYAN, BG, 0.25), font=("Consolas", 8),
+                                 anchor="w")
+        self.diag_lbl.pack(fill="both", padx=10)
+        stage_wrap.bind("<Configure>", self._resize_preview_stage)
+        self._show_placeholder()
+        self.root.after(1000, self._youtube_clock_tick)
+
+        # Quick Actions.
+        actions = tk.Frame(center_col, bg="#090c11", highlightthickness=1,
+                           highlightbackground="#202632")
+        actions.pack(fill="x", pady=(10, 0), ipady=8)
+        self.start_btn = self._btn(actions, f"{ICONS['play']}  Go Live", self.start, bg=MINT, fg=MINT_INK,
+                                   hover=self._mix(MINT, "#ffffff", 0.18), border=MINT,
+                                   font=("Segoe UI", 9, "bold"))
+        self.start_btn.pack(side="left", fill="x", expand=True, padx=(10, 5), ipady=6)
+        self.stop_btn = self._btn(actions, f"{ICONS['stop']}  Emergency Stop", self.stop,
+                                  bg=self._mix(SURFACE2, RED, 0.16), fg=RED,
+                                  hover=self._mix(SURFACE2, RED, 0.26), border=RED,
+                                  font=("Segoe UI", 9, "bold"), state="disabled")
+        self.stop_btn.pack(side="right", fill="x", expand=True, padx=(5, 10), ipady=6)
+        self.mouth_btn = tk.Button(actions, text=f"{ICONS['lips']}  Lip Sync", command=self._toggle_ai_mouth,
+                                   bg=SURFACE2, fg=MINT, relief="flat", bd=0,
+                                   font=("Segoe UI", 9, "bold"), cursor="hand2")
+        self.mouth_btn.pack(side="left", fill="x", expand=True, padx=5, ipady=6)
+        self.youtube_smooth_btn = tk.Button(
+            actions, text="Smooth Voice", command=self._toggle_youtube_smooth,
+            bg=self._mix(SURFACE2, MINT, 0.18), fg=MINT, relief="flat", bd=0,
+            font=("Segoe UI", 9, "bold"), cursor="hand2")
+        self.youtube_smooth_btn.pack(side="left", fill="x", expand=True, padx=5, ipady=6)
+        audio_mutes = tk.Frame(center_col, bg="#090c11", highlightthickness=1,
+                               highlightbackground="#202632")
+        audio_mutes.pack(fill="x", pady=(8, 0))
+        tk.Label(audio_mutes, text="AUDIO", bg=SURFACE, fg=MUTED,
+                 font=("Segoe UI", 7, "bold"), width=7).pack(
+                     side="left", fill="y", padx=(4, 2), pady=7)
+        audio_channels = tk.Frame(audio_mutes, bg=SURFACE)
+        audio_channels.pack(side="left", fill="x", expand=True, padx=(0, 5), pady=5)
+        for column in range(4):
+            audio_channels.grid_columnconfigure(column, weight=1, uniform="audio")
+        self.speech_btn = self._audio_source_control(
+            audio_channels, "ai", self._toggle_speech, column=0)
+        self.youtube_mute_btn = self._audio_source_control(
+            audio_channels, "youtube", self._toggle_youtube_mute, column=1)
+        self.music_btn = self._audio_source_control(
+            audio_channels, "music", self._toggle_music, column=2)
+        self.mic_mute_btn = self._audio_source_control(
+            audio_channels, "mic", self._toggle_mic_monitor_mute, column=3)
+        self._sync_audio_mute_buttons()
+        self._sync_youtube_smooth_button()
+
+        # Right control grid.
+        voice = self._dash_panel(right, "AI Voice", MAG, fill="x", pady=(0, 8))
+        _auto_tts = os.environ.get("AVATAR_TTS", "")
+        _def_label = next((lbl for lbl, key in VOICE_MODES if key == _auto_tts), VOICE_MODE_LABELS[0])
+        self.voicemode_var = tk.StringVar(value=_def_label)
+        ttk.Combobox(voice, textvariable=self.voicemode_var, values=VOICE_MODE_LABELS,
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(0, 6))
+        self.voicemode_var.trace_add("write", self._on_voice_mode)
+        self.voice_var = tk.StringVar(value=MALE_VOICES[0])
+        ttk.Combobox(voice, textvariable=self.voice_var, values=MALE_VOICES,
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(0, 6))
+        self.voice_var.trace_add("write", self._on_voice)
+        self.gaze_var = tk.BooleanVar(value=True)
+        self.gaze_var2 = tk.IntVar(value=55)
+        self._range_row(voice, "Speed", self.gaze_var2, lambda e: self._on_gaze())
+        self.skin_var = tk.IntVar(value=70)
+        self._range_row(voice, "Pitch", self.skin_var, lambda e: self._on_skin())
+        self.speak_btn = self._btn(voice, f"{ICONS['voice']}  Speak Test", self.speak,
+                                   bg=self._mix(SURFACE2, MAG, 0.22),
+                                   fg=FG, hover=self._mix(SURFACE2, MAG, 0.34),
+                                   border=self._mix(MAG, BG, 0.35), font=("Segoe UI", 8, "bold"),
+                                   state="disabled")
+        self.speak_btn.pack(fill="x", ipady=5, pady=(4, 0))
+
+        fs = self._dash_panel(right, "Face Swap", CYAN, fill="x", pady=(0, 8))
+        thumbs = tk.Frame(fs, bg=SURFACE); thumbs.pack(fill="x", pady=(0, 6))
+        self._thumb(thumbs, "Source Face", CYAN, live=True).pack(side="left")
+        self._thumb(thumbs, "Target Avatar", MAG).pack(side="right")
+        self.swap_var = tk.BooleanVar(value=True)
+        self.char_var = tk.StringVar(value="White Haddan")
+        ttk.Combobox(fs, textvariable=self.char_var,
+                     values=["White Haddan", "Haddan", "White man"], state="readonly",
+                     style="Studio.TCombobox").pack(fill="x", pady=(0, 5))
+        self.char_var.trace_add("write", self._on_character)
+        self.skintone_var = tk.IntVar(value=50)
+        self._range_row(fs, "Strength", self.skintone_var, lambda e: self._on_skintone())
+        brow = tk.Frame(fs, bg=SURFACE); brow.pack(fill="x", pady=(2, 0))
+        self.char_btn = self._btn(brow, f"{ICONS['play']}  Running", self._load_character,
+                                  bg=self._mix(SURFACE2, MINT, 0.15),
+                                  fg=MINT, hover=self._mix(SURFACE2, MINT, 0.25),
+                                  border=self._mix(MINT, BG, 0.4), font=("Segoe UI", 8, "bold"))
+        self.char_btn.pack(side="left", fill="x", expand=True, ipady=5)
+        self.recenter_btn = self._btn(brow, f"{ICONS['stop']}  Stop", self.recenter,
+                                      bg=self._mix(SURFACE2, RED, 0.15),
+                                      fg=RED, hover=self._mix(SURFACE2, RED, 0.25),
+                                      border=self._mix(RED, BG, 0.4), font=("Segoe UI", 8, "bold"),
+                                      state="disabled")
+        self.recenter_btn.pack(side="left", fill="x", expand=True, padx=(8, 0), ipady=5)
+
+        lip = self._dash_panel(right, "Lip Sync", MAG, fill="x", pady=(0, 8))
+        self.livemic_var = tk.BooleanVar(value=False)
+        try:
+            from voice_changer_engine import list_input_devices
+            _mics = [f"{i}: {n}" for i, n in list_input_devices()]
+        except Exception:
+            _mics = []
+        self.micdev_var = tk.StringVar(value=(_mics[0] if _mics else "default"))
+        ttk.Combobox(lip, textvariable=self.micdev_var, values=(_mics or ["default"]),
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(0, 7))
+        self.micdev_var.trace_add("write", self._on_micdev)
+        meter = tk.Canvas(lip, height=20, bg=SURFACE, highlightthickness=0)
+        meter.pack(fill="x")
+        for i in range(26):
+            col = MINT if i < 19 else AMBER if i < 23 else RED
+            meter.create_rectangle(4 + i * 8, 4, 9 + i * 8, 18, fill=col, outline="")
+        self.liplock_var = tk.BooleanVar(value=True)
+        self.ai_mouth_var.set(True)
+        self.micgain_var = tk.DoubleVar(value=float(os.environ.get("AVATAR_MIC_GAIN", "5.0")))
+        self._range_row(lip, "Sync intensity", self.micgain_var, self._on_micgain, frm=1.0, to=12.0)
+        self._mini_row(lip, "Latency", "120 ms", MINT)
+
+        out = self._dash_panel(right, "Stream Output", MINT, fill="x", pady=(0, 8))
+        self._mini_row(out, "TikTok", "Disconnected", MUTED)
+        self._mini_row(out, "OBS Virtual Camera", "Off", MUTED)
+        self._mini_row(out, "Resolution", f"{FRAME_SIZE}x{FRAME_SIZE} source")
+        self._mini_row(out, "FPS", "0 FPS")
+        self._mini_row(out, "Video Bitrate", "preview only")
+        self._mini_row(out, "Audio Bitrate", "TTS off")
+        self._mini_row(out, "Output", "idle", MUTED)
+
+        # Full operational controls from the previous studio layout.
+        self.quality_var = tk.StringVar(value="Delulu (recommended)")
+        self.interval_var = tk.IntVar(value=2)
+        self.stab_var = tk.IntVar(value=20)
+        self.minface_var = tk.IntVar(value=9)
+        self.pose_var = tk.StringVar(value="Safe (no melt)")
+        self.turncap_var = tk.IntVar(value=30)
+        self.tilt_var = tk.IntVar(value=10)
+        self.autotalk_var = tk.BooleanVar(value=True)
+        self.restore_var = tk.BooleanVar(value=True)
+        self.body_var = tk.BooleanVar(value=True)
+        self.music_var = tk.BooleanVar(value=True)
+        self.multiref_var = tk.BooleanVar(value=False)
+        self.hair_var = tk.StringVar(value="gray")
+        self.eye_var = tk.StringVar(value="gray")
+        from trading_backgrounds import BACKGROUND_PRESETS
+        self.background_on_var = tk.BooleanVar(value=True)
+        self.background_var = tk.StringVar(value="Wall Street LED / Midnight Blue")
+        self.chart_var = tk.BooleanVar(value=False)
+        self.trader_var = tk.BooleanVar(value=False)
+        self.broadcast_var = tk.BooleanVar(value=True)
+        self.perf_var = tk.BooleanVar(value=True)
+        self.obs_var = tk.BooleanVar(value=False)
+        self.VC_MODES = [("Persona voice (RVC)", "rvc"),
+                         ("Pitch / formant (DSP)", "dsp"),
+                         ("Passthrough (no change)", "passthrough")]
+        self.vcmode_var = tk.StringVar(value=self.VC_MODES[0][0])
+        self._sync_audio_mute_buttons()
+
+        session = self._dash_panel(right, "Session & Performance", CYAN, fill="x", pady=(0, 8))
+        self._mini_row(session, "Quality preset", "")
+        ttk.Combobox(session, textvariable=self.quality_var, values=QUALITY_LABELS,
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(0, 5))
+        self.quality_var.trace_add("write", self._on_quality)
+        self._mini_row(session, "Head update", "")
+        ttk.Spinbox(session, from_=1, to=4, width=5, textvariable=self.interval_var,
+                    command=self._on_interval, style="Studio.TSpinbox").pack(fill="x", pady=(0, 5))
+        self._range_row(session, "Stabilization", self.stab_var, lambda e: self._on_stab())
+        self._mini_row(session, "Min face size", "")
+        ttk.Spinbox(session, from_=6, to=40, increment=2, width=5,
+                    textvariable=self.minface_var, command=self._on_minface,
+                    style="Studio.TSpinbox").pack(fill="x", pady=(0, 5))
+        ttk.Combobox(session, textvariable=self.pose_var, values=POSE_LABELS,
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(0, 5))
+        self.pose_var.trace_add("write", self._on_pose)
+        pose_row = tk.Frame(session, bg=SURFACE); pose_row.pack(fill="x")
+        ttk.Spinbox(pose_row, from_=20, to=90, increment=5, width=8,
+                    textvariable=self.turncap_var, command=self._on_turncap,
+                    style="Studio.TSpinbox").pack(side="left", fill="x", expand=True)
+        ttk.Spinbox(pose_row, from_=8, to=30, increment=1, width=8,
+                    textvariable=self.tilt_var, command=self._on_tilt,
+                    style="Studio.TSpinbox").pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        real = self._dash_panel(right, "Realism", MAG, fill="x", pady=(0, 8))
+        self._check(real, "Auto-talk AI host", self.autotalk_var, self._on_autotalk).pack(fill="x", pady=2)
+        self._check(real, "Face restoration GFPGAN", self.restore_var).pack(fill="x", pady=2)
+        self._check(real, "Live body motion", self.body_var).pack(fill="x", pady=2)
+        self._check(real, "Background music", self.music_var, self._on_music).pack(fill="x", pady=2)
+        self._check(real, "Extended turning", self.multiref_var, self._on_multiref).pack(fill="x", pady=2)
+        self._check(real, "Face-swap mode", self.swap_var, self._on_swap).pack(fill="x", pady=2)
+        self._check(real, "Voice-driven mouth", self.liplock_var, self._on_liplock).pack(fill="x", pady=2)
+        self._range_row(real, "Skin detail", self.skin_var, lambda e: self._on_skin())
+        self._range_row(real, "Skin tone", self.skintone_var, lambda e: self._on_skintone())
+        ttk.Combobox(real, textvariable=self.hair_var,
+                     values=["brown", "black", "blonde", "gray", "none"],
+                     state="readonly", style="Studio.TCombobox").pack(fill="x", pady=(5, 4))
+        self.hair_var.trace_add("write", self._on_hair)
+        ttk.Combobox(real, textvariable=self.eye_var,
+                     values=["off", "blue", "green", "hazel", "brown", "amber", "gray"],
+                     state="readonly", style="Studio.TCombobox").pack(fill="x")
+        self.eye_var.trace_add("write", self._on_eye)
+
+        scene = self._dash_panel(right, "Scene & Output", MINT, fill="x", pady=(0, 8))
+        self._check(scene, "Trading background", self.background_on_var,
+                    self._on_background_toggle).pack(fill="x", pady=2)
+        self.background_combo = ttk.Combobox(scene, textvariable=self.background_var,
+                                             values=BACKGROUND_PRESETS, state="readonly",
+                                             style="Studio.TCombobox")
+        self.background_combo.pack(fill="x", pady=(2, 6))
+        self.background_var.trace_add("write", self._on_background)
+        self._check(scene, "Show live charts when face is lost", self.chart_var).pack(fill="x", pady=2)
+        self._check(scene, "Trader scene chart + avatar PiP", self.trader_var).pack(fill="x", pady=2)
+        self._check(scene, "Broadcast framing", self.broadcast_var).pack(fill="x", pady=2)
+        self._check(scene, "Show CPU/GPU monitor", self.perf_var).pack(fill="x", pady=2)
+        self._check(scene, "Send to OBS virtual camera", self.obs_var).pack(fill="x", pady=2)
+        ttk.Combobox(scene, textvariable=self.vcmode_var,
+                     values=[m[0] for m in self.VC_MODES], state="readonly",
+                     style="Studio.TCombobox").pack(fill="x", pady=(6, 0))
+        self.vcmode_var.trace_add("write", self._on_vcmode)
+
+        ask_panel = self._dash_panel(right, "Ask The Avatar", MAG, fill="x", pady=(0, 8))
+        self.ask_entry = tk.Text(ask_panel, height=2, bg=SURFACE2, fg=FG,
+                                 insertbackground=MAG, font=("Segoe UI", 10),
+                                 relief="flat", wrap="word", padx=8, pady=6,
+                                 highlightthickness=1, highlightbackground=BORDER,
+                                 highlightcolor=MAG)
+        self.ask_entry.pack(fill="x", pady=(0, 6))
+        self.ask_entry.bind("<Return>", self._on_ask_enter)
+        self.ask_btn = self._btn(ask_panel, f"{ICONS['comments']}  Ask Avatar", self.ask,
+                                 bg=MAG, fg=CYAN_INK,
+                                 hover=MAG_HI, border=MAG, font=("Segoe UI", 9, "bold"),
+                                 state="disabled")
+        self.ask_btn.pack(fill="x", ipady=5)
+
+        speak_panel = self._dash_panel(right, "Speak", CYAN, fill="x", pady=(0, 8))
+        self.entry = tk.Text(speak_panel, height=3, bg=SURFACE2, fg=FG,
+                             insertbackground=CYAN, font=("Segoe UI", 10),
+                             relief="flat", wrap="word", padx=8, pady=6,
+                             highlightthickness=1, highlightbackground=BORDER,
+                             highlightcolor=CYAN)
+        self.entry.pack(fill="x", pady=(0, 6))
+        self.entry.bind("<Return>", self._on_enter)
+        speak_row = tk.Frame(speak_panel, bg=SURFACE); speak_row.pack(fill="x")
+        self.speak_btn = self._btn(speak_row, f"{ICONS['voice']}  Speak", self.speak,
+                                   bg=CYAN, fg=CYAN_INK,
+                                   hover=CYAN_HI, border=CYAN, font=("Segoe UI", 9, "bold"),
+                                   state="disabled")
+        self.speak_btn.pack(side="left", fill="x", expand=True, ipady=5)
+        self.mute_btn = tk.Button(speak_row, text=f"{ICONS['mute']}  Mute", command=self.toggle_mute,
+                                  bg=SURFACE2, fg=MUTED, font=("Segoe UI", 9, "bold"),
+                                  relief="flat", bd=0, cursor="hand2", state="disabled",
+                                  activebackground=self._mix(SURFACE2, RED, 0.16),
+                                  highlightthickness=1,
+                                  highlightbackground=self._mix(MUTED, BG, 0.45))
+        self.mute_btn.pack(side="left", fill="x", expand=True, padx=(8, 0), ipady=5)
+        for t in QUICK_PHRASES:
+            self._chip(speak_panel, t[:42] + ("..." if len(t) > 42 else ""),
+                       lambda x=t: self._speak_text(x), full=True).pack(fill="x", pady=(6, 0))
+
+        youtube_panel = self._dash_panel(right, "YouTube Speak", AMBER, fill="x", pady=(0, 8))
+        self.youtube_entry = tk.Text(youtube_panel, height=2, bg=SURFACE2, fg=FG,
+                                     insertbackground=AMBER, font=("Segoe UI", 10),
+                                     relief="flat", wrap="word", padx=8, pady=6,
+                                     highlightthickness=1, highlightbackground=BORDER,
+                                     highlightcolor=AMBER)
+        self.youtube_entry.pack(fill="x", pady=(0, 6))
+        self.youtube_entry.bind("<Return>", self._on_youtube_enter)
+        self.youtube_persona_var = tk.StringVar(value=YOUTUBE_PERSONA_LABELS[0])
+        persona_combo = ttk.Combobox(
+            youtube_panel, textvariable=self.youtube_persona_var,
+            values=YOUTUBE_PERSONA_LABELS, state="readonly",
+            style="Studio.TCombobox",
+        )
+        persona_combo.pack(fill="x", pady=(0, 6))
+        persona_combo.bind("<<ComboboxSelected>>", self._on_youtube_persona_change)
+        yr = tk.Frame(youtube_panel, bg=SURFACE); yr.pack(fill="x", pady=(0, 6))
+        self.youtube_from_var = tk.StringVar(value="")
+        self.youtube_to_var = tk.StringVar(value="")
+        tk.Entry(yr, textvariable=self.youtube_from_var, width=8, bg=SURFACE2,
+                 fg=FG, insertbackground=AMBER, relief="flat").pack(side="left", fill="x", expand=True)
+        tk.Entry(yr, textvariable=self.youtube_to_var, width=8, bg=SURFACE2,
+                 fg=FG, insertbackground=AMBER, relief="flat").pack(side="left", fill="x", expand=True, padx=(8, 0))
+        self.youtube_btn = self._btn(youtube_panel, f"{ICONS['play']}  Speak YouTube", self.speak_youtube,
+                                     bg=AMBER, fg=CYAN_INK, hover=self._mix(AMBER, "#ffffff", 0.18),
+                                     border=AMBER, font=("Segoe UI", 9, "bold"), state="disabled")
+        self.youtube_btn.pack(fill="x", ipady=5)
+        self.youtube_audio_btn = self._btn(youtube_panel, f"{ICONS['voice']}  Alter Real Voice", self.speak_youtube_audio,
+                                           bg=SURFACE2, fg=AMBER,
+                                           hover=self._mix(SURFACE2, AMBER, 0.2),
+                                           border=AMBER, font=("Segoe UI", 9, "bold"),
+                                           state="disabled")
+        self.youtube_audio_btn.pack(fill="x", ipady=5, pady=(6, 0))
+        ystatus = tk.Frame(youtube_panel, bg=SURFACE); ystatus.pack(fill="x", pady=(7, 0))
+        self.youtube_light = tk.Canvas(ystatus, width=18, height=18, bg=SURFACE, highlightthickness=0)
+        self.youtube_light_dot = self.youtube_light.create_oval(4, 4, 14, 14, fill="#3a3f4a", outline="")
+        self.youtube_light.pack(side="left")
+        self.youtube_status_lbl = tk.Label(ystatus, text="MARKET MODE", bg=SURFACE, fg=MUTED,
+                                           font=("Segoe UI", 8, "bold"))
+        self.youtube_status_lbl.pack(side="left", padx=(6, 0))
+        self.youtube_time_lbl = tk.Label(youtube_panel, text="YOUTUBE TIME 00:00",
+                                         bg=SURFACE, fg=FAINT, font=("Consolas", 8))
+        self.youtube_time_lbl.pack(anchor="w", pady=(4, 0))
+        self.youtube_progress = tk.Canvas(
+            youtube_panel, height=18, bg=SURFACE, highlightthickness=0, bd=0)
+        self.youtube_progress.pack(fill="x", pady=(5, 0))
+        self._youtube_progress_display = 0.0
+        self._youtube_progress_after = None
+        self.youtube_progress.bind(
+            "<Configure>", lambda _e: self._draw_youtube_progress())
+        self._draw_youtube_progress()
+        self.youtube_progress_lbl = tk.Label(
+            youtube_panel, text="Idle", bg=SURFACE, fg=FAINT,
+            font=("Consolas", 8))
+        self.youtube_progress_lbl.pack(anchor="w", pady=(2, 0))
+        ybuttons = tk.Frame(youtube_panel, bg=SURFACE); ybuttons.pack(fill="x", pady=(6, 0))
+        self.youtube_resume_btn = self._btn(ybuttons, f"{ICONS['play']}  YouTube", self.resume_youtube,
+                                            bg=SURFACE2, fg=AMBER, hover=self._mix(SURFACE2, AMBER, 0.2),
+                                            border=AMBER, font=("Segoe UI", 8, "bold"),
+                                            state="disabled")
+        self.youtube_resume_btn.pack(side="left", fill="x", expand=True, ipady=4)
+        self.market_mode_btn = self._btn(ybuttons, f"{ICONS['analytics']}  Market", self.resume_market,
+                                         bg=SURFACE2, fg=MINT, hover=self._mix(SURFACE2, MINT, 0.2),
+                                         border=MINT, font=("Segoe UI", 8, "bold"),
+                                         state="disabled")
+        self.market_mode_btn.pack(side="left", fill="x", expand=True, padx=(8, 0), ipady=4)
+        self._sync_youtube_buttons()
+
+        log_panel = self._dash_panel(right, "Activity Log", CYAN, fill="x", pady=(0, 8))
+        self.log = tk.Text(log_panel, height=8, bg=SURFACE2, fg=MUTED, relief="flat",
+                           font=("Consolas", 8), wrap="word", state="disabled",
+                           padx=8, pady=6, highlightthickness=1,
+                           highlightbackground=BORDER, highlightcolor=BORDER)
+        self.log.pack(fill="both", expand=True)
+        self._bind_mousewheel_tree(right, _right_wheel)
+        self._nav_targets = {
+            "Live Control": voice,
+            "Voice": voice,
+            "Face Swap": fs,
+            "Lip Sync": lip,
+            "Scenes": scene,
+            "Analytics": log_panel,
+            "Settings": session,
+        }
+
+        # Hidden/compact controls and variables still used by the engine.
+        hidden = tk.Frame(main, bg=BG)
+
+        # Bottom analytics strip.
+        strip = tk.Frame(main, bg="#090c11", highlightthickness=1,
+                         highlightbackground="#202632")
+        strip.pack(fill="x", pady=(10, 0), ipady=8)
+        metrics = [("Viewers", "0", "", MINT), ("Likes", "0", "", MINT),
+                   ("Comments / min", "0", "", MINT), ("CPU", "0%", "", CYAN),
+                   ("GPU", "0%", "", MAG), ("VRAM", "0%", "", CYAN),
+                   ("Uptime", "00:00:00", "", MAG)]
+        for column in range(len(metrics)):
+            strip.grid_columnconfigure(column, weight=1, uniform="metrics")
+        for column, (label, val, chg, acc) in enumerate(metrics):
+            self._metric_tile(strip, label, val, chg, acc).grid(
+                row=0, column=column, sticky="nsew", padx=4)
+
+    # -------------------------------------------------------------------------
     # PREVIEW / UI REFRESH (Tk main thread only)
     # -------------------------------------------------------------------------
+    def _format_duration(self, seconds):
+        seconds = max(0, int(seconds or 0))
+        h = seconds // 3600
+        m = (seconds % 3600) // 60
+        s = seconds % 60
+        return f"{h:02d}:{m:02d}:{s:02d}"
+
+    def _uptime_seconds(self):
+        if not self.running or self._session_started_at is None:
+            return 0
+        return time.monotonic() - self._session_started_at
+
+    def _comments_per_minute(self):
+        now = time.time()
+        while self._comment_times and now - self._comment_times[0] > 60:
+            self._comment_times.popleft()
+        return len(self._comment_times)
+
+    def _set_metric(self, label, value, change=""):
+        value = str(value)
+        lbl = getattr(self, "_metric_value_labels", {}).get(label)
+        cl = getattr(self, "_metric_change_labels", {}).get(label)
+        if lbl is None:
+            return
+
+        targets = getattr(self, "_metric_targets", {})
+        previous_target = targets.get(label)
+        if previous_target == value:
+            if change and cl is not None:
+                cl.configure(text=str(change))
+            return
+        targets[label] = value
+
+        previous_number = self._metric_number(previous_target)
+        next_number = self._metric_number(value)
+        engagement = label in ("Viewers", "Likes", "Comments / min")
+        if engagement and previous_number is not None and next_number is not None:
+            delta = next_number - previous_number
+            self._animate_metric_count(
+                label, previous_number, next_number,
+                suffix="%" if value.endswith("%") else "")
+            if cl is not None:
+                cl.configure(text=f"+{delta:,}" if delta > 0 else "")
+        else:
+            lbl.configure(text=value)
+            if cl is not None:
+                cl.configure(text=str(change or ""))
+
+        if previous_target is not None and label != "Uptime":
+            self._pulse_metric(label, strong=engagement)
+
+    @staticmethod
+    def _metric_number(value):
+        if value is None:
+            return None
+        text = str(value).strip().replace(",", "").replace("%", "")
+        if not text or text.lower() == "n/a" or ":" in text:
+            return None
+        try:
+            return int(float(text))
+        except (TypeError, ValueError):
+            return None
+
+    def _animate_metric_count(self, label, start, end, suffix=""):
+        """Count smoothly to a new engagement total without blocking Tk."""
+        token = self._metric_anim_tokens.get(label, 0) + 1
+        self._metric_anim_tokens[label] = token
+        steps = 10
+
+        def tick(step=1):
+            if self._metric_anim_tokens.get(label) != token:
+                return
+            eased = 1.0 - (1.0 - step / steps) ** 3
+            current = int(round(start + (end - start) * eased))
+            lbl = self._metric_value_labels.get(label)
+            if lbl is not None:
+                lbl.configure(text=f"{current:,}{suffix}")
+            if step < steps:
+                self.root.after(28, lambda: tick(step + 1))
+
+        tick()
+
+    def _pulse_metric(self, label, strong=False):
+        """Flash a tile and kick its sparkline when a real value changes."""
+        tile = getattr(self, "_metric_tiles", {}).get(label)
+        lbl = getattr(self, "_metric_value_labels", {}).get(label)
+        spark = getattr(self, "_metric_sparks", {}).get(label)
+        accent = getattr(self, "_metric_accents", {}).get(label, CYAN)
+        if tile is None or lbl is None or spark is None:
+            return
+        token = self._metric_anim_tokens.get(f"pulse:{label}", 0) + 1
+        self._metric_anim_tokens[f"pulse:{label}"] = token
+        canvas, items, points = spark
+        frames = 12 if strong else 7
+
+        def frame(index=0):
+            if self._metric_anim_tokens.get(f"pulse:{label}") != token:
+                return
+            phase = index / max(1, frames - 1)
+            energy = math.sin(math.pi * phase)
+            border = self._mix("#151a23", accent, energy * (0.9 if strong else 0.5))
+            tile.configure(highlightbackground=border)
+            lbl.configure(
+                fg=self._mix(FG, accent, energy * (0.72 if strong else 0.35)),
+                font=("Segoe UI", 15 if strong and energy > 0.45 else 13, "bold"))
+            for i, item in enumerate(items):
+                x1, base_y1 = points[i]
+                x2, base_y2 = points[i + 1]
+                wave = math.sin((i + index) * 1.35) * energy
+                lift = (7 if strong else 3) * wave
+                canvas.coords(item, x1, base_y1 - lift, x2, base_y2 - lift)
+                canvas.itemconfigure(
+                    item, fill=self._mix(accent, "#ffffff", energy * 0.45),
+                    width=2 if energy > 0.35 else 1)
+            if index < frames - 1:
+                self.root.after(42, lambda: frame(index + 1))
+            else:
+                tile.configure(highlightbackground="#151a23")
+                lbl.configure(fg=FG, font=("Segoe UI", 13, "bold"))
+                for i, item in enumerate(items):
+                    canvas.coords(item, *points[i], *points[i + 1])
+                    canvas.itemconfigure(item, fill=accent, width=1)
+                change_lbl = self._metric_change_labels.get(label)
+                if change_lbl is not None:
+                    self.root.after(850, lambda: change_lbl.configure(text=""))
+
+        frame()
+
+    def _set_row_value(self, label, value, color=None):
+        lbl = getattr(self, "_row_value_labels", {}).get(label)
+        if lbl is not None:
+            kw = {"text": str(value)}
+            if color:
+                kw["fg"] = color
+            lbl.configure(**kw)
+
+    def _update_live_dashboard(self):
+        cpm = self._comments_per_minute()
+        viewers = getattr(self, "_sess_viewers", None)
+        self._set_metric(
+            "Viewers", f"{int(viewers):,}" if viewers is not None else "n/a")
+        self._set_metric("Likes", f"{int(getattr(self, '_sess_likes', 0)):,}")
+        self._set_metric("Comments / min", str(cpm))
+        self._set_metric("Uptime", self._format_duration(self._uptime_seconds()))
+        if getattr(self, "comments_min_item", None) is not None:
+            self.comments_graph.itemconfigure(self.comments_min_item, text=str(cpm))
+            if getattr(self, "nav_comments_badge", None) is not None:
+                self.nav_comments_badge.configure(text=str(cpm))
+            self.comments_graph.delete("spark")
+            now = time.time()
+            buckets = []
+            for i in range(8):
+                lo = now - (8 - i) * 7.5
+                hi = lo + 7.5
+                buckets.append(sum(1 for t in self._comment_times if lo <= t < hi))
+            maxv = max(1, max(buckets or [0]))
+            pts = []
+            for i, v in enumerate(buckets):
+                x = 96 + i * 16
+                y = 30 - int((v / maxv) * 22)
+                pts.append((x, y))
+            for i in range(len(pts) - 1):
+                self.comments_graph.create_line(*pts[i], *pts[i + 1], fill=MAG,
+                                                width=2, tags="spark")
+        mon = self.monitor
+        if mon is not None and getattr(mon, "ready", False):
+            self._set_metric("CPU", f"{getattr(mon, 'cpu_live', mon.cpu):.0f}%")
+            self._set_metric("GPU", f"{getattr(mon, 'gpu_live', mon.gpu):.0f}%")
+            self._set_metric("VRAM", f"{getattr(mon, 'vram_live', mon.vram):.0f}%")
+        else:
+            self._set_metric("CPU", "n/a")
+            self._set_metric("GPU", "n/a")
+            self._set_metric("VRAM", "n/a")
+        tiktok_connected = bool(getattr(self, "tiktok", None) is not None)
+        obs_connected = bool(getattr(self, "obs_cam", None) is not None)
+        self._set_row_value("TikTok", "Connected" if tiktok_connected else "Disconnected",
+                            MINT if tiktok_connected else MUTED)
+        self._set_row_value("OBS Virtual Camera", "Connected" if obs_connected else "Off",
+                            MINT if obs_connected else MUTED)
+        self._set_row_value("Resolution", f"{FRAME_SIZE}x{FRAME_SIZE} source")
+        self._set_row_value("FPS", f"{self._fps:.1f} FPS" if self.running else "0 FPS")
+        self._set_row_value("Video Bitrate", "OBS virtual cam" if obs_connected else "preview only")
+        self._set_row_value("Audio Bitrate", "TTS active" if self.tts is not None else "TTS off")
+        stable = bool(self.running and self._fps > 0)
+        self._set_row_value("Output", "stable" if stable else "idle",
+                            MINT if stable else MUTED)
+        try:
+            self._topdraw()
+        except Exception:
+            pass
+
     def _show_placeholder(self):
+        W, H = getattr(self, "_preview_draw_size", (PREVIEW_W, PREVIEW_H))
+        img = np.full((H, W, 3), 9, np.uint8)
+        for y in range(H):
+            t = y / max(1, H - 1)
+            img[y, :, :] = (18 + int(18 * t), 8 + int(16 * t), 18 + int(34 * t))
+        cx, cy = W // 2, H // 2
+        cv2.circle(img, (cx, cy - 38), max(54, W // 6), (70, 34, 86), -1, cv2.LINE_AA)
+        cv2.circle(img, (cx, cy - 44), max(40, W // 9), (168, 128, 118), -1, cv2.LINE_AA)
+        cv2.rectangle(img, (cx - W // 10, cy + 12), (cx + W // 10, cy + H // 4),
+                      (36, 35, 55), -1)
+        cv2.putText(img, "Preview Standby", (22, 34), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
+                    (245, 236, 225), 1, cv2.LINE_AA)
+        cv2.putText(img, "waiting for live frame", (22, 53), cv2.FONT_HERSHEY_SIMPLEX, 0.35,
+                    (190, 165, 188), 1, cv2.LINE_AA)
+        cv2.rectangle(img, (W - 58, 19), (W - 17, 41), (70, 70, 78), -1)
+        cv2.putText(img, "IDLE", (W - 51, 35), cv2.FONT_HERSHEY_SIMPLEX, 0.42,
+                    (255, 255, 255), 1, cv2.LINE_AA)
+        y0 = H - 112
+        for i, txt in enumerate(("No TikTok comments connected",
+                                 "Enter a real handle to read chat",
+                                 "Bot replies appear after Start")):
+            yy = y0 + i * 30
+            cv2.rectangle(img, (18, yy), (min(W - 18, 250), yy + 24), (24, 22, 32), -1)
+            cv2.putText(img, txt, (26, yy + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.34,
+                        (230, 225, 235), 1, cv2.LINE_AA)
+        self._draw(img)
+        return
         # A sci-fi HUD "standby" feed: faint grid, corner brackets, a targeting
         # reticle and telemetry — so the idle stage reads like a cockpit display.
         S = PREVIEW_SIZE
@@ -1131,8 +2645,9 @@ class AvatarStudio:
     def _draw(self, bgr):
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         im = Image.fromarray(rgb)
-        if im.size != (PREVIEW_SIZE, PREVIEW_SIZE):
-            im = im.resize((PREVIEW_SIZE, PREVIEW_SIZE))
+        target = getattr(self, "_preview_draw_size", (PREVIEW_W, PREVIEW_H))
+        if im.size != target:
+            im = im.resize(target, Image.Resampling.LANCZOS)
         tkimg = ImageTk.PhotoImage(im)
         self.preview.configure(image=tkimg)
         self.preview.image = tkimg          # keep a reference
@@ -1171,10 +2686,22 @@ class AvatarStudio:
                 want = bool(self.running and getattr(self, "music_var", None)
                             and self.music_var.get())
                 self.music.set_active(want)
-                self.music.set_speaking(bool(getattr(self, "_speaking", False)))
+                self.music.set_speaking(self._any_speech_active())
             except Exception:
                 pass
+        self._update_audio_meters()
+        self._update_live_dashboard()
         self.root.after(33, self._poll_ui)   # ~30 Hz UI refresh
+
+    def _any_speech_active(self):
+        """Authoritative speech state across TTS, YouTube audio, and live mic."""
+        return any((
+            bool(self.tts is not None and getattr(self.tts, "speaking", False)),
+            bool(self._youtube_audio is not None
+                 and getattr(self._youtube_audio, "speaking", False)),
+            bool(self.live_mic is not None
+                 and getattr(self.live_mic, "speaking", False)),
+        ))
 
     def _append_log(self, msg):
         self.log.configure(state="normal")
@@ -1216,6 +2743,7 @@ class AvatarStudio:
 
     def _boot(self):
         try:
+            supporter_warmup = None
             if AUTO_PROFILE:
                 r = AUTO_PROFILE["res"]
                 self._log_msg(f"[auto-config] {r['gpu']} · {r['vram_free']:.1f}GB free "
@@ -1237,7 +2765,7 @@ class AvatarStudio:
                 lp._multi = bool(self.multiref_var.get()) and len(getattr(lp, "_refs", [])) > 1
                 lp.set_stabilization(self.stab_var.get() / 100.0)
                 lp.set_gaze(self.gaze_var.get(), self.gaze_var2.get() / 100.0)
-                lp.set_lip_lock(self.liplock_var.get())
+                lp.set_lip_lock(self.ai_mouth_var.get())
             except Exception:
                 pass
             self._log_msg("   -> " + lp.startup_check()[1])
@@ -1254,6 +2782,25 @@ class AvatarStudio:
             # lazily on the first SPEAK press — freezing the live loop and making
             # SPEAK feel broken.
             self._log_msg("   -> " + tts.startup_check()[1])
+            try:
+                import reactions
+                response_lines = reactions.ready_lines()
+
+                def _warm_supporter_responses():
+                    try:
+                        self._log_msg(
+                            f"[studio] caching {len(response_lines)} supporter "
+                            "response pieces in background...")
+                        tts.prerender(response_lines)
+                        self._log_msg(
+                            "   -> follow/gift/share response cache ready")
+                    except Exception as exc:
+                        self._log_msg(
+                            f"[studio] supporter response warmup failed ({exc}).")
+
+                supporter_warmup = _warm_supporter_responses
+            except Exception as exc:
+                self._log_msg(f"[studio] supporter response warmup failed ({exc}).")
             # AI brain (Ollama) — optional; the avatar answers in character.
             try:
                 from llm_brain import LLMBrain
@@ -1301,19 +2848,21 @@ class AvatarStudio:
             self.engines = {"lp": lp, "mt": mt, "comp": comp, "enh": enhance_engine,
                             "chart": TradingView("XAUUSD"), "body": BodyMotionEngine(),
                             "restore": restore}
-            # LIVE market feed so the host talks about the REAL current gold price
-            # (not the simulated chart's drifting fake number). Background poller.
+            # Keep both feeds warm. Session routing uses gold while spot XAUUSD is
+            # open and moves to BTCUSD during the weekend/daily maintenance break.
             try:
                 from market_data import MarketData
-                self.market = MarketData("PAXGUSDT", "1m")
-                self.market.start()
-                self._log_msg("   -> " + self.market.startup_check()[1])
-                p = self.market.price
-                if p > 0:                       # match the visual chart to reality
-                    self.engines["chart"].price = p
-                    self.engines["chart"].day_open = p
+                self.market_gold = MarketData("PAXGUSDT", "1m")
+                self.market_btc = MarketData("BTCUSDT", "1m")
+                self.market_gold.start()
+                self.market_btc.start()
+                self._select_active_market(force=True)
+                self._log_msg("   -> " + self.market_gold.startup_check()[1])
+                self._log_msg("   -> " + self.market_btc.startup_check()[1])
             except Exception as exc:
                 self.market = None
+                self.market_gold = None
+                self.market_btc = None
                 self._log_msg(f"[studio] live market data unavailable ({exc}).")
             self._on_quality()        # apply the selected quality preset at boot
             self._on_tilt()           # apply max-tilt (pitch) cap at boot
@@ -1351,8 +2900,11 @@ class AvatarStudio:
             self.tts = tts
             self.cap = cap
             self.obs_cam = obs
+            self._live_response_event.set()
+            self.root.after(0, self._sync_audio_mute_buttons)
 
             self.running = True
+            self._session_started_at = time.monotonic()
             self.booting = False
             # SCENE cue: the avatar scene is going live now.
             try:
@@ -1362,6 +2914,9 @@ class AvatarStudio:
                 pass
             self._worker = threading.Thread(target=self._loop, daemon=True)
             self._worker.start()
+            if supporter_warmup is not None:
+                threading.Thread(
+                    target=supporter_warmup, daemon=True).start()
             # PARALLEL LLM PREFETCH POOL: several worker threads generate commentary
             # lines AHEAD of time and route each to whatever compute is free (GPU idle
             # -> GPU; GPU busy with swap/voice -> a CPU-resident model if configured,
@@ -1380,7 +2935,7 @@ class AvatarStudio:
                               + list(self._ENGAGE_BEATS))     # chart-forward weighting
                 self.brain_pool = BrainPool(self.brain, monitor=self.monitor,
                                             beats=pool_beats,
-                                            get_context=self._live_market_ctx)
+                                            get_context=self._live_stream_ctx)
                 self.brain_pool.start()
                 self._log_msg("[studio] LLM prefetch pool ON — " + self.brain_pool.status())
             except Exception as exc:
@@ -1388,6 +2943,7 @@ class AvatarStudio:
             # AUTO-TALK: the brain writes + speaks gold commentary on its own, PIPELINED
             # (generates the next line while the current one plays — voice gen never
             # pauses the LLM).
+            self._queue_initial_market_status()
             self._autotalk_thread = threading.Thread(target=self._autotalk_loop, daemon=True)
             self._autotalk_thread.start()
             # LIVE MARKET ALERTS: watch the real gold price, react to big moves/levels.
@@ -1400,7 +2956,10 @@ class AvatarStudio:
             def _enable():
                 self.start_btn.configure(text="START")
                 self.stop_btn.configure(state="normal")
-                for b in (self.speak_btn, self.ask_btn, self.mute_btn, self.recenter_btn):
+                for b in (self.speak_btn, self.ask_btn, self.mute_btn,
+                          self.recenter_btn, self.youtube_btn,
+                          self.youtube_audio_btn, self.youtube_resume_btn,
+                          self.market_mode_btn):
                     b.configure(state="normal")
             self.root.after(0, _enable)
             self._set_status("LIVE", GREEN)
@@ -1412,6 +2971,38 @@ class AvatarStudio:
             self._set_status("error", RED)
             self.root.after(0, lambda: self.start_btn.configure(
                 state="normal", text="START"))
+
+    def _warm_mohammed_voice_background(self):
+        if self.tts is None or self._mohammed_voice_ready or self._mohammed_voice_warming:
+            return
+        self._mohammed_voice_warming = True
+        try:
+            self.root.after(0, lambda: self.youtube_audio_btn.configure(
+                state="disabled", text="MOHAMMED LOADING..."))
+            self._set_youtube_progress(5, "Background: loading Mohammed voice...")
+        except Exception:
+            pass
+
+        def _worker():
+            try:
+                self._log_msg("[youtube] Mohammed voice prewarm: loading XTTS now...")
+                self.tts.set_backend("xtts")
+                msg = self.tts.warm_backend()
+                self._mohammed_voice_ready = True
+                self._log_msg("[youtube] Mohammed voice ready: " + msg)
+                self._set_youtube_progress(100, "Mohammed voice ready")
+            except Exception as exc:
+                self._log_msg(f"[youtube] Mohammed voice prewarm failed: {exc}")
+                self._set_youtube_progress(0, f"Mohammed prewarm failed: {exc}")
+            finally:
+                self._mohammed_voice_warming = False
+                try:
+                    self.root.after(0, lambda: self.youtube_audio_btn.configure(
+                        state="normal", text="ALTER REAL YOUTUBE VOICE"))
+                except Exception:
+                    pass
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _loop(self):
         lp = self.engines["lp"]; mt = self.engines["mt"]
@@ -1480,7 +3071,7 @@ class AvatarStudio:
             # speech and only the mouth moves (owned by the mouth-sync), so we run
             # LivePortrait + the costly face restore HALF as often and reuse the
             # held result between — freeing the GPU for per-frame mouth-sync.
-            speaking_now = bool(self.tts is not None and getattr(self.tts, "speaking", False))
+            speaking_now = self._any_speech_active()
             _speed = 2 if speaking_now else 1
 
             # one automatic recenter ~2s in, once the operator has settled, so
@@ -1600,8 +3191,11 @@ class AvatarStudio:
 
             # "the bot is ACTUALLY talking" — from the TTS, NOT the mouth engine
             # (which we may keep alive with idle silence below).
-            self._speaking = bool(self.tts is not None and getattr(self.tts, "speaking", False))
-            lips_from_bot = bool(self.liplock_var.get())
+            self._speaking = self._any_speech_active()
+            ai_mouth = bool(self.ai_mouth_var.get())
+            # AI mode has exclusive mouth ownership. Keeping the native mouth
+            # active underneath creates visible duplicate lips at crop edges.
+            lips_from_bot = ai_mouth
             try:                       # mouth = BOT only (closed when silent, never webcam)
                 mt.bot_only = lips_from_bot
             except Exception:
@@ -1621,14 +3215,17 @@ class AvatarStudio:
                         mt.feed_audio((np.random.randn(640).astype(np.float32)) * 1e-3)
                     except Exception:
                         pass
-                if self._speaking or lips_from_bot:
+                if (ai_mouth and self._speaking) or lips_from_bot:
                     try:
-                        if lp_fresh or cached_bbox is None:
+                        # During speech LP/restore may run at a lower cadence.
+                        # If the operator turns, a stale mouth box makes the
+                        # generated mouth land between poses and look smeared.
+                        if lp_fresh or motion > MOTION_THRESH or cached_bbox is None:
                             _mh = (getattr(self.swap_engine, "last_mouth", None)
                                    if did_swap and self.swap_engine is not None else None)
                             cached_bbox = comp.detect_mouth_bbox(ai, _mh)
                         mouth = mt.process_mouth(ai, cached_bbox)
-                        ai = comp.blend_mouth(ai, mouth, cached_bbox)
+                        ai = comp.blend_mouth(ai, mouth, cached_bbox, exclusive=True)
                     except Exception as exc:
                         errs += 1
                         if errs <= 3:
@@ -1654,6 +3251,10 @@ class AvatarStudio:
                         _lvl = self.monitor.quality()
                     if did_swap:
                         enh.set_level(_lvl)
+                        enh.set_protect_head(
+                            getattr(self.swap_engine, "last_head", None))
+                    else:
+                        enh.set_protect_head(None)
                     final = enh.enhance_frame(ai, is_speaking=self._speaking, device=_dev)
                 except Exception:
                     final = ai
@@ -1711,6 +3312,26 @@ class AvatarStudio:
             return
         self._log_msg("[studio] stopping...")
         self.running = False
+        self._session_started_at = None
+        self._clear_ready_speech()
+        self._clear_answering()
+        if self.live_mic is not None:        # release the mic + monitor streams
+            try:
+                self.live_mic.shutdown()
+            except Exception:
+                pass
+            self.live_mic = None
+            try:
+                self.livemic_var.set(False)
+            except Exception:
+                pass
+        if self._youtube_audio is not None:
+            try:
+                self._youtube_audio.stop()
+            except Exception:
+                pass
+            self._youtube_audio = None
+            self._youtube_audio_mode = False
         if self._worker is not None:
             self._worker.join(timeout=2.0)
         for fn in (lambda: self.cap.release() if self.cap else None,
@@ -1722,7 +3343,10 @@ class AvatarStudio:
         self.cap = None; self.obs_cam = None
         self._latest = None
         self.stop_btn.configure(state="disabled")
-        for b in (self.speak_btn, self.ask_btn, self.mute_btn, self.recenter_btn):
+        for b in (self.speak_btn, self.ask_btn, self.mute_btn,
+                  self.recenter_btn, self.youtube_btn,
+                  self.youtube_audio_btn, self.youtube_resume_btn,
+                  self.market_mode_btn):
             b.configure(state="disabled")
         self.start_btn.configure(state="normal", text="START")
         self._set_status("stopped", RED)
@@ -1771,9 +3395,587 @@ class AvatarStudio:
         if self.tts is None or not self.running:
             self._log_msg("[studio] press START first.")
             return
+        if self.live_mic is not None:
+            self._log_msg("[studio] Live Mic is on — just talk into the mic (typed SPEAK is disabled).")
+            return
         self._user_priority()                 # you take precedence over auto-host
         self.tts.speak(txt)
         self._log_msg("> " + txt)
+
+    # ---- YOUTUBE SPEAK -----------------------------------------------------
+    def _on_youtube_enter(self, event):
+        self.speak_youtube()
+        return "break"
+
+    def speak_youtube(self):
+        url = self.youtube_entry.get("1.0", "end").strip()
+        if not url:
+            return
+        if self.tts is None or not self.running:
+            self._log_msg("[studio] press START first.")
+            return
+        if self.live_mic is not None:
+            self._log_msg("[studio] Live Mic is on - YouTube Speak is disabled.")
+            return
+        if self._youtube_busy:
+            self._log_msg("[studio] YouTube Speak is already loading a video.")
+            return
+        try:
+            start_s, end_s = self._youtube_range()
+        except ValueError as exc:
+            self._log_msg(f"[youtube] range error: {exc}")
+            return
+        self._youtube_busy = True
+        self.youtube_btn.configure(state="disabled", text="LOADING...")
+        self._youtube_audio_mode = False
+        self._youtube_mohammed_mode = False
+        try:
+            if self._youtube_audio is not None:
+                self._youtube_audio.stop()
+                self._youtube_audio = None
+            self.tts.set_muted(False)
+        except Exception:
+            pass
+        self._user_priority()
+        self._log_msg("[youtube] reading captions...")
+        self._start_youtube_pump()
+
+        def _worker():
+            try:
+                from youtube_cache import cache_summary
+                from youtube_speaker import fetch_youtube_transcript, chunk_for_speech
+                summary = cache_summary(url)
+                if summary["has_transcript"]:
+                    self._log_msg(f"[youtube] db hit: captions already saved ({summary['video_id']})")
+                else:
+                    self._log_msg(f"[youtube] db miss: new captions link ({summary['video_id']})")
+
+                def _caption_status(msg):
+                    self._log_msg(f"[youtube] captions: {msg}")
+
+                title, transcript = fetch_youtube_transcript(
+                    url, start_seconds=start_s, end_seconds=end_s,
+                    status_callback=_caption_status)
+                chunks = chunk_for_speech(transcript)
+                if not chunks:
+                    raise RuntimeError("no speakable transcript text found")
+                first_batch = chunks[:min(3, len(chunks))]
+                if first_batch:
+                    self._log_msg(
+                        f"[youtube] preparing first Mohammed chunks 0/{len(first_batch)}...")
+
+                    def _pre_progress(i, total, text):
+                        self._log_msg(
+                            f"[youtube] preparing Mohammed {i}/{total}: {text[:48]}")
+
+                    self.tts.prerender(first_batch, progress=_pre_progress)
+                    self._log_msg("[youtube] first Mohammed chunks ready.")
+                self._youtube_title = title
+                self._youtube_chunks = chunks
+                self._youtube_index = 0
+                rg = self._youtube_range_label(start_s, end_s)
+                self._log_msg(f"[youtube] {title}{rg} -> {len(chunks)} voice chunks")
+                self._set_youtube_mode("youtube")
+            except Exception as exc:
+                self._log_msg(f"[youtube] failed: {exc}")
+            finally:
+                def _done():
+                    self._youtube_busy = False
+                    text = "SPEAK YOUTUBE"
+                    if self.running:
+                        self.youtube_btn.configure(state="normal", text=text)
+                    else:
+                        self.youtube_btn.configure(state="disabled", text=text)
+                try:
+                    self.root.after(0, _done)
+                except Exception:
+                    self._youtube_busy = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def resume_youtube(self):
+        if self._youtube_audio is None and not self._youtube_chunks:
+            self._log_msg("[youtube] paste a link and press SPEAK YOUTUBE first.")
+            return
+        self._set_youtube_mode("youtube")
+
+    def resume_market(self):
+        self._set_youtube_mode("market")
+
+    def _set_youtube_mode(self, mode):
+        mode = "youtube" if mode == "youtube" else "market"
+        self._youtube_mode = mode
+        try:
+            if self.tts is not None:
+                # Drop queued low-priority YouTube/auto filler. The current spoken
+                # chunk finishes naturally; the next source starts cleanly.
+                self.tts.clear_pending(below=1)
+        except Exception:
+            pass
+        try:
+            if getattr(self, "autotalk_var", None) is not None:
+                self.root.after(0, lambda: self.autotalk_var.set(mode == "market"))
+        except Exception:
+            pass
+        try:
+            self.root.after(0, self._sync_youtube_status)
+        except Exception:
+            pass
+        if mode == "youtube":
+            try:
+                if self._youtube_audio is not None:
+                    if self.tts is not None:
+                        self.tts.set_muted(True)
+                    self._youtube_audio.resume()
+            except Exception:
+                pass
+            self._start_youtube_pump()
+            if self._youtube_chunks:
+                self._bump_youtube_progress(
+                    self._youtube_playback_progress(), "YouTube speech running")
+            self._log_msg("[youtube] resumed from saved position.")
+        else:
+            try:
+                if self._youtube_audio is not None:
+                    self._youtube_audio.pause()
+                if self.tts is not None:
+                    self.tts.set_muted(False)
+            except Exception:
+                pass
+            self._bump_youtube_progress(
+                self._youtube_progress_value, "Paused - market mode")
+            self._log_msg("[youtube] paused. Market analysis resumed.")
+
+    def _sync_youtube_status(self):
+        try:
+            active = self._youtube_mode == "youtube"
+            audio_active = self._youtube_audio is not None and self._youtube_audio_mode
+            done = bool(self._youtube_chunks) and self._youtube_index >= len(self._youtube_chunks)
+            if done:
+                text, color = "YOUTUBE DONE", MINT
+            elif active:
+                if audio_active:
+                    status = getattr(self._youtube_audio, "status", None) or self._youtube_audio_status
+                    text = ("REAL YOUTUBE VOICE - " + status.upper()
+                            if status else "ALTERED REAL YOUTUBE VOICE")
+                else:
+                    text = "SPEAKING FROM YOUTUBE"
+                color = AMBER
+            else:
+                text, color = "MARKET MODE", MINT
+            self.youtube_status_lbl.configure(text=text, fg=color)
+            self.youtube_light.itemconfig(
+                self.youtube_light_dot,
+                fill=color if active or done else "#3a3f4a")
+            self.youtube_time_lbl.configure(text=self._youtube_time_text())
+            self._sync_youtube_buttons()
+            if self._youtube_chunks:
+                self.youtube_resume_btn.configure(state="normal")
+        except Exception:
+            pass
+
+    def _set_youtube_progress(self, value, text=None):
+        self._youtube_progress_value = max(0.0, min(100.0, float(value or 0.0)))
+        if text is not None:
+            self._youtube_progress_text = str(text)
+
+        def _apply():
+            try:
+                pending = getattr(self, "_youtube_progress_after", None)
+                if pending is not None:
+                    self.root.after_cancel(pending)
+                    self._youtube_progress_after = None
+                self._animate_youtube_progress()
+                if getattr(self, "youtube_progress_lbl", None) is not None:
+                    self.youtube_progress_lbl.configure(text=self._youtube_progress_text)
+            except Exception:
+                pass
+
+        try:
+            self.root.after(0, _apply)
+        except Exception:
+            _apply()
+
+    def _animate_youtube_progress(self):
+        """Ease the custom YouTube meter toward its latest real progress value."""
+        self._youtube_progress_after = None
+        current = float(getattr(self, "_youtube_progress_display", 0.0))
+        target = float(getattr(self, "_youtube_progress_value", 0.0))
+        delta = target - current
+        if abs(delta) < 0.15:
+            self._youtube_progress_display = target
+            self._draw_youtube_progress()
+            return
+        self._youtube_progress_display = current + delta * 0.22
+        self._draw_youtube_progress()
+        self._youtube_progress_after = self.root.after(
+            16, self._animate_youtube_progress)
+
+    def _draw_youtube_progress(self):
+        """Draw a compact neon processing rail without native-theme artifacts."""
+        canvas = getattr(self, "youtube_progress", None)
+        if canvas is None:
+            return
+        width = max(80, canvas.winfo_width())
+        height = max(18, canvas.winfo_height())
+        value = max(0.0, min(
+            100.0, float(getattr(self, "_youtube_progress_display", 0.0))))
+        canvas.delete("all")
+
+        x1, y1, x2, y2 = 1, 3, width - 1, height - 3
+        self._round_rect(
+            canvas, x1, y1, x2, y2, 6,
+            fill="#07121c", outline=self._mix(BORDER, CYAN, 0.25), width=1)
+
+        inner_x1, inner_y1 = x1 + 2, y1 + 2
+        inner_x2, inner_y2 = x2 - 2, y2 - 2
+        fill_x = inner_x1 + (inner_x2 - inner_x1) * value / 100.0
+        if value > 0.0:
+            glow_x = min(inner_x2, fill_x + 4)
+            self._round_rect(
+                canvas, inner_x1, inner_y1, glow_x, inner_y2, 4,
+                fill=self._mix("#07121c", CYAN, 0.34), outline="")
+            self._round_rect(
+                canvas, inner_x1, inner_y1, fill_x, inner_y2, 4,
+                fill=CYAN, outline="")
+            if fill_x - inner_x1 > 8:
+                canvas.create_line(
+                    fill_x - 1, inner_y1 + 1, fill_x - 1, inner_y2 - 1,
+                    fill="#d7ffff", width=2)
+
+        for pct in (25, 50, 75):
+            tick_x = inner_x1 + (inner_x2 - inner_x1) * pct / 100.0
+            if tick_x > fill_x + 2:
+                canvas.create_line(
+                    tick_x, inner_y1 + 2, tick_x, inner_y2 - 2,
+                    fill=self._mix(BORDER, CYAN, 0.22))
+
+        canvas.create_text(
+            width - 7, height / 2, text=f"{int(round(value)):02d}%",
+            anchor="e", fill=(
+                "#031016" if value >= 96 else self._mix(FG, CYAN, 0.35)),
+            font=("Consolas", 7, "bold"))
+
+    def _bump_youtube_progress(self, value, text=None):
+        if value > self._youtube_progress_value:
+            self._set_youtube_progress(value, text)
+        elif text is not None:
+            self._set_youtube_progress(self._youtube_progress_value, text)
+
+    def _style_state_button(self, btn, on, text=None):
+        """Make mode buttons obvious: green means active/on, red means off."""
+        if btn is None:
+            return
+        color = MINT if on else RED
+        bg = self._mix(SURFACE2, color, 0.26 if on else 0.10)
+        hover = self._mix(SURFACE2, color, 0.38 if on else 0.20)
+        try:
+            if text is not None:
+                btn.configure(text=text)
+            btn.configure(bg=bg, fg=color, activebackground=hover,
+                          activeforeground=color, highlightbackground=color,
+                          highlightcolor=color)
+            btn._normal_bg = bg
+            btn._normal_border = color
+            btn._hover_bg = hover
+            btn._hover_border = self._mix(color, "#ffffff", 0.35)
+        except Exception:
+            pass
+
+    def _sync_youtube_buttons(self):
+        yt_on = self._youtube_mode == "youtube"
+        market_on = not yt_on
+        audio_on = yt_on and self._youtube_audio is not None and self._youtube_audio_mode
+        caption_on = yt_on and bool(self._youtube_chunks) and not audio_on
+        self._style_state_button(self.youtube_btn, caption_on, "SPEAK YOUTUBE")
+        self._style_state_button(
+            self.youtube_audio_btn, audio_on, "ALTER REAL YOUTUBE VOICE")
+        self._style_state_button(self.youtube_resume_btn, yt_on, "YOUTUBE")
+        self._style_state_button(self.market_mode_btn, market_on, "MARKET")
+
+    def _youtube_clock_tick(self):
+        try:
+            if getattr(self, "youtube_time_lbl", None) is not None:
+                self.youtube_time_lbl.configure(text=self._youtube_time_text())
+        except Exception:
+            pass
+        try:
+            self.root.after(1000, self._youtube_clock_tick)
+        except Exception:
+            pass
+
+    def _youtube_time_text(self):
+        if self._youtube_audio is not None:
+            pos = float(getattr(self._youtube_audio, "position_seconds", 0.0))
+            dur = float(getattr(self._youtube_audio, "duration", 0.0))
+            status = (getattr(self._youtube_audio, "status", "") or "").upper()
+            if dur > 0:
+                return f"YOUTUBE TIME {self._fmt_time(pos)} / {self._fmt_time(dur)}  {status}"
+            return f"YOUTUBE TIME {self._fmt_time(pos)}  {status}"
+        if self._youtube_chunks:
+            total = len(self._youtube_chunks)
+            idx = min(total, max(0, self._youtube_index))
+            pct = int(round(idx / max(1, total) * 100))
+            start = float(getattr(self, "_youtube_start_seconds", 0.0) or 0.0)
+            end = getattr(self, "_youtube_end_seconds", None)
+            dur = float(getattr(self, "_youtube_duration", 0.0) or 0.0)
+            range_end = float(end) if end is not None else (dur if dur > 0 else start)
+            span = max(0.0, range_end - start)
+            pos = start + span * (idx / max(1, total))
+            if dur > 0:
+                return f"YOUTUBE TIME {self._fmt_time(pos)} / {self._fmt_time(dur)}  TEXT {idx}/{total} {pct}%"
+            return f"YOUTUBE TIME {self._fmt_time(pos)}  TEXT {idx}/{total} {pct}%"
+        return "YOUTUBE TIME 00:00"
+
+    def _youtube_playback_progress(self):
+        if not self._youtube_chunks:
+            return 0.0
+        total = len(self._youtube_chunks)
+        idx = min(total, max(0, self._youtube_index))
+        return 90.0 + 10.0 * (idx / max(1, total))
+
+    def _youtube_range(self):
+        start = self._parse_youtube_time(self.youtube_from_var.get())
+        end = self._parse_youtube_time(self.youtube_to_var.get())
+        if start is not None and end is not None and end <= start:
+            raise ValueError("TO must be after FROM")
+        return start, end
+
+    def _youtube_range_label(self, start, end):
+        if start is None and end is None:
+            return ""
+        a = self._fmt_time(start or 0)
+        b = self._fmt_time(end) if end is not None else "end"
+        return f" [{a} -> {b}]"
+
+    @staticmethod
+    def _parse_youtube_time(value):
+        s = (value or "").strip()
+        if not s:
+            return None
+        try:
+            if ":" not in s:
+                return float(s) * 60.0
+            parts = [float(p) for p in s.split(":")]
+            if len(parts) == 2:
+                return parts[0] * 60.0 + parts[1]
+            if len(parts) == 3:
+                return parts[0] * 3600.0 + parts[1] * 60.0 + parts[2]
+        except Exception:
+            pass
+        raise ValueError("use minutes, mm:ss, or hh:mm:ss")
+
+    @staticmethod
+    def _fmt_time(seconds):
+        if seconds is None:
+            return "00:00"
+        seconds = max(0, int(seconds))
+        h, rem = divmod(seconds, 3600)
+        m, s = divmod(rem, 60)
+        if h:
+            return f"{h:d}:{m:02d}:{s:02d}"
+        return f"{m:02d}:{s:02d}"
+
+    def speak_youtube_audio(self, start_override=None):
+        """Play the real YouTube recording through a voice-only transform.
+
+        This path never transcribes the video and never invokes TTS. It preserves
+        the source performance and changes only its audible voice characteristics.
+        """
+        url = self.youtube_entry.get("1.0", "end").strip()
+        if not url:
+            return
+        if not self.running or self.engines is None:
+            self._log_msg("[studio] press START first.")
+            return
+        if self.live_mic is not None:
+            self._log_msg("[studio] Live Mic is on - real YouTube voice is disabled.")
+            return
+        if self._youtube_busy:
+            self._log_msg("[studio] YouTube audio is already loading.")
+            return
+        try:
+            start_s, end_s = self._youtube_range()
+        except ValueError as exc:
+            self._log_msg(f"[youtube] range error: {exc}")
+            return
+        if start_override is not None:
+            try:
+                start_s = max(0.0, float(start_override))
+            except (TypeError, ValueError):
+                start_s = 0.0
+            if end_s is not None and start_s >= float(end_s):
+                self._log_msg("[youtube] selected voice change after the selected range ended.")
+                return
+        self.youtube_audio_btn.configure(state="disabled", text="LOADING REAL AUDIO...")
+        self._youtube_busy = True
+        self._youtube_audio_mode = True
+        self._youtube_audio_status = ""
+        self._youtube_mohammed_mode = False
+        self._youtube_start_seconds = float(start_s or 0.0)
+        self._youtube_end_seconds = end_s
+        persona_label = self.youtube_persona_var.get()
+        persona_key = YOUTUBE_PERSONA_KEY.get(persona_label, "deep_male")
+        self._youtube_duration = 0.0
+        self._youtube_chunks = []
+        self._youtube_index = 0
+        try:
+            if self._youtube_audio is not None:
+                self._youtube_audio.stop()
+                self._youtube_audio = None
+            if self.tts is not None:
+                self.tts.clear_pending()
+                self.tts.set_muted(True)
+        except Exception:
+            pass
+        self._user_priority()
+        self._log_msg(
+            "[youtube] loading the original recording; TTS/model generation is off.")
+        self._set_youtube_progress(5, "Loading original YouTube audio...")
+
+        def _worker():
+            try:
+                from youtube_audio import YouTubeAudioPlayer
+
+                def _audio_status(msg):
+                    self._youtube_audio_status = msg
+                    self._log_msg(f"[youtube] real audio: {msg}")
+                    if msg.startswith("voice isolation ") and "%" in msg:
+                        try:
+                            phase_pct = int(
+                                msg.split("voice isolation ", 1)[1].split("%", 1)[0])
+                            self._bump_youtube_progress(
+                                35.0 + 47.0 * phase_pct / 100.0, msg)
+                        except (TypeError, ValueError):
+                            self._bump_youtube_progress(35, msg)
+                    elif "vocals ready" in msg or "isolated vocals" in msg:
+                        self._bump_youtube_progress(82, msg)
+                    elif "download" in msg or "cache" in msg:
+                        self._bump_youtube_progress(35, msg)
+                    elif "ffmpeg" in msg or "buffer" in msg:
+                        self._bump_youtube_progress(86, msg)
+                    elif "playing" in msg:
+                        self._bump_youtube_progress(94, "Playing altered original voice")
+                    elif msg == "ended":
+                        self._set_youtube_progress(100, "Original YouTube audio finished")
+                    try:
+                        self.root.after(0, self._sync_youtube_status)
+                    except Exception:
+                        pass
+
+                player = YouTubeAudioPlayer(
+                    self.engines["mt"],
+                    converter_kind=os.environ.get(
+                        "AVATAR_YOUTUBE_CONVERTER", "youtube-disguise"),
+                    persona=persona_key,
+                    smooth_transition=bool(self.youtube_smooth_var.get()),
+                    monitor=True,
+                    status_callback=_audio_status,
+                )
+                self._youtube_audio = player
+                player.set_muted(self._youtube_muted)
+                player.start(url, start_seconds=start_s, end_seconds=end_s)
+                self._youtube_title = player.title
+                self._youtube_duration = player.duration
+                self._set_youtube_mode("youtube")
+                self._set_youtube_progress(85, "Starting altered original voice...")
+                self._log_msg(
+                    f"[youtube] original performance: {player.title}"
+                    f"{self._youtube_range_label(start_s, end_s)}"
+                    f" -> {persona_label}; voice transform only")
+            except Exception as exc:
+                self._youtube_audio_mode = False
+                self._youtube_audio_status = "failed"
+                self._youtube_audio = None
+                self._set_youtube_progress(0, f"Failed: {exc}")
+                self._log_msg(f"[youtube] real audio failed: {exc}")
+                try:
+                    if self.tts is not None:
+                        self.tts.set_muted(False)
+                except Exception:
+                    pass
+            finally:
+                def _done():
+                    self._youtube_busy = False
+                    self.youtube_audio_btn.configure(
+                        state="normal", text="ALTER REAL YOUTUBE VOICE")
+                try:
+                    self.root.after(0, _done)
+                except Exception:
+                    self._youtube_busy = False
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_youtube_persona_change(self, event=None):
+        """Apply a newly selected persona immediately to active YouTube audio."""
+        label = self.youtube_persona_var.get()
+        self._log_msg(f"[youtube] alter voice persona -> {label}")
+        if not (self._youtube_audio is not None
+                and self._youtube_audio_mode
+                and self._youtube_mode == "youtube"):
+            return
+        resume_at = None
+        try:
+            resume_at = float(getattr(self._youtube_audio, "position_seconds", 0.0) or 0.0)
+        except Exception:
+            resume_at = None
+        try:
+            self._youtube_audio.stop()
+        except Exception:
+            pass
+        self._youtube_audio = None
+        self._youtube_audio_mode = False
+        self._youtube_busy = False
+        self._log_msg(
+            f"[youtube] continuing from {self._fmt_time(resume_at or 0.0)} with {label}")
+        self.root.after(
+            120, lambda: self.speak_youtube_audio(start_override=resume_at))
+
+    def _start_youtube_pump(self):
+        if self._youtube_pump_started:
+            return
+        self._youtube_pump_started = True
+
+        def _pump():
+            import time as _t
+            while True:
+                try:
+                    if not getattr(self, "running", False):
+                        _t.sleep(0.5)
+                        continue
+                    if self._youtube_mode != "youtube":
+                        _t.sleep(0.25)
+                        continue
+                    if not self._youtube_chunks:
+                        _t.sleep(0.25)
+                        continue
+                    if self._youtube_index >= len(self._youtube_chunks):
+                        self._set_youtube_progress(100, "YouTube speech finished")
+                        self._set_youtube_mode("market")
+                        self._log_msg("[youtube] finished. Market analysis resumed.")
+                        _t.sleep(1.0)
+                        continue
+                    if self.tts is None or getattr(self.tts, "pending", 0) >= 2:
+                        _t.sleep(0.25)
+                        continue
+                    chunk = self._youtube_chunks[self._youtube_index]
+                    self._youtube_index += 1
+                    self.tts.speak(chunk, priority=0)
+                    self._set_youtube_progress(
+                        self._youtube_playback_progress(),
+                        f"Speaking chunk {self._youtube_index}/{len(self._youtube_chunks)}")
+                    if (self._youtube_index % 10) == 0:
+                        self._log_msg(
+                            f"[youtube] progress {self._youtube_index}/{len(self._youtube_chunks)}")
+                    try:
+                        self.root.after(0, self._sync_youtube_status)
+                    except Exception:
+                        pass
+                except Exception as exc:
+                    self._log_msg(f"[youtube] pump error: {exc}")
+                    _t.sleep(1.0)
+
+        threading.Thread(target=_pump, daemon=True).start()
 
     # ---- ASK (Ollama answers, avatar speaks the reply) ----------------------
     def _on_ask_enter(self, event):
@@ -1791,6 +3993,9 @@ class AvatarStudio:
         """Send a question to the Ollama brain; the avatar speaks the answer."""
         if self.tts is None or not self.running:
             self._log_msg("[studio] press START first.")
+            return
+        if self.live_mic is not None:
+            self._log_msg("[studio] Live Mic is on — answer your viewers out loud into the mic (ASK is disabled).")
             return
         if self.brain is None or not self.brain.ok:
             why = self.brain.startup_check()[1] if self.brain else "brain not started"
@@ -1827,10 +4032,10 @@ class AvatarStudio:
     # MARKET-focused beats — used when gold is actually moving (lean into analysis,
     # levels, reactions). Mixed length so pacing stays unpredictable/human.
     _MARKET_BEATS = [
-        "Give a live update on where gold is trading and what you're watching.",
-        "Call out a key support or resistance level on gold and what you'd do around it.",
-        "React in the moment to gold's move and tell the chat exactly what level you're watching next and why.",
-        "Quick call: bullish or bearish on gold right now, and why, in a snappy line or two.",
+        "Give a live update on the ACTIVE MARKET and what you're watching.",
+        "Call out active-market support or resistance and what confirms the next move.",
+        "React to the current move using the exact fresh data and nearest level.",
+        "Give a concise bullish, bearish, or neutral read on the active market.",
         "Walk the chat through the gold chart right now — the trend and the nearest level that matters.",
         "Point out what gold is doing around the current price and the level you'd watch for a move.",
     ]
@@ -1848,9 +4053,9 @@ class AvatarStudio:
     # buffer the instant it runs dry so the avatar never goes silent. Chart-flavoured
     # so even the filler keeps the show on gold.
     _SHORT_BEATS = [
-        "One snappy line reacting to gold's price RIGHT NOW. One breath, high energy.",
-        "Quick call in one line: is gold pushing up or fading here?",
-        "Shout the current gold level and the one number you're watching next. One line.",
+        "One accurate line reacting to the ACTIVE MARKET right now.",
+        "Quick call: is the active market pushing, fading, or ranging?",
+        "Say the current price and exact next level you're watching.",
         "One quick line hyping the chat to smash that like while you watch gold.",
         "Your gut read on the gold chart this second — one punchy sentence.",
         "Drop a quick 'eyes on this level' callout for gold. One short line.",
@@ -1865,12 +4070,81 @@ class AvatarStudio:
     ]
     _AUTOTALK_BEATS = _MARKET_BEATS + _ENGAGE_BEATS    # union (compat)
 
+    def _select_active_market(self, force=False):
+        """Route open XAUUSD hours to gold and closed hours to live BTCUSD."""
+        from datetime import datetime
+        from market_session import xauusd_session, spoken_reopen
+
+        session = xauusd_session()
+        symbol = "XAUUSD" if session.is_open else "BTCUSD"
+        md = self.market_gold if session.is_open else self.market_btc
+        changed = force or symbol != self._market_symbol
+        self.market = md
+        self._market_symbol = symbol
+        self._market_session = session
+        if changed:
+            self._ma_hist = None
+            self._ma_prev = None
+            if self.brain_pool is not None:
+                try:
+                    self.brain_pool.clear()
+                except Exception:
+                    pass
+            chart = self.engines.get("chart") if self.engines else None
+            price = float(md.price) if md is not None else 0.0
+            if chart is not None and price > 0:
+                chart.set_market(symbol, price)
+            if not force and self._tv_proc is not None:
+                try:
+                    self._tv_proc.terminate()
+                except Exception:
+                    pass
+                self._tv_proc = None
+                tv_symbol = "OANDA:XAUUSD" if symbol == "XAUUSD" else "BINANCE:BTCUSDT"
+                self.root.after(0, lambda s=tv_symbol: self._launch_tradingview(s))
+            if not force:
+                if session.is_open:
+                    prompt = (
+                        "Gold has reopened. Tell viewers naturally that XAUUSD is open "
+                        "again, switch back to gold, and give one fresh observation.")
+                else:
+                    reopen = spoken_reopen(session, datetime.now().astimezone().tzinfo)
+                    prompt = (
+                        f"Tell viewers naturally that XAUUSD is closed for the "
+                        f"{session.reason} and reopens {reopen}. Explain that you are "
+                        "switching to live BTCUSD analysis now.")
+                try:
+                    self._event_q.put_nowait(("market", prompt + self._live_market_ctx()))
+                except Exception:
+                    pass
+            self._log_msg(f"[market] active instrument -> {symbol}")
+        return symbol, md, session
+
+    def _queue_initial_market_status(self):
+        """Make the first market line explain a closed-gold BTC handoff."""
+        from datetime import datetime
+        from market_session import spoken_reopen
+
+        symbol, _md, session = self._select_active_market()
+        if symbol != "BTCUSD":
+            return
+        reopen = spoken_reopen(session, datetime.now().astimezone().tzinfo)
+        prompt = (
+            f"Open with a natural live update: XAUUSD is closed for the "
+            f"{session.reason} and reopens {reopen}. Tell viewers you are switching "
+            "to BTCUSD, then give one concise Bitcoin observation from the exact data.")
+        try:
+            self._event_q.put_nowait(("market", prompt + self._live_market_ctx()))
+        except Exception:
+            pass
+
     def _live_market_ctx(self):
         """Build a REAL-TIME market context string for the brain — the actual live
         gold price + recent % move, fetched at THIS moment. Falls back to the
         simulated chart only if the live feed is down. Also keeps the on-screen
         chart price synced to reality so the visuals match the commentary."""
-        md = getattr(self, "market", None)
+        from datetime import datetime
+        symbol, md, session = self._select_active_market()
         price = None
         tk = {}
         if md is not None:
@@ -1879,17 +4153,17 @@ class AvatarStudio:
                 price = tk.get("price") or md.price
                 if price and price > 0:
                     chart = self.engines.get("chart") if self.engines else None
-                    if chart is not None:            # sync the visual chart to reality
-                        chart.price = price
+                    if chart is not None:
+                        chart.set_market(symbol, price)
             except Exception:
                 price = None
-        if not price:                                # live feed down -> simulated chart
-            chart = self.engines.get("chart") if self.engines else None
-            price = getattr(chart, "price", None)
-        if not price:
-            return ""
+        quote_age = max(0.0, time.time() - getattr(md, "_tick_t", 0.0)) if md else 1e9
+        if not price or quote_age > 10.0:
+            return (f" ACTIVE MARKET: {symbol}. LIVE DATA IS UNAVAILABLE OR STALE. "
+                    "Say data is temporarily unavailable and do not quote a price, "
+                    "level, trend, RSI, signal, or trade idea.")
         # assemble the PRECISE, real, this-second data the model must reason over
-        facts = [f"price ${price:,.2f}"]
+        facts = [f"price ${price:,.2f}", f"quote age {quote_age:.1f} seconds"]
         if tk:
             facts.append(f"24h change {tk['change_pct']:+.2f}%")
             facts.append(f"24h high ${tk['high']:,.0f}, 24h low ${tk['low']:,.0f}")
@@ -1911,9 +4185,26 @@ class AvatarStudio:
         except Exception:
             pass
         data = "; ".join(facts)
-        news = getattr(self, "_gold_news", "")
+        news = getattr(self, "_gold_news", "") if symbol == "XAUUSD" else ""
         news_clause = (f" Latest real market headline: \"{news}\" — you MAY weave in why "
                        "gold is moving if it fits, but never invent news.") if news else ""
+        if symbol == "XAUUSD":
+            source = ("XAUUSD is open. The live source is Binance PAXGUSDT, a "
+                      "tokenized-gold proxy, not an exact OTC XAUUSD broker quote.")
+            session_note = ""
+        else:
+            from market_session import spoken_reopen
+            reopen = spoken_reopen(session, datetime.now().astimezone().tzinfo)
+            source = "XAUUSD is closed. The active source is live Binance BTCUSDT."
+            session_note = (
+                f" State naturally that gold is closed for the {session.reason} and "
+                f"reopens {reopen}; then analyze Bitcoin, not gold.")
+        return (f" ACTIVE MARKET DATA RIGHT NOW: {symbol}; {data}. {source}{session_note}"
+                f"{news_clause} Use ONLY these supplied numbers. Never invent a price, "
+                "level, candle, news event, market status, or future outcome. Separate "
+                "observed facts from conditional scenarios. Analyze price versus support "
+                "and resistance, trend, RSI, range, and invalidation. Say every number "
+                "in plain spoken words. Do not use markdown or math notation.")
         return (f" LIVE GOLD DATA RIGHT NOW (XAUUSD, real, this second): {data}.{news_clause} "
                 "Reason like a sharp analyst USING ONLY THESE EXACT NUMBERS — never "
                 "invent a price or level. Read what's ACTUALLY happening: where price "
@@ -1927,17 +4218,18 @@ class AvatarStudio:
         """Detect a SIGNIFICANT live gold event (round-level cross or sharp move) and
         return a brain prompt to announce it live, or None. Tracks price history; rate-
         limited so it doesn't spam."""
-        md = getattr(self, "market", None)
+        symbol, md, _session = self._select_active_market()
         if md is None:
             return None
         try:
             price = float(md.price)
         except Exception:
             return None
-        if not price or price <= 0:
+        quote_age = time.time() - getattr(md, "_tick_t", 0.0)
+        if not price or price <= 0 or quote_age > 10.0:
             return None
         now = time.monotonic()
-        if not hasattr(self, "_ma_hist"):
+        if not getattr(self, "_ma_hist", None):
             import collections as _c
             self._ma_hist = _c.deque(maxlen=60)
             self._ma_last = 0.0
@@ -1947,22 +4239,26 @@ class AvatarStudio:
             self._ma_prev = price
             return None
         alert = None
-        lvl = 25                            # gold "round" levels every $25
+        lvl = 25 if symbol == "XAUUSD" else 500
+        asset = "gold" if symbol == "XAUUSD" else "Bitcoin"
         if int(price // lvl) != int(self._ma_prev // lvl):     # crossed a round level
             crossed = (int(price // lvl) * lvl if price > self._ma_prev
                        else (int(price // lvl) + 1) * lvl)
-            alert = (f"BREAKING: gold just crossed ${crossed:,} and is now ${price:,.0f}. "
+            alert = (f"BREAKING: {asset} just crossed ${crossed:,} and is now ${price:,.0f}. "
                      "React live to this level break — support, resistance, or breakout? "
                      "One short, energetic sentence.")
         else:                               # sharp % move over ~90s
             ref = next((p for t, p in self._ma_hist if now - t >= 80), None)
             if ref:
                 pct = (price - ref) / ref * 100.0
-                if abs(pct) >= 0.22:
+                move_threshold = 0.22 if symbol == "XAUUSD" else 0.35
+                if abs(pct) >= move_threshold:
                     d = "spiking UP" if pct > 0 else "DROPPING"
                     alert = (f"Gold is {d} fast — now ${price:,.0f}, "
                              f"{'+' if pct > 0 else '-'}{abs(pct):.2f}% in minutes. React live to "
                              "this move and what it means for traders. Short and energetic.")
+        if alert and symbol == "BTCUSD":
+            alert = alert.replace("Gold", "Bitcoin").replace("gold", "Bitcoin")
         self._ma_prev = price
         if alert:
             self._ma_last = now
@@ -1984,11 +4280,12 @@ class AvatarStudio:
                     alert = self._check_market_alert()
                     if alert:
                         self._event_q.put_nowait(("market", alert))
-                    if cal is not None:                  # imminent high-impact news
+                    if self._market_symbol == "XAUUSD" and cal is not None:
                         news = cal.next_alert()
                         if news:
                             self._event_q.put_nowait(("market", news))
-                    self._refresh_gold_news()            # real headlines (cached ~6 min)
+                    if self._market_symbol == "XAUUSD":
+                        self._refresh_gold_news()
                     self._poll_tick()                    # buy/sell poll lifecycle
             except Exception:
                 pass
@@ -2075,13 +4372,14 @@ class AvatarStudio:
         # Look-ahead = 2 so a NEXT line is always synthesized and ready the instant
         # the current one ends — no dead air between lines (streamers never leave
         # silence). The music bed covers any micro-gap while a line generates.
-        LEAD = 3                  # keep ~3 lines buffered so the voice never runs dry
+        LEAD = 2                  # fresher analysis while retaining one-line cushion
         i = 0
         while getattr(self, "running", False):
             try:
                 tts = self.tts
-                if (not getattr(self, "autotalk_var", None) or not self.autotalk_var.get()
-                        or self.brain is None or not self.brain.ok or tts is None):
+                if (self.live_mic is not None       # YOU own the mouth in Live-Mic mode
+                        or getattr(self, "_youtube_mode", "market") == "youtube"
+                        or tts is None):
                     _t.sleep(0.4)
                     continue
                 # YIELD to the user: if you just ASKed/SPEAKed, stay quiet so the
@@ -2092,23 +4390,25 @@ class AvatarStudio:
                 # PRIORITY 1 (checked BEFORE the buffer pace): react to gifts /
                 # follows / shares / like-milestones IMMEDIATELY — thank supporters
                 # without waiting for the line buffer to drain.
-                if self._react_one_event():
+                if self._ready_speech_snapshot() is not None:
+                    _t.sleep(0.15)
                     continue
                 # PRIORITY 2: ANSWER THE CHAT in real time — checked BEFORE the buffer
                 # pace, so a busy voice queue never delays a viewer's reply. If a
                 # comment is waiting, answer it now (the reply jumps the filler queue);
                 # only fall through to commentary when the chat is quiet.
-                if not self._comment_q.empty():
-                    if self._answer_one_comment():
-                        self._last_comment_t = _t.monotonic()
-                        continue
+                if (not getattr(self, "autotalk_var", None)
+                        or not self.autotalk_var.get()
+                        or self.brain is None or not self.brain.ok):
+                    _t.sleep(0.4)
+                    continue
                 # pace COMMENTARY (filler only) to the look-ahead so we don't over-queue.
                 if tts.pending > LEAD:
                     _t.sleep(0.2)
                     continue
                 import random as _r
                 active = self._market_active()
-                mode = "market" if (active or _r.random() < 0.4) else "engage"
+                mode = "market" if (active or _r.random() < 0.78) else "engage"
                 # keep talking with no dead air: instant pre-generated line first
                 line = None
                 if self.brain_pool is not None:
@@ -2141,6 +4441,7 @@ class AvatarStudio:
         """Called from the TikTok reader thread for every live comment — queue it
         (or count it as a poll vote if a buy/sell poll is running)."""
         try:
+            self._comment_times.append(time.time())
             self._feed_msg(f"{user}:  {text}", "q")     # show ALL comments live
             poll = self._poll
             if poll is not None:
@@ -2150,6 +4451,7 @@ class AvatarStudio:
                 if t in ("2", "sell", "short", "sell gold", "bear"):
                     poll["sell"] += 1; return
             self._comment_q.put_nowait((user, text))
+            self._live_response_event.set()
         except Exception:
             pass        # queue full = drop (we're behind on a comment flood)
 
@@ -2189,12 +4491,16 @@ class AvatarStudio:
             self._sess_coins += max(0, int(coins))
             rx = self._reactions()
             if rx is not None:                    # gifts to the FRONT (lead priority)
-                self._prio_events.appendleft(rx.gift(user, gift, count, coins))
+                self._stage_urgent_event(
+                    self._with_live_room_context(rx.ready_gift(user, gift, coins)),
+                    f"gift from {user}", front=True)
             if self._sess_coins >= self._coin_goal:           # gift goal reached!
                 reached = self._coin_goal
                 self._coin_goal += int(os.environ.get("AVATAR_COIN_GOAL", "200"))
                 if rx is not None:
-                    self._prio_events.append(rx.goal(reached))
+                    self._prio_events.append(
+                        self._with_live_room_context(rx.goal(reached)))
+                    self._live_response_event.set()
         except Exception:
             pass
 
@@ -2202,8 +4508,13 @@ class AvatarStudio:
         try:
             self._sess_follows += 1
             self._feed_msg(f"➕ {user} followed", "ev")
-            # buffer the name; _react_one_event batches a burst into ONE thank-you
-            self._pending_follows.append(str(user))
+            # The fixed line was rendered at boot, so this event is ready immediately.
+            rx = self._reactions()
+            if rx is not None:
+                self._log_msg(f"[follow] received from {user}")
+                self._stage_urgent_event(
+                    self._with_live_room_context(rx.ready_follow(user)),
+                    f"follow from {user}")
         except Exception:
             pass
 
@@ -2212,9 +4523,62 @@ class AvatarStudio:
             self._feed_msg(f"↪ {user} shared the stream", "ev")
             rx = self._reactions()
             if rx is not None:
-                self._prio_events.append(rx.share(user))
+                self._log_msg(f"[share] received from {user}")
+                self._stage_urgent_event(
+                    self._with_live_room_context(rx.ready_share(user)),
+                    f"share from {user}")
         except Exception:
             pass
+
+    def _live_room_context(self):
+        """Short spoken room snapshot for live reactions and comment answers."""
+        try:
+            parts = []
+            viewers = getattr(self, "_sess_viewers", None)
+            if viewers is not None:
+                parts.append(f"{max(0, int(viewers)):,} viewers")
+            likes = max(0, int(getattr(self, "_sess_likes", 0) or 0))
+            if likes:
+                parts.append(f"{likes:,} likes")
+            if not parts:
+                return ""
+            if len(parts) == 1:
+                return f"Right now we have {parts[0]} in the room."
+            return f"Right now we have {parts[0]} and {parts[1]} in the room."
+        except Exception:
+            return ""
+
+    def _with_live_room_context(self, text):
+        ctx = self._live_room_context()
+        text = (text or "").strip()
+        if not text or not ctx:
+            return text
+        if "Right now we have" in text:
+            return text
+        return f"{text} [[CUT]] {ctx}"
+
+    def _live_stream_ctx(self):
+        market = ""
+        try:
+            market = self._live_market_ctx() or ""
+        except Exception:
+            market = ""
+        room = self._live_room_context()
+        if room:
+            return (market + " " + f"Live room context: {room}").strip()
+        return market
+
+    def _stage_urgent_event(self, text, detail, front=False):
+        """Make a pre-rendered acknowledgement green directly from TikTok."""
+        if self._prepare_speech_button(
+                text, kind="urgent", priority=2, detail=detail):
+            return True
+        if front:
+            self._prio_events.appendleft(text)
+        else:
+            self._prio_events.append(text)
+        self._live_response_event.set()
+        return False
 
     def _on_like(self, user, total):
         # celebrate only when we CROSS a milestone (likes fire constantly otherwise)
@@ -2223,19 +4587,28 @@ class AvatarStudio:
             if total and total >= self._next_like_ms:
                 rx = self._reactions()
                 if rx is not None:
-                    self._prio_events.append(rx.likes(total))
+                    self._prio_events.append(
+                        self._with_live_room_context(rx.likes(total)))
+                    self._live_response_event.set()
                 step = 500 if total < 1000 else (1000 if total < 10000 else 5000)
                 self._next_like_ms = ((total // step) + 1) * step
         except Exception:
             pass
 
+    def _on_viewers(self, total):
+        """Receive TikTok's concurrent room count immediately when it changes."""
+        try:
+            self._sess_viewers = max(0, int(total or 0))
+        except Exception:
+            pass
+
     def _react_one_event(self):
-        """Speak the next live event. TOP priority = INSTANT offline reactions
-        (follows/gifts/shares/likes/goals, already built as text) which clear the
-        filler queue and play immediately. Then market alerts / polls from the
-        secondary queue (these may use the LLM). Returns True if the avatar spoke."""
+        """Prepare supporter reactions; keep market alerts and polls automatic."""
         try:
             if self.tts is None:
+                return False
+            current = self._ready_speech_snapshot("urgent")
+            if current is not None and int(current.get("priority", 0)) >= 2:
                 return False
             # 1) INSTANT appreciation — speak NOW, jump ahead of any filler commentary
             if self._prio_events:
@@ -2244,17 +4617,10 @@ class AvatarStudio:
                 except IndexError:
                     txt = None
                 if txt:
-                    # priority 2 = appreciation: clear everything queued below it
-                    # (filler + comments) so the thank-you lands right now, and a
-                    # later comment's clear (below=1) can never drop a queued one.
-                    try:
-                        self.tts.clear_pending(below=2)
-                    except Exception:
-                        pass
-                    self._log_msg("avatar> " + txt)
-                    self.tts.speak(txt, priority=2)
-                    self._last_spoke_t = time.monotonic()
-                    return True
+                    return self._prepare_speech_button(
+                        self._with_live_room_context(txt), kind="urgent", priority=2,
+                        detail="supporter appreciation"
+                    )
             # 1b) BATCHED follows — thank a burst of follows in one quick line
             if self._pending_follows:
                 names = []
@@ -2266,14 +4632,10 @@ class AvatarStudio:
                 rx = self._reactions()
                 txt = rx.follow_many(names) if rx is not None else None
                 if txt:
-                    try:
-                        self.tts.clear_pending(below=2)
-                    except Exception:
-                        pass
-                    self._log_msg("avatar> " + txt)
-                    self.tts.speak(txt, priority=2)
-                    self._last_spoke_t = time.monotonic()
-                    return True
+                    return self._prepare_speech_button(
+                        self._with_live_room_context(txt),
+                        kind="urgent", priority=2, detail="new followers"
+                    )
             # 2) market alerts / polls (secondary — may phrase via the brain)
             if self._event_q.empty():
                 return False
@@ -2312,16 +4674,37 @@ class AvatarStudio:
             self._log_msg(f"[events] {exc}")
             return False
 
+    def _live_response_loop(self):
+        """Wake immediately for TikTok activity; no timed polling while connected."""
+        while not getattr(self, "_live_stop", False):
+            self._live_response_event.wait()
+            self._live_response_event.clear()
+            if getattr(self, "_live_stop", False):
+                break
+            try:
+                if self.tts is None or not self.running:
+                    continue
+                if self._prio_events or self._pending_follows:
+                    if self._ready_speech_snapshot("urgent") is None:
+                        self._react_one_event()
+                    continue
+                if (self.brain is not None and self.brain.ok
+                        and not self._comment_q.empty()
+                        and self._ready_speech_snapshot("comment") is None):
+                    if self._answer_one_comment():
+                        self._last_comment_t = time.monotonic()
+            except Exception as exc:
+                self._log_msg(f"[live dispatcher] {exc}")
+
     def _answer_one_comment(self):
-        """Pop the next live comment; if it's worth answering, speak the answer.
-        Returns True if the avatar spoke (so the loop skips its scripted line)."""
+        """Prepare one worthwhile comment answer for release from the top button."""
         try:
             # lazily build the responder once the brain finished loading (the reader
             # may have started before START was pressed).
             if self.responder is None and self.brain is not None:
                 try:
                     from comment_responder import CommentResponder
-                    self.responder = CommentResponder(self.brain, get_context=self._live_market_ctx)
+                    self.responder = CommentResponder(self.brain, get_context=self._live_stream_ctx)
                 except Exception:
                     pass
             if self.responder is None or self._comment_q.empty() or self.tts is None:
@@ -2335,23 +4718,275 @@ class AvatarStudio:
             # to a genuine answer, so the NOW-ANSWERING bar shows real ones only.
             reply = self.responder.respond(user, text, on_answering=self._set_answering)
             if reply:
+                reply = self._with_live_room_context(reply)
                 self._log_msg(f"↳ {user}: {text}")
                 self._log_msg(f"avatar→{user}> {reply}")
                 self._feed_msg(f"\U0001f916 → {user}:  {reply}", "a")
-                # priority 1 = comment: clear only FILLER (below=1) so the reply plays
-                # promptly, but NEVER drop a queued follow/gift thank-you (priority 2).
-                try:
-                    self.tts.clear_pending(below=1)
-                except Exception:
-                    pass
-                self.tts.speak(reply, priority=1)   # bar shows the comment until spoken
-                self._clear_answering()
-                return True
+                return self._prepare_speech_button(
+                    reply, kind="comment", priority=1,
+                    detail=f"{user}: {text}", clear_answering=True
+                )
             self._clear_answering()
             return False
         except Exception as exc:
             self._log_msg(f"[comments] {exc}")
             return False
+
+    @staticmethod
+    def _ready_speech_slot(kind):
+        return "comment" if kind == "comment" else "urgent"
+
+    def _ready_speech_snapshot(self, kind=None):
+        lock = getattr(self, "_ready_speech_lock", None)
+        if lock is None:
+            return None
+        with lock:
+            slots = getattr(self, "_ready_speech_slots", None)
+            if slots is None:
+                item = self._ready_speech
+                return dict(item) if item is not None else None
+            if kind is not None:
+                item = slots.get(self._ready_speech_slot(kind))
+                return dict(item) if item is not None else None
+            items = [item for item in slots.values() if item is not None]
+            if not items:
+                return None
+            items.sort(key=lambda item: int(item.get("priority", 0)), reverse=True)
+            return dict(items[0])
+
+    def _ready_speech_any(self):
+        return self._ready_speech_snapshot() is not None
+
+    def _clear_ready_speech(self):
+        """Discard staged audio and invalidate any preparation still in flight."""
+        with self._ready_speech_lock:
+            self._ready_speech_token += 1
+            self._ready_speech = None
+            self._ready_speech_deferred = None
+            slots = getattr(self, "_ready_speech_slots", None)
+            if slots is not None:
+                for key in slots:
+                    slots[key] = None
+            deferred = getattr(self, "_ready_speech_deferred_slots", None)
+            if deferred is not None:
+                for key in deferred:
+                    deferred[key] = None
+
+    def _clear_ready_speech_slot(self, kind):
+        slot = self._ready_speech_slot(kind)
+        with self._ready_speech_lock:
+            self._ready_speech_token += 1
+            slots = getattr(self, "_ready_speech_slots", None)
+            if slots is not None:
+                slots[slot] = None
+            deferred = getattr(self, "_ready_speech_deferred_slots", None)
+            if deferred is not None:
+                deferred[slot] = None
+            if slot == "urgent":
+                self._ready_speech = None
+                self._ready_speech_deferred = None
+
+    def _prepare_speech_button(self, text, kind, priority, detail="",
+                               clear_answering=False):
+        """Reserve the top button, render the voice, then mark it green."""
+        text = (text or "").strip()
+        if not text or self.tts is None:
+            return False
+        slot = self._ready_speech_slot(kind)
+        with self._ready_speech_lock:
+            slots = getattr(self, "_ready_speech_slots", None)
+            if slots is None:
+                slots = self._ready_speech_slots = {"urgent": None, "comment": None}
+            deferred_slots = getattr(self, "_ready_speech_deferred_slots", None)
+            if deferred_slots is None:
+                deferred_slots = self._ready_speech_deferred_slots = {
+                    "urgent": None, "comment": None}
+            current = slots.get(slot)
+            if current is not None and int(current.get("priority", 0)) >= int(priority):
+                return False
+            if current is not None:
+                deferred_slots[slot] = {
+                    key: current.get(key) for key in (
+                        "text", "kind", "priority", "detail", "clear_answering"
+                    )
+                }
+            self._ready_speech_token += 1
+            token = self._ready_speech_token
+            item = {
+                "token": token, "text": text, "kind": kind,
+                "priority": int(priority), "detail": detail,
+                "status": "preparing", "clear_answering": bool(clear_answering),
+            }
+            slots[slot] = item
+            if slot == "urgent":
+                self._ready_speech = item
+        try:
+            self.tts.clear_pending(below=priority)
+        except Exception:
+            pass
+
+        already_ready = False
+        try:
+            already_ready = bool(self.tts.is_prepared(text))
+        except Exception:
+            pass
+        if already_ready:
+            with self._ready_speech_lock:
+                current = self._ready_speech_slots.get(slot)
+                if current is not None and current.get("token") == token:
+                    current["status"] = "ready"
+            self._log_msg(f"[ready] {kind}: press the green top button")
+            return True
+
+        def _prepare():
+            ok = False
+            try:
+                ok = bool(self.tts is not None and self.tts.prepare(text))
+            except Exception as exc:
+                self._log_msg(f"[ready voice] {exc}")
+            with self._ready_speech_lock:
+                current = self._ready_speech_slots.get(slot)
+                if current is None or current.get("token") != token:
+                    return
+                if ok:
+                    current["status"] = "ready"
+                else:
+                    self._ready_speech_slots[slot] = None
+                    if slot == "urgent":
+                        self._ready_speech = None
+            if ok:
+                self._log_msg(f"[ready] {kind}: press the green top button")
+            elif clear_answering:
+                self._clear_answering()
+
+        threading.Thread(target=_prepare, daemon=True).start()
+        return True
+
+    def _play_ready_speech(self, kind=None):
+        """Release prepared audio immediately when the green button is pressed."""
+        slot = self._ready_speech_slot(kind) if kind is not None else None
+        with self._ready_speech_lock:
+            if slot is None:
+                ready_items = [
+                    item for item in self._ready_speech_slots.values()
+                    if item is not None and item.get("status") == "ready"]
+                ready_items.sort(
+                    key=lambda item: int(item.get("priority", 0)), reverse=True)
+                item = ready_items[0] if ready_items else None
+                slot = self._ready_speech_slot(
+                    item.get("kind")) if item is not None else "urgent"
+            else:
+                item = self._ready_speech_slots.get(slot)
+            if item is None or item.get("status") != "ready":
+                self._log_msg("[ready] click ignored: voice is not ready")
+                return
+        if self.tts is None or not self.running:
+            self._log_msg("[ready] cannot speak: TTS is not running")
+            return
+        if self.live_mic is not None:
+            self._log_msg("[ready] AI voice activated over Live Mic for acknowledgement")
+        youtube_state = self._pause_youtube_for_ready_speech()
+        self.tts.set_muted(False)
+        self._sync_audio_mute_buttons()
+        try:
+            self.tts.interrupt_current()
+            self.tts.clear_pending()
+        except Exception:
+            pass
+        accepted = self.tts.speak(item["text"], priority=int(item["priority"]))
+        if not accepted:
+            self._restore_youtube_after_ready_speech(youtube_state)
+            self._log_msg("[ready] TTS rejected the line; button remains ready")
+            return
+        with self._ready_speech_lock:
+            current = self._ready_speech_slots.get(slot)
+            if current is None or current.get("token") != item.get("token"):
+                return
+            self._ready_speech_slots[slot] = None
+            if slot == "urgent":
+                self._ready_speech = None
+            deferred = self._ready_speech_deferred_slots.get(slot)
+            self._ready_speech_deferred_slots[slot] = None
+        self._log_msg("[ready] pressed; speech queued")
+        self._log_msg("avatar> " + item["text"])
+        self._last_spoke_t = time.monotonic()
+        self._user_active_until = time.monotonic() + 4.0
+        if youtube_state is not None:
+            threading.Thread(
+                target=self._wait_and_restore_youtube,
+                args=(youtube_state,), daemon=True
+            ).start()
+        if item.get("clear_answering"):
+            self._clear_answering()
+        if deferred is not None and slot == "comment":
+            self._prepare_speech_button(**deferred)
+        else:
+            self._live_response_event.set()
+
+    def _skip_ready_speech(self, kind):
+        slot = self._ready_speech_slot(kind)
+        item = self._ready_speech_snapshot(slot)
+        if item is None:
+            self._log_msg("[ready] nothing to skip")
+            return
+        self._clear_ready_speech_slot(slot)
+        if slot == "comment" or item.get("clear_answering"):
+            self._clear_answering()
+        if slot == "urgent":
+            try:
+                self._pending_follows.clear()
+            except Exception:
+                pass
+        self._log_msg(f"[ready] skipped {slot}")
+        self._live_response_event.set()
+
+    def _pause_youtube_for_ready_speech(self):
+        """Silence real YouTube playback while an urgent response takes the mouth."""
+        player = self._youtube_audio
+        if player is None:
+            return None
+        state = {
+            "player": player,
+            "was_running": bool(getattr(player, "_running", False)),
+            "was_paused": bool(getattr(player, "_paused", None)
+                               and player._paused.is_set()),
+            "was_muted": bool(getattr(player, "muted", False)),
+            "tts_was_muted": bool(getattr(self.tts, "muted", False)),
+        }
+        try:
+            player.set_muted(True)
+            player.pause()
+            self._log_msg("[ready] YouTube audio paused for urgent speech")
+        except Exception as exc:
+            self._log_msg(f"[ready] could not pause YouTube audio: {exc}")
+        return state
+
+    def _wait_and_restore_youtube(self, state):
+        """Resume the exact YouTube player after the urgent TTS queue becomes idle."""
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
+            tts = self.tts
+            if tts is None or getattr(tts, "pending", 0) <= 0:
+                break
+            time.sleep(0.02)
+        self._restore_youtube_after_ready_speech(state)
+
+    def _restore_youtube_after_ready_speech(self, state):
+        if not state:
+            return
+        player = state.get("player")
+        if player is None or player is not self._youtube_audio:
+            return
+        try:
+            player.set_muted(bool(state.get("was_muted", False)))
+            if (state.get("was_running") and not state.get("was_paused")
+                    and self._youtube_mode == "youtube"):
+                player.resume()
+            if self.tts is not None:
+                self.tts.set_muted(bool(state.get("tts_was_muted", False)))
+            self._log_msg("[ready] YouTube audio restored")
+        except Exception as exc:
+            self._log_msg(f"[ready] could not restore YouTube audio: {exc}")
 
     def _feed_msg(self, text, kind="sys"):
         """Append one line to the live-comments feed below the avatar. Thread-safe.
@@ -2453,34 +5088,49 @@ class AvatarStudio:
         client = None
         client_handle = None
         while not getattr(self, "_live_stop", False):
-            handle = (self.handle_var.get() or "").strip()
+            handle = (getattr(self, "_handle_text", "") or "").strip()
             if not handle:
                 if last is not None:
                     self._set_live_light("none")
                     last = None
                 _t.sleep(1.2)
                 continue
-            if not handle.startswith("@"):
-                handle = "@" + handle
+            unique_id = handle.lstrip("@")
+            display_handle = "@" + unique_id
             try:
                 from TikTokLive import TikTokLiveClient
                 # reuse ONE client per handle so we don't leak an HTTP session
                 # on every poll over a multi-hour stream.
-                if client is None or handle != client_handle:
-                    client = TikTokLiveClient(unique_id=handle)
-                    client_handle = handle
+                if client is None or unique_id != client_handle:
+                    client = TikTokLiveClient(unique_id=unique_id)
+                    client_handle = unique_id
                 live = bool(asyncio.get_event_loop().run_until_complete(
                     client.is_live()))
             except Exception:
-                live = False
+                # A network/API failure is unknown, not an offline transition.
+                # Keep the last confirmed state and retry on the next poll.
+                _t.sleep(3.0)
+                continue
             self._handle_live = live
             self._set_live_light("live" if live else "off")
             if live != last:
-                self._log_msg(f"[live] {handle} is "
+                self._log_msg(f"[live] {display_handle} is "
                               + ("LIVE \U0001f7e2 — comments incoming" if live
                                  else "offline \U0001f534"))
                 if live:
-                    self._save_handle(handle)      # confirmed real handle -> remember it
+                    self._save_handle(display_handle)
+                if last is not None:
+                    try:
+                        from startup_sound import (
+                            play_live_offline_sound,
+                            play_live_online_sound,
+                        )
+                        if live:
+                            play_live_online_sound()
+                        else:
+                            play_live_offline_sound()
+                    except Exception:
+                        pass
                 last = live
             # auto-connect the comment reader the moment the stream goes live
             if (live and self.comments_var.get() and self.tiktok is None
@@ -2559,6 +5209,8 @@ class AvatarStudio:
         try:
             handle = (self.handle_var.get() or "").strip()
             self._drain_queue(self._comment_q)        # forget stale comments
+            self._clear_ready_speech()
+            self._clear_answering()
             if self.tiktok is not None:               # drop the old connection
                 try:
                     self.tiktok.stop()
@@ -2585,6 +5237,7 @@ class AvatarStudio:
                 self._pending_follows.clear()
             except Exception:
                 pass
+            self._clear_ready_speech()
             self._clear_answering()
             try:                                       # we're on the Tk thread here
                 self.feed.configure(state="normal")
@@ -2603,6 +5256,9 @@ class AvatarStudio:
             if not self.comments_var.get():
                 if self.tiktok is not None:
                     self.tiktok.stop(); self.tiktok = None
+                self._sess_viewers = None
+                self._clear_ready_speech()
+                self._clear_answering()
                 self._log_msg("[comments] off")
                 return
             handle = (self.handle_var.get() or "").strip()
@@ -2617,11 +5273,12 @@ class AvatarStudio:
             # The reader can run without the brain (it just READS comments); answers
             # begin as soon as the brain is loaded (responder is created lazily).
             if self.responder is None and self.brain is not None:
-                self.responder = CommentResponder(self.brain, get_context=self._live_market_ctx)
+                self.responder = CommentResponder(self.brain, get_context=self._live_stream_ctx)
             if self.tiktok is None:
                 self.tiktok = TikTokComments(handle, self._on_comment,
                                              on_gift=self._on_gift, on_follow=self._on_follow,
-                                             on_like=self._on_like, on_share=self._on_share)
+                                             on_like=self._on_like, on_share=self._on_share,
+                                             on_viewers=self._on_viewers)
                 self.tiktok.start()
             note = "" if self.brain is not None else " (answers begin after START)"
             self._log_msg(f"[comments] reading {handle} — comments + gifts/follows{note}")
@@ -2754,10 +5411,16 @@ class AvatarStudio:
                 self._log_msg(f"[studio] recenter failed: {exc}")
 
     def toggle_mute(self):
-        if self.tts is None:
+        # In Live-Mic mode the AI voice is already muted; the button mutes the
+        # voice-changer MONITOR instead (the avatar mouth keeps tracking your mic).
+        if self.live_mic is not None:
+            self.live_mic.set_muted(not self.live_mic.muted)
+            muted = self.live_mic.muted
+        elif self.tts is not None:
+            self.tts.set_muted(not self.tts.muted)
+            muted = self.tts.muted
+        else:
             return
-        self.tts.set_muted(not self.tts.muted)
-        muted = self.tts.muted
         self.mute_btn.configure(text="UNMUTE" if muted else "MUTE",
                                 bg=RED if muted else BG2,
                                 fg="#ffffff" if muted else FG)
@@ -2766,6 +5429,105 @@ class AvatarStudio:
     def _on_voice(self, *args):
         if self.tts is not None:
             self.tts.set_voice(self.voice_var.get())
+
+    # ----- LIVE MIC (voice changer) -----------------------------------------
+    def _vc_key(self):
+        """Selected voice-changer converter key (rvc / dsp / passthrough)."""
+        return dict(getattr(self, "VC_MODES", [])).get(self.vcmode_var.get(), "rvc")
+
+    def _mic_device_index(self):
+        """Parse 'N: name' from the mic dropdown -> device index, or None (default)."""
+        s = self.micdev_var.get()
+        if ":" in s:
+            try:
+                return int(s.split(":", 1)[0])
+            except Exception:
+                return None
+        return None
+
+    def _on_live_mic(self, *args):
+        if bool(self.livemic_var.get()):
+            self._start_live_mic()
+        else:
+            self._stop_live_mic()
+
+    def _start_live_mic(self):
+        """Build + start the LiveVoiceEngine on the SAME mouth engine the TTS feeds,
+        and mute the AI host so only one source drives the mouth at a time."""
+        if not self.running or self.engines is None:
+            self._log_msg("[studio] press START first, then enable Live Mic.")
+            self.livemic_var.set(False)
+            return
+        if self.live_mic is not None:
+            return
+        try:
+            from voice_changer_engine import LiveVoiceEngine, make_converter
+            mt = self.engines.get("mt")
+            eng = LiveVoiceEngine(mt, converter=make_converter(self._vc_key()),
+                                  in_device=self._mic_device_index())
+            try:
+                eng.set_gain(self.micgain_var.get())
+            except Exception:
+                pass
+            ok, msg = eng.startup_check()
+            if not ok:
+                self._log_msg(f"[studio] live mic unavailable: {msg}")
+                self.livemic_var.set(False)
+                return
+            if self.tts is not None:
+                try:
+                    self.tts.clear_pending()
+                except Exception:
+                    pass
+                self.tts.set_muted(True)        # avatar speaks from YOUR mic now
+            eng.set_muted(self._mic_monitor_muted)
+            eng.start()
+            self.live_mic = eng
+            self._sync_audio_mute_buttons()
+            self._log_msg(f"[studio] LIVE MIC on — {msg}. AI host muted; talk into the mic.")
+        except Exception as exc:
+            self._log_msg(f"[studio] live mic failed: {exc}")
+            self.live_mic = None
+            self.livemic_var.set(False)
+
+    def _stop_live_mic(self):
+        eng = self.live_mic
+        self.live_mic = None
+        if eng is not None:
+            try:
+                eng.shutdown()
+            except Exception:
+                pass
+            if self.tts is not None:
+                self.tts.set_muted(False)       # restore the AI voice
+            self._log_msg("[studio] live mic off — AI voice restored.")
+        self._sync_audio_mute_buttons()
+
+    def _on_vcmode(self, *args):
+        """Hot-swap the voice changer (RVC / DSP / passthrough) while live."""
+        if self.live_mic is None:
+            return
+        try:
+            from voice_changer_engine import make_converter
+            self.live_mic.set_converter(make_converter(self._vc_key()))
+            self._log_msg(f"[studio] voice changer -> {self.vcmode_var.get()}")
+        except Exception as exc:
+            self._log_msg(f"[studio] voice changer switch failed: {exc}")
+
+    def _on_micdev(self, *args):
+        """Restart the live mic on the newly selected input device."""
+        if self.live_mic is None:
+            return
+        self._stop_live_mic()
+        self._start_live_mic()
+
+    def _on_micgain(self, *args):
+        """Live mic-boost slider — apply immediately while talking."""
+        if self.live_mic is not None:
+            try:
+                self.live_mic.set_gain(self.micgain_var.get())
+            except Exception:
+                pass
 
     def _on_voice_mode(self, *args):
         """Switch the TTS backend live, then warm its model in the background.
@@ -2870,12 +5632,46 @@ class AvatarStudio:
             self._log_msg("[studio] background music " + ("ON" if on else "off"))
         self._sync_music_btn()
 
+    def _on_background(self, *args):
+        """Apply a background preset immediately."""
+        name = self.background_var.get()
+        enabled = name != "No Background"
+        self.background_on_var.set(enabled)
+        if enabled:
+            self._last_background = name
+        try:
+            import enhance_engine as ee
+            ee.set_background_preset(name)
+        except Exception as exc:
+            self._log_msg(f"[studio] background switch failed: {exc}")
+            return
+        self._log_msg("[studio] background -> " + name)
+
+    def _on_background_toggle(self, *args):
+        """Explicitly disable replacement or restore the last selected preset."""
+        enabled = bool(self.background_on_var.get())
+        if enabled:
+            name = getattr(self, "_last_background",
+                           "Wall Street LED / Midnight Blue")
+            if name == "No Background":
+                name = "Wall Street LED / Midnight Blue"
+        else:
+            current = self.background_var.get()
+            if current != "No Background":
+                self._last_background = current
+            name = "No Background"
+        if self.background_var.get() != name:
+            self.background_var.set(name)
+        else:
+            self._on_background()
+
     def _toggle_music(self):
         """Top mute button: flip the background music on/off."""
         if getattr(self, "music_var", None) is None:
             return
         self.music_var.set(not self.music_var.get())
         self._on_music()
+        self._sync_audio_mute_buttons()
 
     def _toggle_speech(self):
         """Top mute button: silence the bot's VOICE (lips keep moving)."""
@@ -2884,10 +5680,186 @@ class AvatarStudio:
             return
         self.tts.set_muted(not self.tts.muted)
         muted = self.tts.muted
-        self.speech_btn.configure(text="🔇 SPEECH" if muted else "🎤 SPEECH",
-                                  fg=RED if muted else MAG,
-                                  highlightbackground=self._mix(RED if muted else MAG, BG, 0.5))
         self._log_msg("[studio] bot speech " + ("MUTED" if muted else "on"))
+        self._sync_audio_mute_buttons()
+
+    def _toggle_youtube_mute(self):
+        """Mute only the original/altered YouTube voice source."""
+        self._youtube_muted = not self._youtube_muted
+        if self._youtube_audio is not None:
+            self._youtube_audio.set_muted(self._youtube_muted)
+        self._log_msg("[studio] YouTube voice "
+                      + ("MUTED" if self._youtube_muted else "on"))
+        self._sync_audio_mute_buttons()
+
+    def _toggle_mic_monitor_mute(self):
+        """Mute only the local Live Mic monitor output."""
+        self._mic_monitor_muted = not self._mic_monitor_muted
+        if self.live_mic is not None:
+            self.live_mic.set_muted(self._mic_monitor_muted)
+        self._log_msg("[studio] Live Mic monitor "
+                      + ("MUTED" if self._mic_monitor_muted else "on"))
+        self._sync_audio_mute_buttons()
+
+    def _toggle_youtube_smooth(self):
+        """Blend real YouTube voice starts/stops so source changes are less obvious."""
+        if getattr(self, "youtube_smooth_var", None) is None:
+            return
+        enabled = not bool(self.youtube_smooth_var.get())
+        self.youtube_smooth_var.set(enabled)
+        if self._youtube_audio is not None:
+            self._youtube_audio.smooth_transition = enabled
+        self._sync_youtube_smooth_button()
+        self._log_msg("[studio] YouTube voice smoothing "
+                      + ("ON" if enabled else "OFF"))
+
+    def _sync_youtube_smooth_button(self):
+        btn = getattr(self, "youtube_smooth_btn", None)
+        if btn is None or getattr(self, "youtube_smooth_var", None) is None:
+            return
+        enabled = bool(self.youtube_smooth_var.get())
+        color = MINT if enabled else RED
+        bg = self._mix(SURFACE2, color, 0.22 if enabled else 0.10)
+        try:
+            btn.configure(
+                text="SMOOTH VOICE" if enabled else "VOICE HARD CUT",
+                bg=bg,
+                fg=color,
+                activebackground=self._mix(SURFACE2, color, 0.32),
+                activeforeground=color,
+                highlightbackground=self._mix(color, BG, 0.45),
+            )
+        except Exception:
+            pass
+
+    def _sync_audio_mute_buttons(self):
+        """Label every audible source and show its independent mute state."""
+        states = (
+            (getattr(self, "speech_btn", None), "AI",
+             bool(self.tts is not None and self.tts.muted)),
+            (getattr(self, "youtube_mute_btn", None), "YOUTUBE",
+             bool(self._youtube_muted)),
+            (getattr(self, "music_btn", None), "MUSIC",
+             not bool(getattr(self, "music_var", None) and self.music_var.get())),
+            (getattr(self, "mic_mute_btn", None), "MIC",
+             bool(self._mic_monitor_muted)),
+        )
+        for btn, label, muted in states:
+            if btn is None:
+                continue
+            try:
+                btn.configure(
+                    text=f"{label}  {'OFF' if muted else 'ON'}",
+                    fg=RED if muted else MINT,
+                    activeforeground=RED if muted else MINT,
+                    activebackground=self._mix(
+                        SURFACE2, RED if muted else MINT, 0.18),
+                )
+            except Exception:
+                pass
+
+    def _audio_source_control(self, parent, key, command, column):
+        """Create one mute button with a compact live output meter below it."""
+        wrap = tk.Frame(
+            parent, bg=SURFACE2, highlightthickness=1,
+            highlightbackground=BORDER)
+        wrap.grid(row=0, column=column, sticky="nsew", padx=2)
+        btn = tk.Button(
+            wrap, command=command, bg=SURFACE2, fg=MINT,
+            relief="flat", bd=0, font=("Segoe UI", 8, "bold"),
+            cursor="hand2")
+        btn.pack(fill="x", ipady=1)
+        meter = tk.Canvas(
+            wrap, height=7, bg=SURFACE2, highlightthickness=0, bd=0)
+        meter.pack(fill="x", padx=5, pady=(1, 4))
+        bars = []
+        for i in range(10):
+            bars.append(meter.create_rectangle(
+                2 + i * 7, 2, 6 + i * 7, 5, fill=BORDER, outline=""))
+        self._audio_meters[key] = (wrap, meter, bars)
+        self._audio_meter_levels[key] = 0.0
+        return btn
+
+    @staticmethod
+    def _meter_value(rms):
+        """Map normal audio RMS values to a readable 0..1 meter."""
+        if rms <= 0.001:
+            return 0.0
+        return max(0.0, min(1.0, (rms - 0.001) / 0.24))
+
+    def _update_audio_meters(self):
+        """Refresh meters from the actual output level of every audio source."""
+        tts = self.tts
+        youtube = self._youtube_audio
+        music = self.music
+        mic = self.live_mic
+        raw = {
+            "ai": (
+                getattr(tts, "audio_level", 0.0)
+                if tts is not None and getattr(tts, "speaking", False)
+                and not getattr(tts, "muted", False) else 0.0),
+            "youtube": (
+                getattr(youtube, "audio_level", 0.0)
+                if youtube is not None and getattr(youtube, "speaking", False)
+                and not self._youtube_muted else 0.0),
+            "music": (
+                getattr(music, "audio_level", 0.0)
+                if music is not None and getattr(music, "active", False)
+                and getattr(self, "music_var", None)
+                and self.music_var.get() else 0.0),
+            "mic": (
+                getattr(mic, "last_rms", 0.0)
+                if mic is not None and getattr(mic, "speaking", False)
+                and not self._mic_monitor_muted else 0.0),
+        }
+        for key, rms in raw.items():
+            target = self._meter_value(float(rms or 0.0))
+            previous = self._audio_meter_levels.get(key, 0.0)
+            level = target if target > previous else previous * 0.72
+            self._audio_meter_levels[key] = level
+            meter_info = self._audio_meters.get(key)
+            if meter_info is None:
+                continue
+            wrap, canvas, bars = meter_info
+            width = max(54, canvas.winfo_width())
+            gap = 2
+            bar_w = max(2, (width - 4 - gap * (len(bars) - 1)) / len(bars))
+            lit = int(round(level * len(bars)))
+            active = lit > 0
+            wrap.configure(
+                highlightbackground=(
+                    self._mix(MINT, BORDER, 0.45) if active else BORDER))
+            for i, item in enumerate(bars):
+                x1 = 2 + i * (bar_w + gap)
+                color = (MINT if i < 7 else AMBER if i < 9 else RED)
+                canvas.coords(item, x1, 2, x1 + bar_w, 5)
+                canvas.itemconfigure(
+                    item, fill=color if i < lit else BORDER)
+
+    def _toggle_ai_mouth(self):
+        """Switch AI voice lip-sync on/off without stopping speech."""
+        enabled = not bool(self.ai_mouth_var.get())
+        self.ai_mouth_var.set(enabled)
+        self.liplock_var.set(enabled)
+        self._sync_mouth_btn()
+        if self.engines:
+            try:
+                self.engines["lp"].set_lip_lock(enabled)
+            except Exception:
+                pass
+        self._log_msg("[studio] mouth mode: "
+                      + ("AI VOICE lip-sync" if enabled else "AVATAR native mouth"))
+
+    def _sync_mouth_btn(self):
+        """Reflect the active mouth source in the top-bar button."""
+        if getattr(self, "mouth_btn", None) is None:
+            return
+        enabled = bool(self.ai_mouth_var.get())
+        color = MINT if enabled else AMBER
+        self.mouth_btn.configure(
+            text="AI MOUTH" if enabled else "AVATAR MOUTH",
+            fg=color,
+            highlightbackground=self._mix(color, BG, 0.5))
 
     def _run_autoconfig(self):
         """Background: probe + benchmark the machine, then apply the picked config
@@ -2957,33 +5929,25 @@ class AvatarStudio:
 
     def _sync_music_btn(self):
         """Make the top button reflect the current music state."""
-        if getattr(self, "music_btn", None) is None:
-            return
-        on = bool(getattr(self, "music_var", None) and self.music_var.get())
-        try:
-            if on:
-                self.music_btn.configure(text="♪ MUSIC", fg=CYAN,
-                                         highlightbackground=self._mix(CYAN, BG, 0.5))
-            else:
-                self.music_btn.configure(text="🔇 MUTED", fg=RED,
-                                         highlightbackground=self._mix(RED, BG, 0.5))
-        except Exception:
-            pass
+        self._sync_audio_mute_buttons()
 
     def _on_liplock(self):
+        enabled = bool(self.liplock_var.get())
+        self.ai_mouth_var.set(enabled)
+        self._sync_mouth_btn()
         if self.engines:
             try:
-                self.engines["lp"].set_lip_lock(self.liplock_var.get())
+                self.engines["lp"].set_lip_lock(enabled)
                 self._log_msg("[studio] lips: "
-                              + ("BOT VOICE only (your mouth ignored)"
-                                 if self.liplock_var.get() else "follow your webcam mouth"))
+                              + ("AI VOICE only (native mouth suppressed)"
+                                 if enabled else "AVATAR native mouth"))
             except Exception:
                 pass
 
     def _on_swap(self):
         # FACE-SWAP shows YOUR real head/mouth — mutually exclusive with bot-only
         # lips. Turning it on disables the lip-lock.
-        if self.swap_var.get() and getattr(self, "liplock_var", None) and self.liplock_var.get():
+        if self.swap_var.get() and not self.ai_mouth_var.get():
             self.liplock_var.set(False)
             self._log_msg("[studio] FACE-SWAP on — shows YOUR real mouth "
                           "(lip-lock off). Untick it for bot-only lips.")
@@ -3099,6 +6063,7 @@ class AvatarStudio:
     def _on_close(self):
         self.running = False
         self._live_stop = True
+        self._live_response_event.set()
         if self.brain_pool is not None:
             try:
                 self.brain_pool.stop()
@@ -3114,6 +6079,10 @@ class AvatarStudio:
         for fn in (lambda: self.cap.release() if self.cap else None,
                    lambda: self.obs_cam.close() if self.obs_cam else None,
                    lambda: self._tv_proc.terminate() if self._tv_proc else None,
+                   lambda: self.market_gold.stop() if self.market_gold else None,
+                   lambda: self.market_btc.stop() if self.market_btc else None,
+                   lambda: self._youtube_audio.stop() if self._youtube_audio else None,
+                   lambda: self.live_mic.shutdown() if self.live_mic else None,
                    lambda: self.tts.shutdown() if self.tts else None,
                    lambda: self.music.stop() if self.music else None):
             try:
@@ -3148,6 +6117,7 @@ def main():
         print("[studio] Avatar Studio is ALREADY RUNNING — only one instance is "
               "allowed (so only one bot speaks). Exiting this one.")
         return
+    _configure_windows_app_identity()
     root = tk.Tk()
     AvatarStudio(root)
     root.mainloop()

@@ -34,6 +34,8 @@ tts_cache/
 tts_samples/
 data_prep/data/
 pretrained_weights/
+data/youtube_cache/
+music/
 
 # --- facexlib / gfpgan auto-download weight caches ---
 gfpgan/weights/

@@ -37,18 +37,19 @@ MOUTH_LANDMARKS = [
     78, 308, 13, 14, 87, 317, 37, 267, 82, 312,        # inner lip
     91, 321, 146, 375,                                  # lower outer
 ]
-PAD_X = float(os.environ.get("AVATAR_MOUTH_PADX", "0.36"))   # cover lip corners
-PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.18"))   # stop at upper lip (not the philtrum) = no under-nose shadow
+PAD_X = float(os.environ.get("AVATAR_MOUTH_PADX", "0.22"))
+PAD_Y_TOP = float(os.environ.get("AVATAR_MOUTH_PADTOP", "0.10"))
 # more room below = the jaw/chin drop on an open mouth is captured -> the mouth
 # OPENING reads clearly instead of being clipped.
-PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.56"))
-FEATHER_KERNEL = 31   # GaussianBlur kernel for the alpha edge feather (odd) - softer, no seam
+PAD_Y_BOTTOM = float(os.environ.get("AVATAR_MOUTH_PADBOT", "0.34"))
+FEATHER_KERNEL = 15
 COLOR_MATCH_STRENGTH = float(os.environ.get("AVATAR_MOUTH_COLORMATCH", "0.4"))   # eased from 0.6 (it shifted the dark open-mouth interior toward skin = muted the opening)
 # Unsharp-mask strength on the soft Wav2Lip mouth (0 = off). The studio only
 # overlays the Wav2Lip mouth WHILE SPEAKING (idle uses the clean LP mouth), so a
 # mild amount crisps up the talking mouth without the idle-artifact issue. 0.3 is
 # a safe, natural amount; raise for more bite, lower if it looks over-sharpened.
-MOUTH_SHARPEN = float(os.environ.get("AVATAR_MOUTH_SHARPEN", "0.3"))
+MOUTH_SHARPEN = float(os.environ.get("AVATAR_MOUTH_SHARPEN", "0.48"))
+DETAIL_TRANSFER = float(os.environ.get("AVATAR_MOUTH_DETAIL", "0.55"))
 MIN_BBOX = 12         # reject degenerate detections smaller than this (px)
 
 
@@ -101,7 +102,7 @@ class Compositor:
                 cx, cy, mw = mouth_hint
                 mw = max(12.0, float(mw))
                 bw = mw * (1.0 + 2 * PAD_X)             # mouth width + corners
-                bh = mw * 0.75                          # mouth height ~ 0.75 * width
+                bh = mw * 0.55
                 x1 = int(cx - bw / 2); x2 = int(cx + bw / 2)
                 y1 = int(cy - bh * (0.5 + PAD_Y_TOP))   # room above the upper lip
                 y2 = int(cy + bh * (0.5 + PAD_Y_BOTTOM))  # room below for jaw drop
@@ -159,12 +160,14 @@ class Compositor:
         return (x1, y1, x2, y2)
 
     # -------------------------------------------------------------------------
-    def blend_mouth(self, lp_frame, synced_mouth_crop, bbox):
+    def blend_mouth(self, lp_frame, synced_mouth_crop, bbox, exclusive=False):
         """Composite the synced mouth crop onto lp_frame within bbox.
 
         Uses a feathered alpha mask (so the bbox edges melt into the surrounding
         face) and a mean-shift colour match (so the synced crop's skin tone
-        matches the LivePortrait face it is dropped into). Never raises.
+        matches the LivePortrait face it is dropped into). In exclusive mode the
+        AI mouth owns nearly the full box so native lips cannot show through.
+        Never raises.
         """
         try:
             x1, y1, x2, y2 = bbox
@@ -177,10 +180,12 @@ class Compositor:
             if region.size == 0:
                 return lp_frame
 
-            # Size the crop to the destination region.
+            # Size the crop to the destination region. Lanczos keeps lip/teeth
+            # edges cleaner when the generated mouth is scaled during turns.
             crop = synced_mouth_crop
             if crop.shape[:2] != (bh, bw):
-                crop = cv2.resize(crop, (bw, bh))
+                crop = cv2.resize(crop, (bw, bh),
+                                  interpolation=cv2.INTER_LANCZOS4)
             # SHARPEN the soft 96px Wav2Lip mouth (it's the blurriest, most-watched
             # region, and the CodeFormer restore ran BEFORE the mouth so it never
             # touched it). An unsharp mask adds crisp lip/teeth detail so it reads
@@ -199,16 +204,35 @@ class Compositor:
             shift = (ref_mean - crop_mean) * COLOR_MATCH_STRENGTH
             crop = np.clip(crop + shift, 0, 255)
 
+            # Restore high-frequency texture from the original beard/skin around
+            # the generated lips. The center ellipse remains fully generated so
+            # native lip shapes cannot leak back into the AI mouth.
+            if DETAIL_TRANSFER > 0 and min(bw, bh) >= 12:
+                original_detail = region_f - cv2.GaussianBlur(
+                    region_f, (0, 0), 1.15
+                )
+                yy, xx = np.ogrid[:bh, :bw]
+                nx = (xx - bw * 0.5) / max(1.0, bw * 0.34)
+                ny = (yy - bh * 0.54) / max(1.0, bh * 0.28)
+                lip_center = np.clip(1.0 - (nx * nx + ny * ny), 0.0, 1.0)
+                texture_mask = (1.0 - lip_center)[:, :, None]
+                crop = np.clip(
+                    crop + original_detail * texture_mask * DETAIL_TRANSFER,
+                    0, 255,
+                )
+
             # --- feathered alpha mask (1 inside, ramping to 0 at the edges) ---
             # Border kept SMALL (10%) so the whole mouth sits in the fully-replaced
             # centre — otherwise the operator's lip corners / jaw motion leak in
             # through the edges (the "my mouth still syncs" bug). The box is padded
             # generously (PAD_*), so this 10% feather lands on cheek/chin SKIN.
             mask = np.ones((bh, bw), dtype=np.float32)
-            border = max(2, int(min(bw, bh) * 0.15))
+            border_ratio = 0.035 if exclusive else 0.10
+            border = max(2, int(min(bw, bh) * border_ratio))
             mask[:border, :] = 0; mask[-border:, :] = 0
             mask[:, :border] = 0; mask[:, -border:] = 0
-            k = FEATHER_KERNEL | 1
+            k = (max(3, int(min(bw, bh) * 0.055)) | 1) if exclusive \
+                else (FEATHER_KERNEL | 1)
             mask = cv2.GaussianBlur(mask, (k, k), 0)
             mask = np.clip(mask, 0.0, 1.0)[:, :, None]
 

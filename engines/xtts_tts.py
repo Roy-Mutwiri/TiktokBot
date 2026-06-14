@@ -21,6 +21,7 @@
 import os
 import re
 import sys
+import hashlib
 
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -51,6 +52,7 @@ _ta.load = _sf_load     # XTTS's load_audio() calls torchaudio.load internally
 import glob as _glob
 _PROJECT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _REFDIR = os.path.join(_PROJECT, "voice_refs")
+_XTTS_CACHE = os.path.join(_PROJECT, "data", "xtts_cache")
 
 
 def _default_refs():
@@ -78,18 +80,18 @@ XTTS_REF = XTTS_REFS[0]
 # chunking (below) to keep every generation short. repetition_penalty prevents the
 # autoregressive repeat/garble loop. All env-tunable.
 XTTS_TEMP = float(os.environ.get("AVATAR_XTTS_TEMP", "0.65"))      # stable sweet spot
-XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "2.0"))  # high = artifacts
+XTTS_REP_PEN = float(os.environ.get("AVATAR_XTTS_REP_PENALTY", "1.55"))
 XTTS_TOP_K = int(os.environ.get("AVATAR_XTTS_TOP_K", "50"))
 XTTS_TOP_P = float(os.environ.get("AVATAR_XTTS_TOP_P", "0.80"))
 XTTS_LEN_PEN = float(os.environ.get("AVATAR_XTTS_LEN_PENALTY", "1.0"))
 # A calm, natural man speaks measured — XTTS at 1.0 rushes and reads "AI". 0.88 lands
 # a relaxed human pace; dynamic pacing (below) nudges it faster when excited / slower
 # when analysing. Env-tunable.
-XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "0.80"))
+XTTS_SPEED = float(os.environ.get("AVATAR_XTTS_SPEED", "0.92"))
 PACE_DYNAMIC = os.environ.get("AVATAR_XTTS_DYNAMIC_PACE", "1") == "1"
 PACE_FAST = float(os.environ.get("AVATAR_XTTS_PACE_FAST", "1.10"))   # excited multiplier
 PACE_SLOW = float(os.environ.get("AVATAR_XTTS_PACE_SLOW", "0.95"))   # calm/analytical multiplier
-XTTS_GAP = float(os.environ.get("AVATAR_XTTS_GAP", "0.09"))          # pause between segments (s)
+XTTS_GAP = float(os.environ.get("AVATAR_XTTS_GAP", "0.035"))
 # Converting transliterated Arabic to Arabic SCRIPT mid-line forces XTTS to code-
 # switch — one line becomes many tiny separate clips (gaps + slow Arabic) = choppy,
 # laggy, unintelligible. OFF by default: the line stays ONE smooth English synthesis.
@@ -234,6 +236,48 @@ def codeswitch_segments(text):
     return [(" ".join(ws), lang) for ws, lang in segs]
 
 
+def _latent_cache_path(refs):
+    os.makedirs(_XTTS_CACHE, exist_ok=True)
+    h = hashlib.sha256()
+    h.update(MODEL_NAME.encode("utf-8"))
+    h.update(b"|gpt_cond_len=30|max_ref_length=60|")
+    for path in refs:
+        try:
+            st = os.stat(path)
+            ident = f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
+        except OSError:
+            ident = os.path.abspath(path)
+        h.update(ident.encode("utf-8", errors="ignore"))
+        h.update(b"\n")
+    return os.path.join(_XTTS_CACHE, "mohammed_latents_" + h.hexdigest()[:16] + ".pt")
+
+
+def _load_latents(path, device):
+    try:
+        if not os.path.exists(path):
+            return None
+        data = _torch.load(path, map_location=device)
+        gpt = data.get("gpt_latent")
+        spk = data.get("speaker_embedding")
+        if gpt is None or spk is None:
+            return None
+        return gpt, spk
+    except Exception as exc:
+        print(f"[XTTS] latent cache ignored ({exc})")
+        return None
+
+
+def _save_latents(path, gpt_latent, speaker_embedding):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _torch.save({
+            "gpt_latent": gpt_latent,
+            "speaker_embedding": speaker_embedding,
+        }, path)
+    except Exception as exc:
+        print(f"[XTTS] latent cache save failed ({exc})")
+
+
 class XTTSBackend:
     """Resident XTTS-v2. synthesize(text) -> (float32 mono audio, sample_rate)."""
 
@@ -280,9 +324,17 @@ class XTTSBackend:
             raise RuntimeError("no XTTS reference audio found")
         print(f"[XTTS] cloning from {len(refs)} reference clip(s): "
               + ", ".join(os.path.basename(p) for p in refs))
-        # compute the speaker latents ONCE from ALL refs -> richer, fast per-line
-        self._gpt_latent, self._spk_emb = self._model.get_conditioning_latents(
-            audio_path=refs, gpt_cond_len=30, max_ref_length=60)
+        latent_path = _latent_cache_path(refs)
+        latents = _load_latents(latent_path, self.device)
+        if latents is not None:
+            self._gpt_latent, self._spk_emb = latents
+            print(f"[XTTS] loaded cached Mohammed speaker latents: {os.path.basename(latent_path)}")
+        else:
+            # Compute from all Mohammed refs once, then persist for later launches.
+            self._gpt_latent, self._spk_emb = self._model.get_conditioning_latents(
+                audio_path=refs, gpt_cond_len=30, max_ref_length=60)
+            _save_latents(latent_path, self._gpt_latent, self._spk_emb)
+            print(f"[XTTS] saved Mohammed speaker latents: {os.path.basename(latent_path)}")
         self._laugh_wav = self._load_clip(os.path.join(_REFDIR, "laugh.wav"))
         self._breath_wav = self._load_clip(os.path.join(_REFDIR, "breath.wav"))
         self._warmup()

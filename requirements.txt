@@ -11,6 +11,7 @@ huggingface_hub
 sounddevice
 librosa
 soundfile
+demucs
 scipy
 tqdm
 
