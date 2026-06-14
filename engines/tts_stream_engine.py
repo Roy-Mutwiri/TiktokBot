@@ -183,6 +183,7 @@ class TTSStreamEngine:
         self._interrupt_serial = 0
         self._audio_stream = None
         self._audio_lock = threading.Lock()
+        self._playback_match_persona = None
         try:
             self._resample(np.zeros(32, np.float32), SAMPLE_RATE, PLAYBACK_RATE)
         except Exception:
@@ -497,6 +498,10 @@ class TTSStreamEngine:
         self.tts_backend = name
         print(f"[TTS] backend -> {name}")
         return True, name
+
+    def set_playback_voice_match(self, persona=None):
+        """Temporarily color TTS playback toward the active YouTube voice persona."""
+        self._playback_match_persona = (persona or "").strip().lower() or None
 
     def warm_backend(self):
         """Load the current backend's model now (blocking) so the first SPEAK
@@ -986,6 +991,58 @@ class TTSStreamEngine:
             audio = audio * (0.94 / peak)
         return audio.astype(np.float32)
 
+    def _match_youtube_playback_voice(self, audio, rate):
+        """Light post-filter so acknowledgements sit closer to YouTube voice mode."""
+        persona = self._playback_match_persona
+        if not persona or os.environ.get("AVATAR_READY_MATCH_YOUTUBE", "1") != "1":
+            return audio
+        y = np.asarray(audio, dtype=np.float32).flatten()
+        if not len(y):
+            return y
+        profiles = {
+            "deep_male": (-4.0, 0.82, 0.90),
+            "warm_male": (-2.0, 0.92, 0.96),
+            "young_male": (1.0, 1.03, 1.02),
+            "broadcast_male": (-1.0, 0.95, 0.92),
+            "natural_woman": (3.0, 1.08, 1.03),
+            "warm_woman": (2.0, 1.04, 1.00),
+            "bright_woman": (4.0, 1.12, 1.06),
+            "low_woman": (1.0, 1.00, 0.96),
+        }
+        semitones, formant, warmth = profiles.get(persona, profiles["deep_male"])
+        try:
+            import librosa
+            if abs(semitones) >= 0.05:
+                y = librosa.effects.pitch_shift(
+                    y, sr=int(rate), n_steps=float(semitones), n_fft=2048)
+                y = np.asarray(y, dtype=np.float32)
+        except Exception:
+            pass
+        try:
+            from scipy.signal import butter, sosfilt
+            low = max(40.0, min(180.0, 70.0 * formant))
+            high = max(9000.0, min(rate / 2 - 200.0, 14500.0 * formant))
+            sos = butter(2, [low, high], btype="bandpass", fs=rate, output="sos")
+            y = sosfilt(sos, y).astype(np.float32)
+        except Exception:
+            pass
+        # Add the same warm, controlled center-speaker character as altered YouTube.
+        warm = np.empty_like(y)
+        lp = 0.0
+        for i, sample in enumerate(y):
+            lp = 0.985 * lp + 0.015 * float(sample)
+            warm[i] = sample + 0.18 * warmth * lp
+        y = np.tanh(warm * 1.08) / np.tanh(1.08)
+        fade = min(len(y) // 4, max(1, int(rate * 0.08)))
+        if fade > 1:
+            ramp = np.linspace(0.0, 1.0, fade, dtype=np.float32)
+            y[:fade] *= ramp
+            y[-fade:] *= ramp[::-1]
+        peak = float(np.max(np.abs(y))) or 1.0
+        if peak > 0.92:
+            y = y * (0.92 / peak)
+        return y.astype(np.float32)
+
     def _play_direct(self, pcm, rate):
         """Write speech through one persistent float stream."""
         import sounddevice as sd
@@ -993,6 +1050,7 @@ class TTSStreamEngine:
         audio = self._condition_playback(pcm)
         if rate != PLAYBACK_RATE:
             audio = self._resample(audio, rate, PLAYBACK_RATE)
+        audio = self._match_youtube_playback_voice(audio, PLAYBACK_RATE)
         try:
             with self._audio_lock:
                 if self.muted:

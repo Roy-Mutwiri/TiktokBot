@@ -4986,11 +4986,15 @@ class AvatarStudio:
                                and player._paused.is_set()),
             "was_muted": bool(getattr(player, "muted", False)),
             "tts_was_muted": bool(getattr(self.tts, "muted", False)),
+            "tts_voice_match": getattr(self.tts, "_playback_match_persona", None),
         }
         try:
+            persona = getattr(player, "persona", None)
+            if self.tts is not None and persona:
+                self.tts.set_playback_voice_match(persona)
             player.set_muted(True)
             player.pause()
-            self._log_msg("[ready] YouTube audio paused for urgent speech")
+            self._log_msg("[ready] YouTube audio paused; matching acknowledgement voice")
         except Exception as exc:
             self._log_msg(f"[ready] could not pause YouTube audio: {exc}")
         return state
@@ -5017,6 +5021,7 @@ class AvatarStudio:
                     and self._youtube_mode == "youtube"):
                 player.resume()
             if self.tts is not None:
+                self.tts.set_playback_voice_match(state.get("tts_voice_match"))
                 self.tts.set_muted(bool(state.get("tts_was_muted", False)))
             self._log_msg("[ready] YouTube audio restored")
         except Exception as exc:
