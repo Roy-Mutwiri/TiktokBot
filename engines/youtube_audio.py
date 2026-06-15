@@ -86,8 +86,12 @@ class YouTubeAudioPlayer:
             self.stop()
         audio_url, title, duration, cache_hit = _resolve_audio_source(
             url, self._set_status)
-        if os.environ.get("AVATAR_YOUTUBE_VOCALS_ONLY", "1") == "1":
+        if (os.environ.get("AVATAR_YOUTUBE_VOCALS_ONLY", "0") == "1"
+                and os.path.isfile(audio_url)):
             audio_url = _isolate_vocals(audio_url, self._set_status)
+        elif not os.path.isfile(audio_url):
+            self._set_status(
+                "live stream connected - voice isolation skipped for low latency")
         self.title = title
         self.duration = float(duration or 0.0)
         self.start_seconds = float(start_seconds or 0.0)
@@ -337,11 +341,34 @@ def _resolve_audio_source(url, status_callback=None):
         _status(status_callback, "found audio in local db/cache")
         return cached["audio_path"], cached["title"], cached["duration"], True
 
-    _status(status_callback, "new link - downloading youtube audio to cache")
     try:
         import yt_dlp
     except Exception as exc:
         raise YouTubeAudioError(f"yt-dlp is not installed ({exc})")
+    probe_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "format": "bestaudio/best",
+    }
+    _status(status_callback, "checking youtube link")
+    try:
+        with yt_dlp.YoutubeDL(probe_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+    except Exception as exc:
+        raise YouTubeAudioError(f"could not read YouTube audio ({exc})")
+
+    title = (info or {}).get("title") or "YouTube audio"
+    duration = float((info or {}).get("duration") or 0.0)
+    if _is_live_info(info):
+        audio_url = _select_live_audio_url(info)
+        if not audio_url:
+            raise YouTubeAudioError(
+                "the live video is online but no playable audio stream was found")
+        _status(status_callback, "live stream found - connecting without download")
+        return audio_url, title, duration, False
+
+    _status(status_callback, "new link - downloading youtube audio to cache")
     out_dir = audio_dir(url)
     opts = {
         "quiet": True,
@@ -365,6 +392,36 @@ def _resolve_audio_source(url, status_callback=None):
     save_audio(url, title, duration, audio_path)
     _status(status_callback, "saved audio in local db/cache")
     return audio_path, title, duration, False
+
+
+def _is_live_info(info):
+    info = info or {}
+    return bool(
+        info.get("is_live")
+        or info.get("live_status") == "is_live"
+    )
+
+
+def _select_live_audio_url(info):
+    info = info or {}
+    requested = info.get("requested_formats") or []
+    candidates = list(requested) + list(info.get("formats") or [])
+    candidates.append(info)
+    audio = [
+        fmt for fmt in candidates
+        if fmt.get("url") and fmt.get("acodec") not in (None, "none")
+    ]
+    if not audio:
+        return ""
+    audio.sort(
+        key=lambda fmt: (
+            fmt.get("vcodec") == "none",
+            float(fmt.get("abr") or 0.0),
+            float(fmt.get("tbr") or 0.0),
+        ),
+        reverse=True,
+    )
+    return audio[0]["url"]
 
 
 def _find_downloaded_audio(out_dir):
@@ -670,6 +727,12 @@ def _build_ffmpeg_cmd(audio_url, start_seconds=0.0, end_seconds=None,
     fast_seek = max(0.0, start_seconds - 120.0) if start_seconds > 120.0 else 0.0
     fine_seek = start_seconds - fast_seek
     cmd = [FFMPEG, "-hide_banner", "-loglevel", "error"]
+    if str(audio_url).lower().startswith(("http://", "https://")):
+        cmd += [
+            "-reconnect", "1",
+            "-reconnect_streamed", "1",
+            "-reconnect_delay_max", "5",
+        ]
     if fast_seek > 0:
         cmd += ["-ss", str(fast_seek)]
     cmd += ["-i", audio_url]

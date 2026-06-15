@@ -429,6 +429,16 @@ class TTSStreamEngine:
         self.synthesizing = False
         self._set_speaking(False)
 
+    def soft_interrupt_current(self):
+        """Stop at the next audio block without aborting the native device."""
+        self._interrupt_serial += 1
+        try:
+            self.mouth.end_audio()
+        except Exception:
+            pass
+        self.synthesizing = False
+        self._set_speaking(False)
+
     def speak(self, text, priority=0):
         """Queue text to be spoken (priority: 0 filler, 1 comment, 2 appreciation)."""
         text = (text or "").strip()
@@ -980,12 +990,16 @@ class TTSStreamEngine:
 
     @staticmethod
     def _condition_playback(pcm):
-        """Sanitize and peak-limit speech without adding saturation."""
+        """Sanitize, level quiet speech, and peak-limit without saturation."""
         audio = np.asarray(pcm, dtype=np.float32).flatten()
         if not len(audio):
             return audio
         audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0)
         audio = audio - float(np.mean(audio))
+        rms = float(np.sqrt(np.mean(audio * audio)) + 1e-9)
+        target_rms = float(os.environ.get("AVATAR_TTS_TARGET_RMS", "0.115"))
+        if rms > 1e-5 and rms < target_rms:
+            audio = audio * min(3.0, target_rms / rms)
         peak = float(np.max(np.abs(audio))) or 1.0
         if peak > 0.94:
             audio = audio * (0.94 / peak)
@@ -1043,7 +1057,7 @@ class TTSStreamEngine:
             y = y * (0.92 / peak)
         return y.astype(np.float32)
 
-    def _play_direct(self, pcm, rate):
+    def _play_direct(self, pcm, rate, serial=None):
         """Write speech through one persistent float stream."""
         import sounddevice as sd
 
@@ -1066,7 +1080,10 @@ class TTSStreamEngine:
                     self._audio_stream.start()
                 stream = self._audio_stream
                 for start in range(0, len(audio), 960):
-                    if self.muted or stream is not self._audio_stream:
+                    if (self.muted or stream is not self._audio_stream
+                            or (serial is not None
+                                and serial != getattr(
+                                    self, "_interrupt_serial", 0))):
                         break
                     block = audio[start:start + 960]
                     self.audio_level = float(
@@ -1104,7 +1121,7 @@ class TTSStreamEngine:
                 loop = asyncio.get_running_loop()
                 try:
                     await loop.run_in_executor(
-                        None, self._play_direct, play_pcm, play_sr
+                        None, self._play_direct, play_pcm, play_sr, serial
                     )
                 except Exception as exc:
                     if not self.muted:

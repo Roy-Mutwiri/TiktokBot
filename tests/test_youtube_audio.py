@@ -1,5 +1,7 @@
 import os
 import sys
+import threading
+import types
 import unittest
 from unittest import mock
 
@@ -15,8 +17,11 @@ from youtube_audio import (
     YouTubeAudioPlayer,
     _build_ffmpeg_cmd,
     _has_hash_prefix,
+    _is_live_info,
     _isolate_vocals,
     _prepare_demucs_checkpoint,
+    _resolve_audio_source,
+    _select_live_audio_url,
     pcm16_bytes_to_float,
 )
 
@@ -27,6 +32,79 @@ if PROJECT_DIR not in sys.path:
 
 
 class YouTubeAudioTests(unittest.TestCase):
+    def test_live_info_detection_excludes_upcoming_streams(self):
+        self.assertTrue(_is_live_info({"is_live": True}))
+        self.assertTrue(_is_live_info({"live_status": "is_live"}))
+        self.assertFalse(_is_live_info({"live_status": "is_upcoming"}))
+        self.assertFalse(_is_live_info({"live_status": "was_live"}))
+
+    def test_live_audio_selection_prefers_audio_only_format(self):
+        info = {
+            "url": "https://example.test/fallback",
+            "acodec": "aac",
+            "vcodec": "h264",
+            "formats": [
+                {
+                    "url": "https://example.test/video",
+                    "acodec": "aac",
+                    "vcodec": "h264",
+                    "abr": 128,
+                },
+                {
+                    "url": "https://example.test/audio",
+                    "acodec": "opus",
+                    "vcodec": "none",
+                    "abr": 96,
+                },
+            ],
+        }
+
+        self.assertEqual(
+            _select_live_audio_url(info),
+            "https://example.test/audio",
+        )
+
+    def test_live_audio_resolver_does_not_download_infinite_stream(self):
+        info = {
+            "title": "Live show",
+            "is_live": True,
+            "live_status": "is_live",
+            "duration": None,
+            "url": "https://example.test/live.m3u8",
+            "acodec": "aac",
+            "vcodec": "none",
+        }
+
+        class FakeYDL:
+            def __init__(self, _opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                self.download = download
+                if download:
+                    raise AssertionError("live streams must not be downloaded")
+                return info
+
+        fake_module = types.SimpleNamespace(YoutubeDL=FakeYDL)
+        statuses = []
+        with mock.patch("youtube_audio.get_cached_audio", return_value=None), \
+                mock.patch.dict(sys.modules, {"yt_dlp": fake_module}):
+            source, title, duration, cache_hit = _resolve_audio_source(
+                "https://youtube.test/live", statuses.append)
+
+        self.assertEqual(source, "https://example.test/live.m3u8")
+        self.assertEqual(title, "Live show")
+        self.assertEqual(duration, 0.0)
+        self.assertFalse(cache_hit)
+        self.assertIn(
+            "live stream found - connecting without download", statuses)
+
     def test_voice_isolation_streams_demucs_progress(self):
         import tempfile
 
@@ -163,6 +241,14 @@ class YouTubeAudioTests(unittest.TestCase):
         self.assertEqual(cmd[fine_seek_index + 1], "120.0")
         self.assertEqual(cmd[duration_index + 1], "60.0")
 
+    def test_ffmpeg_reconnects_remote_live_streams(self):
+        cmd = _build_ffmpeg_cmd("https://example.test/live.m3u8")
+
+        self.assertIn("-reconnect", cmd)
+        self.assertIn("-reconnect_streamed", cmd)
+        self.assertIn("-reconnect_delay_max", cmd)
+        self.assertLess(cmd.index("-reconnect"), cmd.index("-i"))
+
     def test_real_voice_disguise_is_applied_inside_ffmpeg(self):
         cmd = _build_ffmpeg_cmd(
             "cached-audio.webm",
@@ -259,6 +345,68 @@ class YouTubeAudioTests(unittest.TestCase):
         self.assertEqual(calls, [193.5])
         self.assertIn("03:13", logs[-1])
 
+    def test_ready_speech_mutes_youtube_without_pausing_playback(self):
+        from avatar_studio import AvatarStudio
+
+        class FakePaused:
+            def is_set(self):
+                return False
+
+        class FakePlayer:
+            def __init__(self):
+                self._running = True
+                self._paused = FakePaused()
+                self.duck_gain = 0.22
+                self._target_output_gain = 1.0
+                self.duck_calls = []
+                self.pause_calls = 0
+                self.resume_calls = 0
+
+            def set_ducked(self, ducked, gain=None):
+                self.duck_calls.append((ducked, gain))
+                if gain is not None:
+                    self.duck_gain = gain
+                self._target_output_gain = self.duck_gain if ducked else 1.0
+
+            def pause(self):
+                self.pause_calls += 1
+
+            def resume(self):
+                self.resume_calls += 1
+
+        class FakeTTS:
+            muted = False
+            _playback_match_persona = "deep_male"
+
+            def set_playback_voice_match(self, persona):
+                self._playback_match_persona = persona
+
+            def set_muted(self, muted):
+                self.muted = muted
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        player = FakePlayer()
+        studio._youtube_audio = player
+        studio._youtube_mode = "youtube"
+        studio.tts = FakeTTS()
+        studio._audio_handoff_lock = threading.Lock()
+        studio._audio_handoff_token = 0
+        studio._audio_handoff_state = None
+        studio._log_msg = mock.Mock()
+
+        token = studio._pause_youtube_for_ready_speech()
+
+        self.assertEqual(player.duck_calls, [(True, 0.0)])
+        self.assertEqual(player.pause_calls, 0)
+        self.assertEqual(player.resume_calls, 0)
+        self.assertEqual(player._target_output_gain, 0.0)
+
+        studio._restore_youtube_after_ready_speech(token)
+
+        self.assertEqual(player.pause_calls, 0)
+        self.assertEqual(player.resume_calls, 0)
+        self.assertEqual(player.duck_gain, 0.22)
+        self.assertEqual(player._target_output_gain, 1.0)
 
 if __name__ == "__main__":
     unittest.main()

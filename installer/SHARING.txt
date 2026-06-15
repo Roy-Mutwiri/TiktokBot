@@ -1,0 +1,11 @@
+AVATAR STUDIO - INSTALL ON ANOTHER WINDOWS PC
+
+1. Copy this entire AvatarStudio-Installer folder to the other PC.
+2. Keep AvatarStudio-Setup.exe and all AvatarStudio-Setup-*.bin files together.
+3. Double-click AvatarStudio-Setup.exe.
+4. Click through Setup. No Python or command line is required.
+5. Start Avatar Studio from the Desktop or Start Menu shortcut.
+
+The installer supports 64-bit Windows 10 version 1809 or newer.
+For GPU acceleration, install the latest graphics driver for that PC.
+OBS Virtual Camera is only needed when camera output to another app is desired.

@@ -76,8 +76,25 @@ class TikTokComments:
 
     @staticmethod
     def _name(event):
-        u = getattr(event, "user", None)
-        return str(getattr(u, "nickname", None) or getattr(u, "unique_id", "viewer"))
+        # CommentEvent.user performs a compatibility conversion that is broken
+        # in some TikTokLive releases when the wire payload contains `nickName`.
+        # user_info is the already-decoded protobuf and avoids that conversion.
+        u = getattr(event, "user_info", None)
+        if u is None:
+            try:
+                u = getattr(event, "user", None)
+            except Exception:
+                u = None
+        if u is None:
+            u = getattr(getattr(event, "data", None), "user", None)
+        return str(
+            getattr(u, "nickname", None)
+            or getattr(u, "unique_id", None)
+            or getattr(u, "nick_name", None)
+            or getattr(u, "username", None)
+            or getattr(event, "user_id", None)
+            or "viewer"
+        )
 
     def _social_once(self, kind, event):
         """Dispatch once when both custom and raw social listeners receive an event."""
@@ -163,11 +180,18 @@ class TikTokComments:
         @client.on(CommentEvent)
         async def _on_comment(event):
             try:
-                text = event.comment or ""
+                text = (
+                    getattr(event, "comment", None)
+                    or getattr(event, "text", None)
+                    or getattr(getattr(event, "data", None), "comment", None)
+                    or ""
+                )
                 if text.strip():
-                    self.on_comment(self._name(event), str(text))
-            except Exception:
-                pass
+                    user = self._name(event)
+                    print(f"[TIKTOK] comment: {user}: {str(text)[:120]}")
+                    self.on_comment(user, str(text))
+            except Exception as exc:
+                print(f"[TIKTOK] comment dispatch failed: {str(exc)[:160]}")
 
         if self.on_join is not None:
             @client.on(JoinEvent)

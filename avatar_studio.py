@@ -306,6 +306,8 @@ class AvatarStudio:
         self._market_transition_announced = None
         self._thinking = False               # True while the brain is generating
         self.cap = None
+        self.camera_enabled = True
+        self._camera_lock = threading.RLock()
         self.obs_cam = None
         self._tv_proc = None                # the AI-driven TradingView browser
         self.lp_interval = 2
@@ -338,10 +340,41 @@ class AvatarStudio:
         self._youtube_progress_value = 0.0
         self._youtube_progress_text = "Idle"
         self._scene_capture_image = None
+        self._scene_display_image = None
         self._scene_capture_tk = None
+        self._scene_capture_bbox = None
+        self._scene_window_hwnd = None
+        self._scene_window_crop = None
+        self._scene_window_title = ""
+        self._scene_window_capture_method = None
+        self._scene_preview_job = None
+        self._scene_capture_lock = threading.Lock()
+        self._scene_capture_stop = threading.Event()
+        self._scene_capture_thread = None
+        self._scene_capture_serial = 0
+        self._scene_rendered_serial = -1
+        self._scene_preview_size = (640, 210)
+        self._scene_source = None
+        self._youtube_scene = None
+        self._youtube_scene_url = ""
+        self._youtube_scene_crop = (0.0, 0.0, 1.0, 1.0)
+        self._youtube_scene_attach_job = None
+        self._youtube_scene_raw_image = None
         self.scene_slot = None
         self.scene_preview_lbl = None
         self.scene_add_btn = None
+        self.scene_edit_btn = None
+        self.scene_time_lbl = None
+        self.scene_face_strip = None
+        self._active_face_variant = 1
+        self._face_variant_buttons = {}
+        self._scene_face_box = None
+        self._scene_face_detect_count = 0
+        self._scene_face_detector = None
+        self._audio_handoff_lock = threading.Lock()
+        self._audio_handoff_token = 0
+        self._audio_handoff_state = None
+        self._ready_playback_active = False
         self._mohammed_voice_ready = False
         self._mohammed_voice_warming = False
         self._worker = None
@@ -363,18 +396,19 @@ class AvatarStudio:
         _set_window_icon(root)
         root.configure(bg=BG)
         sw, sh = root.winfo_screenwidth(), root.winfo_screenheight()
-        # 16:9 desktop control room layout: sidebar, top bar, vertical TikTok
-        # output, live comment reader, controls, and bottom telemetry strip.
-        win_w = min(1500, max(1280, sw - 90))
-        win_h = int(win_w * 9 / 16)
-        if win_h > sh - 70:
-            win_h = max(720, sh - 70)
-            win_w = int(win_h * 16 / 9)
+        # Match the large center tile in Windows 11's 25/50/25 snap layout.
+        # Keep enough width for the control rails on smaller displays, while
+        # using nearly the full work-area height for the stacked live monitors.
+        win_w = min(sw - 32, max(1500, int(sw * 0.50)))
+        win_h = max(780, sh - 70)
         _wx = max(0, (sw - win_w) // 2); _wy = max(0, (sh - win_h) // 2)
         root.geometry(f"{win_w}x{win_h}+{_wx}+{_wy}")
-        root.minsize(1180, 660)
+        root.minsize(900, 600)
+        root.resizable(True, True)
         # frameless window -> our own futuristic title bar with custom controls
         self._drag = None
+        self._resize_drag = None
+        self._resize_handles = []
         self._tb_buttons = {}
         self._tb_hover = None
         try:
@@ -387,6 +421,7 @@ class AvatarStudio:
 
         self._init_style()
         self._build_ui()
+        self._install_resize_handles()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self._poll_ui()                     # start the UI refresh loop
         self._animate()                     # start the HUD animation loop
@@ -441,8 +476,13 @@ class AvatarStudio:
                 symbol = "OANDA:XAUUSD"
         sym = os.environ.get("AVATAR_TV_SYMBOL", symbol)
         lang = os.environ.get("AVATAR_TTS_LANG", "en")
-        args = [sys.executable, os.path.join(proj, "tradingview_pilot.py"),
-                "--symbol", sym, "--lang", lang if lang in ("en", "ar") else "en"]
+        if getattr(sys, "frozen", False):
+            args = [sys.executable, "--tradingview-pilot"]
+        else:
+            args = [sys.executable, os.path.join(proj, "tradingview_pilot.py")]
+        args.extend([
+            "--symbol", sym, "--lang", lang if lang in ("en", "ar") else "en"
+        ])
         if os.environ.get("AVATAR_TV_SPEAK", "0") != "1":
             args.append("--no-speak")        # avoid double TTS load by default
         try:
@@ -733,6 +773,8 @@ class AvatarStudio:
 
     def _tb_press(self, e):
         h = self._tb_hit(e.x, e.y)
+        if h == "camera":
+            self.toggle_camera(); return
         if h == "ready_speech":
             self._play_ready_speech(); return
         if h == "ready_thanks_speak":
@@ -770,8 +812,79 @@ class AvatarStudio:
                 return
             if self.root.state() == "normal":
                 self.root.overrideredirect(True)
+                self.root.after_idle(self._raise_resize_handles)
         except Exception:
             pass
+
+    def _install_resize_handles(self):
+        """Add draggable edges and corners to the frameless main window."""
+        specs = (
+            ("n",  0, 0, "nw", 1, 6, "sb_v_double_arrow"),
+            ("s",  0, 1, "sw", 1, 6, "sb_v_double_arrow"),
+            ("w",  0, 0, "nw", 6, 1, "sb_h_double_arrow"),
+            ("e",  1, 0, "ne", 6, 1, "sb_h_double_arrow"),
+            ("nw", 0, 0, "nw", 14, 14, "size_nw_se"),
+            ("ne", 1, 0, "ne", 14, 14, "size_ne_sw"),
+            ("sw", 0, 1, "sw", 14, 14, "size_ne_sw"),
+            ("se", 1, 1, "se", 14, 14, "size_nw_se"),
+        )
+        for edge, relx, rely, anchor, width, height, cursor in specs:
+            handle = tk.Frame(self.root, bg=BG, cursor=cursor, bd=0)
+            options = {"relx": relx, "rely": rely, "anchor": anchor,
+                       "width": width, "height": height}
+            if edge in ("n", "s"):
+                options["relwidth"] = 1
+            elif edge in ("w", "e"):
+                options["relheight"] = 1
+            handle.place(**options)
+            handle.bind(
+                "<ButtonPress-1>",
+                lambda event, side=edge: self._begin_window_resize(event, side))
+            handle.bind("<B1-Motion>", self._resize_window)
+            handle.bind("<ButtonRelease-1>", self._end_window_resize)
+            self._resize_handles.append(handle)
+        self.root.bind("<Configure>", lambda _event: self._raise_resize_handles(),
+                       add="+")
+        self._raise_resize_handles()
+
+    def _raise_resize_handles(self):
+        for handle in self._resize_handles:
+            try:
+                handle.lift()
+            except Exception:
+                pass
+
+    def _begin_window_resize(self, event, edge):
+        self._resize_drag = (
+            edge, event.x_root, event.y_root,
+            self.root.winfo_x(), self.root.winfo_y(),
+            self.root.winfo_width(), self.root.winfo_height(),
+        )
+
+    def _resize_window(self, event):
+        if self._resize_drag is None:
+            return
+        edge, start_x, start_y, x, y, width, height = self._resize_drag
+        dx, dy = event.x_root - start_x, event.y_root - start_y
+        min_width, min_height = self.root.minsize()
+        new_x, new_y, new_width, new_height = x, y, width, height
+
+        if "e" in edge:
+            new_width = max(min_width, width + dx)
+        if "s" in edge:
+            new_height = max(min_height, height + dy)
+        if "w" in edge:
+            new_width = max(min_width, width - dx)
+            new_x = x + width - new_width
+        if "n" in edge:
+            new_height = max(min_height, height - dy)
+            new_y = y + height - new_height
+
+        self.root.geometry(
+            f"{new_width}x{new_height}+{new_x}+{new_y}")
+
+    def _end_window_resize(self, _event=None):
+        self._resize_drag = None
 
     # -------------------------------------------------------------------------
     def _build_ui(self):
@@ -1334,6 +1447,8 @@ class AvatarStudio:
                                      highlightcolor=AMBER)
         self.youtube_entry.pack(fill="x", pady=(0, 7))
         self.youtube_entry.bind("<Return>", self._on_youtube_enter)
+        self.youtube_entry.bind("<<Paste>>", self._on_youtube_link_changed)
+        self.youtube_entry.bind("<KeyRelease>", self._on_youtube_link_changed)
         self.youtube_persona_var = tk.StringVar(value=YOUTUBE_PERSONA_LABELS[0])
         persona_combo = ttk.Combobox(
             c, textvariable=self.youtube_persona_var,
@@ -1636,40 +1751,572 @@ class AvatarStudio:
         holder = tk.Frame(
             self.scene_slot, bg="#0c1016", highlightthickness=1,
             highlightbackground=self._mix(BORDER, CYAN, 0.42))
-        holder.place(relx=0.5, rely=0.52, anchor="center", relwidth=1.0)
-        if self._scene_capture_image is not None:
-            self.scene_preview_lbl = tk.Label(
-                holder, bg="#050608", bd=0, highlightthickness=1,
-                highlightbackground=self._mix(CYAN, BG, 0.35))
-            self.scene_preview_lbl.pack(fill="x", padx=8, pady=(8, 6))
-            holder.bind("<Configure>", lambda _e: self._refresh_scene_preview())
-            self.scene_preview_lbl.bind(
-                "<Button-1>", lambda _e: self._start_scene_snip())
+        holder.pack(fill="both", expand=True)
+        header = tk.Frame(holder, bg="#0c1016")
+        header.pack(fill="x", padx=9, pady=(7, 5))
+        tk.Label(
+            header, text="LIVE SCENE", bg="#0c1016",
+            fg=CYAN if self._scene_capture_image is not None else MUTED,
+            font=("Segoe UI", 8, "bold")).pack(side="left")
+        self.scene_time_lbl = tk.Label(
+            header, text=self._scene_time_text(), bg="#0c1016", fg=FAINT,
+            font=("Consolas", 7))
+        self.scene_time_lbl.pack(side="left", padx=(8, 0))
         self.scene_add_btn = tk.Button(
-            holder, text="Add Scene", command=self._start_scene_snip,
+            header,
+            text="Screen Scene" if self._scene_capture_image is not None else "Add Scene",
+            command=self._add_scene,
             bg=self._mix(CYAN, "#1d7cff", 0.35), fg="#ffffff",
             activebackground=self._mix(CYAN, "#ffffff", 0.20),
             activeforeground="#ffffff", relief="flat", bd=0,
-            font=("Segoe UI", 9, "bold"), cursor="hand2",
-            highlightthickness=1, highlightbackground=CYAN, padx=12, pady=7)
-        self.scene_add_btn.pack(anchor="center", pady=(6, 8))
+            font=("Segoe UI", 8, "bold"), cursor="hand2",
+            highlightthickness=1, highlightbackground=CYAN, padx=10, pady=4)
+        self.scene_add_btn.pack(side="right")
+        if self._scene_source == "youtube":
+            self.scene_edit_btn = tk.Button(
+                header, text="Edit Crop", command=self._edit_youtube_scene_crop,
+                bg=self._mix(SURFACE2, AMBER, 0.22), fg=AMBER,
+                activebackground=self._mix(SURFACE2, AMBER, 0.34),
+                activeforeground=AMBER, relief="flat", bd=0,
+                font=("Segoe UI", 8, "bold"), cursor="hand2",
+                highlightthickness=1, highlightbackground=AMBER,
+                padx=9, pady=4)
+            self.scene_edit_btn.pack(side="right", padx=(0, 6))
+        if self._scene_capture_image is not None:
+            preview_row = tk.Frame(holder, bg="#050608")
+            preview_row.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+            self.scene_face_strip = tk.Frame(
+                preview_row, bg="#080c12", width=154)
+            self.scene_face_strip.pack(side="left", fill="y", padx=(0, 6))
+            self.scene_face_strip.pack_propagate(False)
+            self.scene_face_strip.grid_columnconfigure(0, weight=1, uniform="faces")
+            self.scene_face_strip.grid_columnconfigure(1, weight=1, uniform="faces")
+            for row in range(4):
+                self.scene_face_strip.grid_rowconfigure(row, weight=1, uniform="faces")
+            for index in range(1, 9):
+                slot = tk.Frame(
+                    self.scene_face_strip, bg="#0d131c",
+                    highlightthickness=1, highlightbackground=BORDER)
+                row = (index - 1) % 4
+                column = (index - 1) // 4
+                slot.grid(
+                    row=row, column=column, sticky="nsew",
+                    padx=(0 if column == 0 else 3, 0),
+                    pady=(0 if row == 0 else 3, 0))
+                button = tk.Button(
+                    slot, text=f"FACE {index}",
+                    command=lambda value=index: self._set_face_variant(value),
+                    bg="#123128" if index == self._active_face_variant else "#0d131c",
+                    fg=MINT if index == self._active_face_variant else MUTED,
+                    activebackground="#173d32", activeforeground=MINT,
+                    relief="flat", bd=0, cursor="hand2",
+                    font=("Segoe UI", 8, "bold"))
+                button.pack(fill="both", expand=True)
+                self._face_variant_buttons[index] = button
+            self.scene_preview_lbl = tk.Label(
+                preview_row, bg="#050608", bd=0, highlightthickness=1,
+                highlightbackground=self._mix(CYAN, BG, 0.35))
+            self.scene_preview_lbl.pack(side="left", fill="both", expand=True)
+            self.scene_preview_lbl.bind(
+                "<Configure>", self._on_scene_preview_resize)
+        else:
+            empty = tk.Label(
+                holder, text="No scene selected",
+                bg="#050608", fg=MUTED, font=("Segoe UI", 9))
+            empty.pack(fill="both", expand=True, padx=8, pady=(0, 8))
         if self._scene_capture_image is not None:
             self._refresh_scene_preview()
 
+    def _set_face_variant(self, variant):
+        self._active_face_variant = max(1, min(8, int(variant)))
+        for index, button in self._face_variant_buttons.items():
+            active = index == self._active_face_variant
+            try:
+                button.configure(
+                    bg="#123128" if active else "#0d131c",
+                    fg=MINT if active else MUTED)
+            except Exception:
+                pass
+        self._log_msg(
+            f"[test] visual fingerprint preset Face {self._active_face_variant}")
+
+    def _detect_scene_face(self, frame):
+        """Return a stable face box for the locked scene (RGB PIL image)."""
+        self._scene_face_detect_count += 1
+        if (self._scene_face_box is not None
+                and self._scene_face_detect_count % 20 != 1):
+            return self._scene_face_box
+        try:
+            if self._scene_face_detector is None:
+                cascade = os.path.join(
+                    cv2.data.haarcascades, "haarcascade_frontalface_default.xml")
+                self._scene_face_detector = cv2.CascadeClassifier(cascade)
+            rgb = np.asarray(frame.convert("RGB"))
+            gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
+            scale = min(1.0, 720.0 / max(gray.shape))
+            scan = cv2.resize(
+                gray, None, fx=scale, fy=scale,
+                interpolation=cv2.INTER_AREA) if scale < 1.0 else gray
+            faces = self._scene_face_detector.detectMultiScale(
+                scan, scaleFactor=1.08, minNeighbors=4,
+                minSize=(max(30, scan.shape[1] // 18),
+                         max(30, scan.shape[0] // 18)))
+            if len(faces):
+                x, y, w, h = max(faces, key=lambda item: item[2] * item[3])
+                inv = 1.0 / scale
+                x, y, w, h = [int(round(v * inv)) for v in (x, y, w, h)]
+                pad_x, pad_y = int(w * 0.18), int(h * 0.22)
+                self._scene_face_box = (
+                    max(0, x - pad_x), max(0, y - pad_y),
+                    min(frame.width, x + w + pad_x),
+                    min(frame.height, y + h + pad_y))
+        except Exception:
+            pass
+        if self._scene_face_box is None:
+            # Selected scenes normally center the presenter. This fallback is
+            # deliberately conservative and remains stable for detector tests.
+            side = int(min(frame.width, frame.height) * 0.62)
+            cx, cy = frame.width // 2, int(frame.height * 0.42)
+            self._scene_face_box = (
+                max(0, cx - side // 2), max(0, cy - side // 2),
+                min(frame.width, cx + side // 2),
+                min(frame.height, cy + side // 2))
+        return self._scene_face_box
+
+    def _apply_scene_face_variant(self, frame):
+        """Apply a strong deterministic benchmark transform to the scene face."""
+        variant = int(getattr(self, "_active_face_variant", 1) or 1)
+        if variant == 1 or frame is None:
+            return frame
+        rgb = np.asarray(frame.convert("RGB")).copy()
+        h, w = rgb.shape[:2]
+        box = self._detect_scene_face(frame)
+        x1, y1, x2, y2 = [int(v) for v in box]
+        x1, y1 = max(0, x1), max(0, y1)
+        x2, y2 = min(w, x2), min(h, y2)
+        if x2 <= x1 or y2 <= y1:
+            return frame
+        base = rgb[y1:y2, x1:x2].copy()
+        roi = base.copy()
+        rh, rw = roi.shape[:2]
+        if variant == 2:
+            # Narrower, warmer face with lifted midtones.
+            narrow = cv2.resize(roi, (max(8, int(rw * 0.84)), rh),
+                                interpolation=cv2.INTER_CUBIC)
+            roi = cv2.copyMakeBorder(
+                narrow, 0, 0, (rw - narrow.shape[1]) // 2,
+                rw - narrow.shape[1] - (rw - narrow.shape[1]) // 2,
+                cv2.BORDER_REFLECT_101)
+            lab = cv2.cvtColor(roi, cv2.COLOR_RGB2LAB)
+            lab[:, :, 1] = np.clip(
+                lab[:, :, 1].astype(np.int16) + 12, 0, 255).astype(np.uint8)
+            lab[:, :, 2] = np.clip(
+                lab[:, :, 2].astype(np.int16) + 20, 0, 255).astype(np.uint8)
+            roi = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+            roi = cv2.convertScaleAbs(roi, alpha=1.08, beta=7)
+        elif variant == 3:
+            # Wider lower face, cooler palette, stronger edge structure.
+            src = np.float32([[0, 0], [rw - 1, 0], [0, rh - 1], [rw - 1, rh - 1]])
+            dx = rw * 0.10
+            dst = np.float32([[dx, 0], [rw - 1 - dx, 0],
+                              [0, rh - 1], [rw - 1, rh - 1]])
+            roi = cv2.warpPerspective(
+                roi, cv2.getPerspectiveTransform(src, dst), (rw, rh),
+                flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
+            blur = cv2.GaussianBlur(roi, (0, 0), 1.4)
+            roi = cv2.addWeighted(roi, 1.65, blur, -0.65, 0)
+            roi[:, :, 2] = np.clip(
+                roi[:, :, 2].astype(np.int16) - 16, 0, 255).astype(np.uint8)
+            roi[:, :, 0] = np.clip(
+                roi[:, :, 0].astype(np.int16) + 18, 0, 255).astype(np.uint8)
+        elif variant == 4:
+            # Vertically compact, desaturated, high local contrast plus fixed
+            # low-amplitude texture for reproducible fingerprint testing.
+            compact = cv2.resize(roi, (rw, max(8, int(rh * 0.86))),
+                                 interpolation=cv2.INTER_CUBIC)
+            roi = cv2.copyMakeBorder(
+                compact, (rh - compact.shape[0]) // 2,
+                rh - compact.shape[0] - (rh - compact.shape[0]) // 2,
+                0, 0, cv2.BORDER_REFLECT_101)
+            lab = cv2.cvtColor(roi, cv2.COLOR_RGB2LAB)
+            clahe = cv2.createCLAHE(clipLimit=2.6, tileGridSize=(6, 6))
+            lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+            roi = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+            gray = cv2.cvtColor(roi, cv2.COLOR_RGB2GRAY)
+            gray3 = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+            roi = cv2.addWeighted(roi, 0.38, gray3, 0.62, 0)
+            yy, xx = np.indices((rh, rw))
+            texture = (((xx * 13 + yy * 7) % 17) - 8).astype(np.int16)
+            roi = np.clip(
+                roi.astype(np.int16) + texture[:, :, None],
+                0, 255).astype(np.uint8)
+        elif variant == 5:
+            # Uneven mixed lighting: warm key light and cool opposing fill.
+            yy, xx = np.indices((rh, rw), dtype=np.float32)
+            mix = xx / max(1.0, rw - 1.0)
+            warm = np.zeros_like(roi, dtype=np.float32)
+            warm[:, :, 0] = 30.0 * (1.0 - mix)
+            warm[:, :, 1] = 12.0 * (1.0 - mix)
+            warm[:, :, 2] = 28.0 * mix
+            shade = (0.72 + 0.46 * (1.0 - np.abs(mix - 0.42)))[:, :, None]
+            roi = np.clip(
+                roi.astype(np.float32) * shade + warm,
+                0, 255).astype(np.uint8)
+        elif variant == 6:
+            # Low-resolution acquisition followed by blocky recompression.
+            low_w, low_h = max(24, rw // 5), max(24, rh // 5)
+            low = cv2.resize(roi, (low_w, low_h), interpolation=cv2.INTER_AREA)
+            ok, encoded = cv2.imencode(
+                ".jpg", cv2.cvtColor(low, cv2.COLOR_RGB2BGR),
+                [cv2.IMWRITE_JPEG_QUALITY, 28])
+            if ok:
+                decoded = cv2.imdecode(encoded, cv2.IMREAD_COLOR)
+                low = cv2.cvtColor(decoded, cv2.COLOR_BGR2RGB)
+            roi = cv2.resize(low, (rw, rh), interpolation=cv2.INTER_NEAREST)
+            roi = ((roi.astype(np.uint16) // 24) * 24).clip(0, 255).astype(np.uint8)
+        elif variant == 7:
+            # Fixed partial occlusion benchmark across eyes and upper cheeks.
+            overlay = roi.copy()
+            top = int(rh * 0.24)
+            bottom = int(rh * 0.60)
+            cv2.rectangle(
+                overlay, (int(rw * 0.08), top), (int(rw * 0.92), bottom),
+                (24, 28, 34), -1)
+            cv2.line(
+                overlay, (int(rw * 0.08), bottom),
+                (int(rw * 0.92), bottom), (95, 110, 126), 2)
+            roi = cv2.addWeighted(overlay, 0.88, roi, 0.12, 0)
+        elif variant == 8:
+            # Deterministic perspective/pose stress test.
+            src = np.float32([
+                [0, 0], [rw - 1, 0], [0, rh - 1], [rw - 1, rh - 1]])
+            dst = np.float32([
+                [rw * 0.17, rh * 0.05], [rw * 0.91, 0],
+                [rw * 0.04, rh * 0.94], [rw * 0.98, rh - 1]])
+            roi = cv2.warpPerspective(
+                roi, cv2.getPerspectiveTransform(src, dst), (rw, rh),
+                flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT_101)
+            matrix = cv2.getRotationMatrix2D((rw / 2.0, rh / 2.0), -5.0, 1.03)
+            roi = cv2.warpAffine(
+                roi, matrix, (rw, rh), flags=cv2.INTER_CUBIC,
+                borderMode=cv2.BORDER_REFLECT_101)
+            roi = cv2.convertScaleAbs(roi, alpha=1.12, beta=-8)
+        mask = np.zeros((y2 - y1, x2 - x1), np.float32)
+        cv2.ellipse(
+            mask, ((x2 - x1) // 2, (y2 - y1) // 2),
+            (max(1, (x2 - x1) // 2 - 2), max(1, (y2 - y1) // 2 - 2)),
+            0, 0, 360, 1.0, -1)
+        feather = max(5, int(min(mask.shape) * 0.08) | 1)
+        mask = cv2.GaussianBlur(mask, (feather, feather), 0)[:, :, None]
+        rgb[y1:y2, x1:x2] = np.clip(
+            base * (1.0 - mask) + roi.astype(np.float32) * mask,
+            0, 255).astype(np.uint8)
+        return Image.fromarray(rgb, "RGB")
+
     def _refresh_scene_preview(self):
-        if self.scene_preview_lbl is None or self._scene_capture_image is None:
+        if self.scene_preview_lbl is None:
             return
         try:
-            width = max(92, self.scene_preview_lbl.winfo_width() or 138)
-            height = max(54, int(width * 9 / 16))
-            img = self._scene_capture_image.copy()
-            img.thumbnail((width, height), Image.LANCZOS)
-            canvas = Image.new("RGB", (width, height), "#050608")
-            canvas.paste(img, ((width - img.width) // 2, (height - img.height) // 2))
-            self._scene_capture_tk = ImageTk.PhotoImage(canvas)
+            with self._scene_capture_lock:
+                display = self._scene_display_image
+            if display is None:
+                return
+            self._scene_capture_tk = ImageTk.PhotoImage(display)
             self.scene_preview_lbl.configure(image=self._scene_capture_tk)
         except Exception as exc:
             self._log_msg(f"[scene] preview failed: {exc}")
+
+    def _on_scene_preview_resize(self, event):
+        size = (max(240, int(event.width)), max(120, int(event.height)))
+        with self._scene_capture_lock:
+            self._scene_preview_size = size
+
+    def _schedule_scene_preview(self):
+        if self._scene_preview_job is not None:
+            return
+        self._scene_preview_job = self.root.after(33, self._scene_preview_tick)
+        if self._scene_capture_thread is None or not self._scene_capture_thread.is_alive():
+            self._scene_capture_stop.clear()
+            self._scene_capture_thread = threading.Thread(
+                target=self._scene_capture_loop, daemon=True)
+            self._scene_capture_thread.start()
+
+    def _scene_capture_loop(self):
+        """Capture outside Tk's thread so screen I/O cannot freeze the UI."""
+        youtube_frame_serial = -1
+        while not self._scene_capture_stop.is_set():
+            with self._scene_capture_lock:
+                source = self._scene_source
+                bbox = self._scene_capture_bbox
+                hwnd = self._scene_window_hwnd
+                window_crop = self._scene_window_crop
+                capture_method = self._scene_window_capture_method
+                youtube_scene = self._youtube_scene
+                youtube_crop = self._youtube_scene_crop
+            if source == "youtube":
+                if youtube_scene is None:
+                    frame_serial, frame_array = -1, None
+                else:
+                    snapshot = getattr(youtube_scene, "frame_snapshot", None)
+                    if callable(snapshot):
+                        frame_serial, frame_array = snapshot()
+                    else:
+                        frame_serial, frame_array = 0, youtube_scene.frame()
+                if frame_array is None:
+                    self._scene_capture_stop.wait(0.08)
+                    continue
+                if frame_serial == youtube_frame_serial:
+                    self._scene_capture_stop.wait(0.01)
+                    continue
+                youtube_frame_serial = frame_serial
+                try:
+                    from youtube_video import normalized_crop
+                    raw_image = Image.fromarray(frame_array, "RGB")
+                    cropped = normalized_crop(frame_array, youtube_crop)
+                    frame = Image.fromarray(cropped, "RGB")
+                    frame = self._apply_scene_face_variant(frame)
+                    with self._scene_capture_lock:
+                        target = self._scene_preview_size
+                        self._youtube_scene_raw_image = raw_image
+                    preview = frame.copy()
+                    preview.thumbnail(target, Image.BILINEAR)
+                    display = Image.new("RGB", target, "#050608")
+                    display.paste(
+                        preview,
+                        ((target[0] - preview.width) // 2,
+                         (target[1] - preview.height) // 2))
+                    with self._scene_capture_lock:
+                        if self._scene_source == "youtube":
+                            self._scene_capture_image = frame
+                            self._scene_display_image = display
+                            self._scene_capture_serial += 1
+                except Exception as exc:
+                    self._log_msg(f"[scene] YouTube frame failed: {exc}")
+                    self._scene_capture_stop.wait(0.5)
+                self._scene_capture_stop.wait(0.04)
+                continue
+            if bbox is None:
+                self._scene_capture_stop.wait(0.20)
+                continue
+            try:
+                frame = None
+                if hwnd and window_crop:
+                    candidates = self._capture_window_images(
+                        hwnd, preferred=capture_method)
+                    cropped = [
+                        (method, image.crop(window_crop).convert("RGB"))
+                        for method, image in candidates
+                        if image is not None
+                    ]
+                    usable = [
+                        (method, image) for method, image in cropped
+                        if self._scene_frame_score(image) >= 5.0
+                    ]
+                    if usable:
+                        method, frame = max(
+                            usable, key=lambda pair: self._scene_frame_score(pair[1]))
+                        with self._scene_capture_lock:
+                            self._scene_window_capture_method = method
+                    elif capture_method is not None:
+                        with self._scene_capture_lock:
+                            self._scene_window_capture_method = None
+                if frame is None:
+                    # Keep the last valid locked frame when a GPU window returns
+                    # black. Desktop fallback would leak whatever overlaps it.
+                    if hwnd and window_crop:
+                        self._scene_capture_stop.wait(0.10)
+                        continue
+                    frame = ImageGrab.grab(bbox=bbox, all_screens=True).convert("RGB")
+                frame = self._apply_scene_face_variant(frame)
+                with self._scene_capture_lock:
+                    target = self._scene_preview_size
+                frame.thumbnail(target, Image.BILINEAR)
+                display = Image.new("RGB", target, "#050608")
+                display.paste(
+                    frame,
+                    ((target[0] - frame.width) // 2,
+                     (target[1] - frame.height) // 2))
+                with self._scene_capture_lock:
+                    if bbox == self._scene_capture_bbox:
+                        self._scene_capture_image = frame
+                        self._scene_display_image = display
+                        self._scene_capture_serial += 1
+            except Exception as exc:
+                self._log_msg(f"[scene] live capture failed: {exc}")
+                self._scene_capture_stop.wait(0.5)
+                continue
+            self._scene_capture_stop.wait(0.06)
+
+    @staticmethod
+    def _window_at_point(x, y):
+        if sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+            user32 = ctypes.windll.user32
+            hwnd = user32.WindowFromPoint(POINT(int(x), int(y)))
+            if not hwnd:
+                return None
+            root = user32.GetAncestor(hwnd, 2)  # GA_ROOT
+            return int(root or hwnd)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _window_rect(hwnd):
+        if not hwnd or sys.platform != "win32":
+            return None
+        try:
+            import ctypes
+
+            class RECT(ctypes.Structure):
+                _fields_ = [
+                    ("left", ctypes.c_long), ("top", ctypes.c_long),
+                    ("right", ctypes.c_long), ("bottom", ctypes.c_long),
+                ]
+
+            rect = RECT()
+            if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                return None
+            return (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _window_title(hwnd):
+        if not hwnd or sys.platform != "win32":
+            return ""
+        try:
+            import ctypes
+            length = ctypes.windll.user32.GetWindowTextLengthW(hwnd)
+            buf = ctypes.create_unicode_buffer(max(2, length + 1))
+            ctypes.windll.user32.GetWindowTextW(hwnd, buf, len(buf))
+            return buf.value.strip()
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _scene_frame_score(image):
+        """Reject flat black GPU frames while allowing legitimately dark UIs."""
+        try:
+            gray = np.asarray(image.resize((96, 54)).convert("L"), dtype=np.float32)
+            contrast = float(gray.std())
+            edges = (
+                float(np.abs(np.diff(gray, axis=0)).mean())
+                + float(np.abs(np.diff(gray, axis=1)).mean())
+            )
+            dynamic_range = float(gray.max() - gray.min())
+            return contrast + edges * 1.5 + dynamic_range * 0.25
+        except Exception:
+            return 0.0
+
+    @staticmethod
+    def _capture_window_images(hwnd, preferred=None):
+        """Return native window captures from multiple Windows rendering paths."""
+        rect = AvatarStudio._window_rect(hwnd)
+        if rect is None:
+            return []
+        width = rect[2] - rect[0]
+        height = rect[3] - rect[1]
+        if width < 2 or height < 2:
+            return []
+        images = []
+        if preferred in (None, "pillow"):
+            try:
+                image = ImageGrab.grab(window=hwnd)
+                if image is not None and image.width >= 2 and image.height >= 2:
+                    images.append(("pillow", image.convert("RGB")))
+            except Exception:
+                pass
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+            gdi32 = ctypes.windll.gdi32
+            window_dc = user32.GetWindowDC(hwnd)
+            memory_dc = gdi32.CreateCompatibleDC(window_dc)
+            bitmap = gdi32.CreateCompatibleBitmap(window_dc, width, height)
+            old = gdi32.SelectObject(memory_dc, bitmap)
+            try:
+                def _read_bitmap():
+                    bmi = ctypes.create_string_buffer(40)
+                    ctypes.memset(bmi, 0, 40)
+                    ctypes.cast(bmi, ctypes.POINTER(wintypes.DWORD))[0] = 40
+                    ctypes.cast(bmi, ctypes.POINTER(wintypes.LONG))[1] = width
+                    ctypes.cast(bmi, ctypes.POINTER(wintypes.LONG))[2] = -height
+                    ctypes.cast(bmi, ctypes.POINTER(wintypes.WORD))[6] = 1
+                    ctypes.cast(bmi, ctypes.POINTER(wintypes.WORD))[7] = 32
+                    raw = ctypes.create_string_buffer(width * height * 4)
+                    if not gdi32.GetDIBits(
+                            memory_dc, bitmap, 0, height, raw, bmi, 0):
+                        return None
+                    return Image.frombuffer(
+                        "RGB", (width, height), raw,
+                        "raw", "BGRX", 0, 1).copy()
+
+                methods = (
+                    ((2, "print-full"), (0, "print-basic"), (3, "print-client"))
+                    if preferred is None else
+                    tuple(
+                        pair for pair in (
+                            (2, "print-full"), (0, "print-basic"),
+                            (3, "print-client"))
+                        if pair[1] == preferred)
+                )
+                for flag, method in methods:
+                    if user32.PrintWindow(hwnd, memory_dc, flag):
+                        image = _read_bitmap()
+                        if image is not None:
+                            images.append((method, image))
+                # Some accelerated windows expose useful pixels through their
+                # window DC even when PrintWindow returns a black surface.
+                if preferred in (None, "bitblt") and gdi32.BitBlt(
+                        memory_dc, 0, 0, width, height, window_dc,
+                        0, 0, 0x00CC0020 | 0x40000000):
+                    image = _read_bitmap()
+                    if image is not None:
+                        images.append(("bitblt", image))
+            finally:
+                gdi32.SelectObject(memory_dc, old)
+                gdi32.DeleteObject(bitmap)
+                gdi32.DeleteDC(memory_dc)
+                user32.ReleaseDC(hwnd, window_dc)
+        except Exception:
+            pass
+        return images
+
+    @staticmethod
+    def _capture_window_image(hwnd):
+        """Compatibility helper returning the best available native capture."""
+        images = AvatarStudio._capture_window_images(hwnd)
+        if not images:
+            return None
+        return max(images, key=lambda pair: AvatarStudio._scene_frame_score(
+            pair[1]))[1]
+
+    def _scene_preview_tick(self):
+        self._scene_preview_job = None
+        with self._scene_capture_lock:
+            bbox = self._scene_capture_bbox
+            source = self._scene_source
+        if bbox is None and source != "youtube":
+            return
+        try:
+            with self._scene_capture_lock:
+                serial = self._scene_capture_serial
+            if serial != self._scene_rendered_serial:
+                self._refresh_scene_preview()
+                self._scene_rendered_serial = serial
+        except Exception as exc:
+            self._log_msg(f"[scene] live preview failed: {exc}")
+        finally:
+            if self._scene_capture_bbox is not None or self._scene_source == "youtube":
+                self._schedule_scene_preview()
 
     def _list_monitors(self):
         if sys.platform == "win32":
@@ -1713,6 +2360,18 @@ class AvatarStudio:
             self._choose_scene_monitor(monitors)
         else:
             self._open_scene_snipper(monitors[0])
+
+    def _add_scene(self):
+        """Use the pasted YouTube video first, otherwise open screen selection."""
+        url = ""
+        try:
+            url = self.youtube_entry.get("1.0", "end").strip()
+        except Exception:
+            pass
+        if "youtu" in url.lower():
+            self._attach_youtube_scene(url, force=True)
+            return
+        self._start_scene_snip()
 
     def _choose_scene_monitor(self, monitors):
         win = tk.Toplevel(self.root)
@@ -1811,12 +2470,75 @@ class AvatarStudio:
             if not box or box[2] - box[0] < 8 or box[3] - box[1] < 8:
                 return
             crop = shot.crop(box)
-            self._scene_capture_image = crop.convert("RGB")
+            abs_box = (
+                monitor["left"] + box[0],
+                monitor["top"] + box[1],
+                monitor["left"] + box[2],
+                monitor["top"] + box[3],
+            )
+            # Remove the selection overlay before asking Windows which native
+            # window owns the selected region.
+            overlay.withdraw()
+            overlay.update_idletasks()
+            center_x = (abs_box[0] + abs_box[2]) // 2
+            center_y = (abs_box[1] + abs_box[3]) // 2
+            hwnd = self._window_at_point(center_x, center_y)
+            window_rect = self._window_rect(hwnd)
+            window_crop = None
+            if window_rect is not None:
+                window_crop = (
+                    max(0, abs_box[0] - window_rect[0]),
+                    max(0, abs_box[1] - window_rect[1]),
+                    min(window_rect[2] - window_rect[0],
+                        abs_box[2] - window_rect[0]),
+                    min(window_rect[3] - window_rect[1],
+                        abs_box[3] - window_rect[1]),
+                )
+                if (window_crop[2] - window_crop[0] < 8
+                        or window_crop[3] - window_crop[1] < 8):
+                    window_crop = None
+            with self._scene_capture_lock:
+                youtube_scene = self._youtube_scene
+                self._scene_source = "screen"
+                self._scene_capture_bbox = abs_box
+                self._scene_window_hwnd = hwnd if window_crop is not None else None
+                self._scene_window_crop = window_crop
+                self._scene_window_title = (
+                    self._window_title(hwnd) if window_crop is not None else "")
+                self._scene_window_capture_method = None
+                self._scene_face_box = None
+                self._scene_face_detect_count = 0
+                self._scene_capture_image = crop.convert("RGB")
+                initial = self._scene_capture_image.copy()
+                initial.thumbnail(self._scene_preview_size, Image.BILINEAR)
+                self._scene_display_image = Image.new(
+                    "RGB", self._scene_preview_size, "#050608")
+                self._scene_display_image.paste(
+                    initial,
+                    ((self._scene_preview_size[0] - initial.width) // 2,
+                     (self._scene_preview_size[1] - initial.height) // 2))
+                self._scene_capture_serial += 1
+            if youtube_scene is not None:
+                try:
+                    youtube_scene.stop()
+                except Exception:
+                    pass
+                self._youtube_scene = None
+                self._youtube_scene_url = ""
             overlay.destroy()
             self.root.deiconify()
             self.root.lift()
             self._build_sidebar_scene_slot()
-            self._log_msg(f"[scene] added screen region {crop.width}x{crop.height}")
+            self._schedule_scene_preview()
+            if window_crop is not None:
+                title = self._scene_window_title or "selected window"
+                self._log_msg(
+                    f"[scene] locked to window: {title} "
+                    f"({crop.width}x{crop.height})")
+            else:
+                self._log_msg(
+                    f"[scene] screen region added {crop.width}x{crop.height}; "
+                    "window lock unavailable")
 
         cv.bind("<Button-1>", _down)
         cv.bind("<B1-Motion>", _drag)
@@ -1905,7 +2627,7 @@ class AvatarStudio:
                               font=("Segoe UI", 7), tags="tb")
             ready = self._ready_speech_snapshot()
             ready_x1 = 442
-            ready_x2 = min(w - 244, 650)
+            ready_x2 = min(w - 286, 650)
             if ready_x2 > ready_x1 + 80:
                 status = ready.get("status") if ready else None
                 is_ready = status == "ready"
@@ -1951,7 +2673,7 @@ class AvatarStudio:
                 self._tb_buttons["ready_speech"] = (ready_x1, 14, ready_x2, 40)
             ready_hits = []
             split_x1 = 442
-            split_x2 = min(w - 244, 930)
+            split_x2 = min(w - 286, 930)
 
             def _draw_ready_lane(slot, label, x1, x2):
                 item = self._ready_speech_snapshot(slot)
@@ -2012,6 +2734,27 @@ class AvatarStudio:
                 _draw_ready_lane(
                     "comment", "COMMENT", split_x1 + lane_w + split_gap,
                     split_x1 + lane_w + split_gap + lane_w)
+            camera_x1, camera_x2 = w - 274, w - 234
+            camera_on = bool(self.camera_enabled)
+            camera_outline = MINT if camera_on else RED
+            camera_fill = self._mix(
+                SURFACE2, camera_outline,
+                0.22 if self._tb_hover == "camera" else 0.10)
+            self._round_rect(
+                topcv, camera_x1, 14, camera_x2, 40, 6,
+                fill=camera_fill, outline=camera_outline, tags="tb")
+            eye_cx = (camera_x1 + camera_x2) // 2
+            topcv.create_oval(
+                eye_cx - 10, 20, eye_cx + 10, 34,
+                outline=camera_outline, width=2, tags="tb")
+            topcv.create_oval(
+                eye_cx - 3, 24, eye_cx + 3, 30,
+                fill=camera_outline, outline="", tags="tb")
+            if not camera_on:
+                topcv.create_line(
+                    eye_cx - 11, 18, eye_cx + 11, 36,
+                    fill=RED, width=2, tags="tb")
+
             self._round_rect(topcv, w - 226, 14, w - 116, 40, 6, fill=SURFACE, outline=BORDER, tags="tb")
             topcv.create_text(w - 210, 27, text="Default Profile", anchor="w", fill=FG,
                               font=("Segoe UI", 8), tags="tb")
@@ -2022,7 +2765,8 @@ class AvatarStudio:
             mn_x = ex_x - gap - bw
             by = 15
             self._tb_buttons = {"min": (mn_x, by, mn_x + bw, by + bh),
-                                "exit": (ex_x, by, ex_x + bw, by + bh)}
+                                "exit": (ex_x, by, ex_x + bw, by + bh),
+                                "camera": (camera_x1, 14, camera_x2, 40)}
             if ready_x2 > ready_x1 + 80 and not ready_hits:
                 self._tb_buttons["ready_speech"] = (ready_x1, 14, ready_x2, 40)
             for name, bounds in ready_hits:
@@ -2083,9 +2827,7 @@ class AvatarStudio:
                     r, rail, icon_lbl, text_lbl, self.nav_comments_badge)
                 self.nav_comments_badge.bind(
                     "<Button-1>", lambda _e, name=label: self._nav_go(name))
-        self.scene_slot = tk.Frame(sidebar, bg="#07090d")
-        self.scene_slot.pack(side="top", fill="both", expand=True, padx=12, pady=(14, 8))
-        self._build_sidebar_scene_slot()
+        tk.Frame(sidebar, bg="#07090d").pack(side="top", fill="both", expand=True)
         profile = tk.Frame(sidebar, bg="#0c1016",
                            highlightthickness=1, highlightbackground=BORDER)
         profile.pack(side="bottom", fill="x", padx=12, pady=12, ipady=8)
@@ -2240,6 +2982,13 @@ class AvatarStudio:
         stage_wrap.bind("<Configure>", self._resize_preview_stage)
         self._show_placeholder()
         self.root.after(1000, self._youtube_clock_tick)
+
+        # Large, continuously refreshed screen-region monitor below the avatar.
+        self.scene_slot = tk.Frame(
+            preview_panel, bg="#07090d", height=260)
+        self.scene_slot.pack(fill="x", pady=(8, 0))
+        self.scene_slot.pack_propagate(False)
+        self._build_sidebar_scene_slot()
 
         # Quick Actions.
         actions = tk.Frame(center_col, bg="#090c11", highlightthickness=1,
@@ -2509,6 +3258,8 @@ class AvatarStudio:
                                      highlightcolor=AMBER)
         self.youtube_entry.pack(fill="x", pady=(0, 6))
         self.youtube_entry.bind("<Return>", self._on_youtube_enter)
+        self.youtube_entry.bind("<<Paste>>", self._on_youtube_link_changed)
+        self.youtube_entry.bind("<KeyRelease>", self._on_youtube_link_changed)
         self.youtube_persona_var = tk.StringVar(value=YOUTUBE_PERSONA_LABELS[0])
         persona_combo = ttk.Combobox(
             youtube_panel, textvariable=self.youtube_persona_var,
@@ -3036,7 +3787,10 @@ class AvatarStudio:
                 self.brain = None
                 self._log_msg(f"[studio] brain unavailable ({exc}).")
             self._log_msg("[studio] webcam...")
-            cap = _open_webcam()
+            cap = _open_webcam() if self.camera_enabled else None
+            if cap is not None and not self.camera_enabled:
+                cap.release()
+                cap = None
             if cap is None:
                 self._log_msg("[studio] NO WEBCAM — driving with a static frame.")
             obs = None
@@ -3116,7 +3870,8 @@ class AvatarStudio:
                 except Exception as exc:
                     self._log_msg(f"[studio] face-swap load failed: {exc}")
             self.tts = tts
-            self.cap = cap
+            with self._camera_lock:
+                self.cap = cap
             self.obs_cam = obs
             self._live_response_event.set()
             self.root.after(0, self._sync_audio_mute_buttons)
@@ -3216,7 +3971,8 @@ class AvatarStudio:
                 self._mohammed_voice_warming = False
                 try:
                     self.root.after(0, lambda: self.youtube_audio_btn.configure(
-                        state="normal", text="ALTER REAL YOUTUBE VOICE"))
+                        state="normal",
+                        text="ALTER REAL YOUTUBE VOICE"))
                 except Exception:
                     pass
 
@@ -3243,9 +3999,24 @@ class AvatarStudio:
         prev_small = None                # for motion-adaptive LP scheduling
 
         while self.running:
+            if not self.camera_enabled:
+                msg = np.full((FRAME_SIZE, FRAME_SIZE, 3), 24, np.uint8)
+                cv2.putText(msg, "CAMERA OFF", (118, 245),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1.1,
+                            (181, 240, 77), 2, cv2.LINE_AA)
+                cv2.putText(msg, "Use the eye button in the top bar to enable it.",
+                            (54, 285), cv2.FONT_HERSHEY_SIMPLEX, 0.52,
+                            (200, 200, 200), 1, cv2.LINE_AA)
+                with self._frame_lock:
+                    self._latest = msg
+                time.sleep(0.1)
+                continue
+
             # No real camera? Show a clear message instead of running the
             # pipeline on a blank frame (which would just sit on charts).
-            if self.cap is None:
+            with self._camera_lock:
+                cap_available = self.cap is not None
+            if not cap_available:
                 msg = np.full((FRAME_SIZE, FRAME_SIZE, 3), 24, np.uint8)
                 cv2.putText(msg, "NO WEBCAM", (120, 230), cv2.FONT_HERSHEY_SIMPLEX,
                             1.1, (60, 60, 230), 2, cv2.LINE_AA)
@@ -3261,8 +4032,10 @@ class AvatarStudio:
 
             _t = time.perf_counter()
             driving = last_frame
-            if self.cap is not None:
-                ok, fr = self.cap.read()
+            with self._camera_lock:
+                cap = self.cap
+                ok, fr = cap.read() if cap is not None else (False, None)
+            if cap is not None:
                 if ok and fr is not None:
                     driving = cv2.resize(fr, (FRAME_SIZE, FRAME_SIZE))
                     last_frame = driving
@@ -3552,8 +4325,8 @@ class AvatarStudio:
             self._youtube_audio_mode = False
         if self._worker is not None:
             self._worker.join(timeout=2.0)
-        for fn in (lambda: self.cap.release() if self.cap else None,
-                   lambda: self.obs_cam.close() if self.obs_cam else None):
+        self._release_camera()
+        for fn in (lambda: self.obs_cam.close() if self.obs_cam else None,):
             try:
                 fn()
             except Exception:
@@ -3575,6 +4348,49 @@ class AvatarStudio:
     # -------------------------------------------------------------------------
     # SPEAK / CONTROLS
     # -------------------------------------------------------------------------
+    def _release_camera(self):
+        with self._camera_lock:
+            cap, self.cap = self.cap, None
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
+
+    def _enable_camera_capture(self):
+        self._log_msg("[studio] enabling camera...")
+        cap = _open_webcam()
+        if not self.camera_enabled:
+            if cap is not None:
+                cap.release()
+            return
+        with self._camera_lock:
+            old_cap, self.cap = self.cap, cap
+        if old_cap is not None and old_cap is not cap:
+            try:
+                old_cap.release()
+            except Exception:
+                pass
+        self._log_msg(
+            "[studio] camera enabled."
+            if cap is not None else
+            "[studio] camera unavailable or busy.")
+
+    def toggle_camera(self):
+        self.camera_enabled = not self.camera_enabled
+        if self.camera_enabled:
+            self._log_msg("[studio] camera requested ON.")
+            if self.running:
+                threading.Thread(
+                    target=self._enable_camera_capture, daemon=True).start()
+        else:
+            self._release_camera()
+            self._log_msg("[studio] camera disabled and released.")
+        try:
+            self._topdraw()
+        except Exception:
+            pass
+
     def _on_enter(self, event):
         self.speak()
         return "break"
@@ -3617,18 +4433,210 @@ class AvatarStudio:
             self._log_msg("[studio] Live Mic is on — just talk into the mic (typed SPEAK is disabled).")
             return
         self._user_priority()                 # you take precedence over auto-host
-        self.tts.speak(txt)
+        self._speak_exclusive(txt)
         self._log_msg("> " + txt)
+
+    def _speak_exclusive(self, text, priority=0):
+        """Queue AI speech while silencing, but not pausing, YouTube audio."""
+        if self.tts is None or not self.running:
+            return False
+        handoff_token = self._pause_youtube_for_ready_speech()
+        try:
+            self.tts.set_playback_voice_match(None)
+            self.tts.set_muted(False)
+            self._sync_audio_mute_buttons()
+        except Exception:
+            pass
+        accepted = self.tts.speak(text, priority=priority)
+        if not accepted:
+            if handoff_token is not None:
+                threading.Thread(
+                    target=self._wait_and_restore_youtube,
+                    args=(handoff_token,), daemon=True
+                ).start()
+            return False
+        if handoff_token is not None:
+            threading.Thread(
+                target=self._wait_and_restore_youtube,
+                args=(handoff_token,), daemon=True
+            ).start()
+        return True
 
     # ---- YOUTUBE SPEAK -----------------------------------------------------
     def _on_youtube_enter(self, event):
         self.speak_youtube()
         return "break"
 
+    def _on_youtube_link_changed(self, _event=None):
+        if self._youtube_scene_attach_job is not None:
+            try:
+                self.root.after_cancel(self._youtube_scene_attach_job)
+            except Exception:
+                pass
+        # <<Paste>> fires before Tk's default binding inserts clipboard text.
+        self._youtube_scene_attach_job = self.root.after(
+            650, self._attach_youtube_scene_from_entry)
+
+    def _attach_youtube_scene_from_entry(self):
+        self._youtube_scene_attach_job = None
+        url = self.youtube_entry.get("1.0", "end").strip()
+        if "youtu" not in url.lower():
+            return
+        self._attach_youtube_scene(url)
+
+    def _attach_youtube_scene(self, url, force=False):
+        url = (url or "").strip()
+        if (not url or (
+                url == self._youtube_scene_url
+                and self._scene_source == "youtube"
+                and not force)):
+            return
+        try:
+            from youtube_video import YouTubeVideoScene
+        except Exception as exc:
+            self._log_msg(f"[scene] YouTube video unavailable: {exc}")
+            return
+        if self._youtube_scene is not None:
+            try:
+                self._youtube_scene.stop()
+            except Exception:
+                pass
+
+        def _status(message):
+            self._log_msg(f"[scene] {message}")
+            if "ready" in message:
+                try:
+                    self.root.after(0, self._build_sidebar_scene_slot)
+                except Exception:
+                    pass
+
+        self._youtube_scene_url = url
+        self._youtube_scene_crop = (0.0, 0.0, 1.0, 1.0)
+        self._youtube_scene = YouTubeVideoScene(
+            self._youtube_position_seconds, status_callback=_status)
+        with self._scene_capture_lock:
+            self._scene_source = "youtube"
+            self._scene_capture_bbox = None
+            self._scene_window_hwnd = None
+            self._scene_window_crop = None
+            self._scene_capture_image = Image.new(
+                "RGB", self._scene_preview_size, "#050608")
+            self._scene_display_image = self._scene_capture_image.copy()
+            self._scene_capture_serial += 1
+        self._youtube_scene.start(url)
+        self._build_sidebar_scene_slot()
+        self._schedule_scene_preview()
+        self._log_msg("[scene] YouTube video attached; loading synchronized preview.")
+
+    def _youtube_position_seconds(self):
+        if self._youtube_audio is not None:
+            return float(getattr(self._youtube_audio, "position_seconds", 0.0) or 0.0)
+        start = float(getattr(self, "_youtube_start_seconds", 0.0) or 0.0)
+        if self._youtube_chunks:
+            total = max(1, len(self._youtube_chunks))
+            fraction = min(total, max(0, self._youtube_index)) / total
+            end = self._youtube_end_seconds
+            duration = float(getattr(self, "_youtube_duration", 0.0) or 0.0)
+            if duration <= 0 and self._youtube_scene is not None:
+                duration = float(
+                    getattr(self._youtube_scene, "duration", 0.0) or 0.0)
+            range_end = float(end) if end is not None else duration
+            if range_end > start:
+                return start + (range_end - start) * fraction
+        return start
+
+    def _scene_time_text(self):
+        if self._scene_source != "youtube":
+            return ""
+        position = self._youtube_position_seconds()
+        duration = 0.0
+        if self._youtube_scene is not None:
+            duration = float(getattr(self._youtube_scene, "duration", 0.0) or 0.0)
+        return (
+            f"{self._fmt_time(position)} / {self._fmt_time(duration)}"
+            if duration > 0 else self._fmt_time(position)
+        )
+
+    def _edit_youtube_scene_crop(self):
+        with self._scene_capture_lock:
+            image = self._youtube_scene_raw_image
+            current = self._youtube_scene_crop
+        if image is None:
+            self._log_msg("[scene] wait for the first YouTube frame, then edit crop.")
+            return
+
+        win = tk.Toplevel(self.root)
+        win.title("Edit YouTube Scene Crop")
+        win.configure(bg=BG)
+        win.transient(self.root)
+        win.attributes("-topmost", True)
+        width, height = 800, 450
+        canvas = tk.Canvas(
+            win, width=width, height=height, bg="#000000",
+            highlightthickness=1, highlightbackground=AMBER,
+            cursor="crosshair")
+        canvas.pack(padx=12, pady=(12, 8))
+        shown = image.resize((width, height), Image.LANCZOS)
+        tk_image = ImageTk.PhotoImage(shown)
+        canvas.create_image(0, 0, image=tk_image, anchor="nw")
+        win._youtube_crop_image = tk_image
+        state = {"start": None, "rect": None, "crop": current}
+
+        def _draw(crop):
+            if state["rect"] is not None:
+                canvas.delete(state["rect"])
+            x1, y1, x2, y2 = crop
+            state["rect"] = canvas.create_rectangle(
+                x1 * width, y1 * height, x2 * width, y2 * height,
+                outline=AMBER, width=3)
+            state["crop"] = crop
+
+        def _down(event):
+            state["start"] = (event.x, event.y)
+
+        def _drag(event):
+            if state["start"] is None:
+                return
+            sx, sy = state["start"]
+            x1, x2 = sorted((max(0, sx), min(width, event.x)))
+            y1, y2 = sorted((max(0, sy), min(height, event.y)))
+            if x2 - x1 < 8 or y2 - y1 < 8:
+                return
+            _draw((x1 / width, y1 / height, x2 / width, y2 / height))
+
+        def _apply():
+            self._youtube_scene_crop = state["crop"]
+            self._scene_face_box = None
+            self._scene_face_detect_count = 0
+            win.destroy()
+            self._log_msg("[scene] YouTube crop updated.")
+
+        def _reset():
+            _draw((0.0, 0.0, 1.0, 1.0))
+
+        _draw(current)
+        canvas.bind("<Button-1>", _down)
+        canvas.bind("<B1-Motion>", _drag)
+        canvas.bind("<ButtonRelease-1>", _drag)
+        controls = tk.Frame(win, bg=BG)
+        controls.pack(fill="x", padx=12, pady=(0, 12))
+        tk.Button(
+            controls, text="Reset Full Video", command=_reset,
+            bg=SURFACE2, fg=FG, relief="flat", cursor="hand2",
+            font=("Segoe UI", 9), padx=12, pady=6).pack(side="left")
+        tk.Button(
+            controls, text="Apply Crop", command=_apply,
+            bg=self._mix(AMBER, "#ffffff", 0.08), fg="#111111",
+            relief="flat", cursor="hand2", font=("Segoe UI", 9, "bold"),
+            padx=16, pady=6).pack(side="right")
+        win.bind("<Return>", lambda _event: _apply())
+        win.bind("<Escape>", lambda _event: win.destroy())
+
     def speak_youtube(self):
         url = self.youtube_entry.get("1.0", "end").strip()
         if not url:
             return
+        self._attach_youtube_scene(url)
         if self.tts is None or not self.running:
             self._log_msg("[studio] press START first.")
             return
@@ -3915,6 +4923,13 @@ class AvatarStudio:
         try:
             if getattr(self, "youtube_time_lbl", None) is not None:
                 self.youtube_time_lbl.configure(text=self._youtube_time_text())
+            if getattr(self, "scene_time_lbl", None) is not None:
+                self.scene_time_lbl.configure(text=self._scene_time_text())
+            if (self._youtube_audio is not None
+                    and self._youtube_mode == "youtube"
+                    and self._scene_source != "youtube"
+                    and self._youtube_scene_attach_job is None):
+                self._on_youtube_link_changed()
         except Exception:
             pass
         try:
@@ -3924,7 +4939,7 @@ class AvatarStudio:
 
     def _youtube_time_text(self):
         if self._youtube_audio is not None:
-            pos = float(getattr(self._youtube_audio, "position_seconds", 0.0))
+            pos = self._youtube_position_seconds()
             dur = float(getattr(self._youtube_audio, "duration", 0.0))
             status = (getattr(self._youtube_audio, "status", "") or "").upper()
             if dur > 0:
@@ -3937,9 +4952,11 @@ class AvatarStudio:
             start = float(getattr(self, "_youtube_start_seconds", 0.0) or 0.0)
             end = getattr(self, "_youtube_end_seconds", None)
             dur = float(getattr(self, "_youtube_duration", 0.0) or 0.0)
+            if dur <= 0 and self._youtube_scene is not None:
+                dur = float(
+                    getattr(self._youtube_scene, "duration", 0.0) or 0.0)
             range_end = float(end) if end is not None else (dur if dur > 0 else start)
-            span = max(0.0, range_end - start)
-            pos = start + span * (idx / max(1, total))
+            pos = self._youtube_position_seconds()
             if dur > 0:
                 return f"YOUTUBE TIME {self._fmt_time(pos)} / {self._fmt_time(dur)}  TEXT {idx}/{total} {pct}%"
             return f"YOUTUBE TIME {self._fmt_time(pos)}  TEXT {idx}/{total} {pct}%"
@@ -4003,6 +5020,7 @@ class AvatarStudio:
         url = self.youtube_entry.get("1.0", "end").strip()
         if not url:
             return
+        self._attach_youtube_scene(url)
         if not self.running or self.engines is None:
             self._log_msg("[studio] press START first.")
             return
@@ -4116,7 +5134,8 @@ class AvatarStudio:
                 def _done():
                     self._youtube_busy = False
                     self.youtube_audio_btn.configure(
-                        state="normal", text="ALTER REAL YOUTUBE VOICE")
+                        state="normal",
+                        text="ALTER REAL YOUTUBE VOICE")
                 try:
                     self.root.after(0, _done)
                 except Exception:
@@ -4178,7 +5197,7 @@ class AvatarStudio:
                         continue
                     chunk = self._youtube_chunks[self._youtube_index]
                     self._youtube_index += 1
-                    self.tts.speak(chunk, priority=0)
+                    self._speak_exclusive(chunk, priority=0)
                     self._set_youtube_progress(
                         self._youtube_playback_progress(),
                         f"Speaking chunk {self._youtube_index}/{len(self._youtube_chunks)}")
@@ -4218,7 +5237,7 @@ class AvatarStudio:
         if self.brain is None or not self.brain.ok:
             why = self.brain.startup_check()[1] if self.brain else "brain not started"
             self._log_msg(f"[studio] AI brain unavailable ({why}) — speaking as-is.")
-            self.tts.speak(txt)
+            self._speak_exclusive(txt)
             self._log_msg("> " + txt)
             return
         self._brain_answer(txt)
@@ -4240,10 +5259,10 @@ class AvatarStudio:
                 self._log_msg(f"[studio] brain error: {exc}")
             if reply:
                 self._log_msg("avatar> " + reply)
-                self.tts.speak(reply)
+                self._speak_exclusive(reply)
             else:
                 self._log_msg("[studio] no answer — speaking your text as-is.")
-                self.tts.speak(txt)
+                self._speak_exclusive(txt)
         threading.Thread(target=_think, daemon=True).start()
 
     # ----- AUTO-TALK: continuous self-generated gold commentary -----------------
@@ -4605,6 +5624,9 @@ class AvatarStudio:
                 if _t.monotonic() < self._user_active_until:
                     _t.sleep(0.3)
                     continue
+                if self._ready_playback_active:
+                    _t.sleep(0.1)
+                    continue
                 # PRIORITY 1 (checked BEFORE the buffer pace): react to gifts /
                 # follows / shares / like-milestones IMMEDIATELY — thank supporters
                 # without waiting for the line buffer to drain.
@@ -4649,7 +5671,7 @@ class AvatarStudio:
                 # if you interacted while it was generating, drop this line
                 if line and self.autotalk_var.get() and _t.monotonic() >= self._user_active_until:
                     self._log_msg("avatar> " + line)
-                    self.tts.speak(line)
+                    self._speak_exclusive(line)
                     self._last_spoke_t = _t.monotonic()
             except Exception as exc:
                 self._log_msg(f"[autotalk] {exc}")
@@ -4866,28 +5888,21 @@ class AvatarStudio:
 
     def _top_viewers_line(self):
         top = self._top_viewers(8)
-        room = self._live_room_context()
         if not top:
-            if room:
-                return (f"{room} Big love to everyone watching right now. "
-                        "Stay sharp, stay patient, and keep showing up.")
-            return ("Big love to everyone watching right now. I see the room, "
-                    "I appreciate the support, and the next move belongs to the disciplined.")
+            return ("Big love to everyone watching. Thank you for being here "
+                    "and supporting the live.")
         names = [rec["name"] for rec in top[:5]]
         extra = len(top) - len(names)
         joined = self._join_names(names)
         if extra > 0:
-            joined = f"{joined}, plus {extra} more active legends"
+            joined = f"{joined}, and {extra} more"
         top_gifter = next((rec for rec in top if int(rec.get("coins", 0)) > 0), None)
         gift_part = ""
         if top_gifter is not None:
-            gift_part = (f" Special respect to {top_gifter['name']} holding it down "
-                         f"with {int(top_gifter.get('coins', 0)):,} coins.")
-        opener = f"{room} " if room else ""
+            gift_part = f" Extra thanks to {top_gifter['name']} for the gifts."
         return (
-            f"{opener}Shout out to the top viewers right now: {joined}. "
-            f"{gift_part} You are carrying the energy in this live. "
-            "Keep focused, keep supporting each other, and let's make this session count."
+            f"Shout out to our top viewers: {joined}.{gift_part} "
+            "Thank you for supporting the live."
         ).replace("  ", " ").strip()
 
     def _speak_top_viewers(self):
@@ -4895,27 +5910,19 @@ class AvatarStudio:
             self._log_msg("[viewers] press START first.")
             return
         line = self._top_viewers_line()
-        youtube_state = self._pause_youtube_for_ready_speech()
         try:
             self.tts.set_muted(False)
-            self.tts.interrupt_current()
-            self.tts.clear_pending()
+            self.tts.clear_pending(below=2)
         except Exception:
             pass
-        accepted = self.tts.speak(line, priority=2)
+        accepted = self._speak_exclusive(line, priority=2)
         if not accepted:
-            self._restore_youtube_after_ready_speech(youtube_state)
             self._log_msg("[viewers] TTS rejected viewer shout-out")
             return
         self._log_msg("[viewers] top viewers shout-out queued")
         self._log_msg("avatar> " + line)
         self._last_spoke_t = time.monotonic()
         self._user_active_until = time.monotonic() + 5.0
-        if youtube_state is not None:
-            threading.Thread(
-                target=self._wait_and_restore_youtube,
-                args=(youtube_state,), daemon=True
-            ).start()
 
     def _live_stream_ctx(self):
         market = ""
@@ -4930,6 +5937,7 @@ class AvatarStudio:
 
     def _stage_urgent_event(self, text, detail, front=False):
         """Make a pre-rendered acknowledgement green directly from TikTok."""
+        text = self._supporter_text_only(text)
         if self._prepare_speech_button(
                 text, kind="urgent", priority=2, detail=detail):
             return True
@@ -4939,6 +5947,15 @@ class AvatarStudio:
             self._prio_events.append(text)
         self._live_response_event.set()
         return False
+
+    @staticmethod
+    def _supporter_text_only(text):
+        """Keep appreciation focused on the person, not a detached room count."""
+        text = (text or "").strip()
+        marker = "[[CUT]] Right now we have"
+        if marker in text:
+            text = text.split(marker, 1)[0].strip()
+        return text
 
     def _on_like(self, user, total):
         # celebrate only when we CROSS a milestone (likes fire constantly otherwise)
@@ -4985,7 +6002,7 @@ class AvatarStudio:
                     txt = None
                 if txt:
                     return self._prepare_speech_button(
-                        self._with_live_room_context(txt), kind="urgent", priority=2,
+                        self._supporter_text_only(txt), kind="urgent", priority=2,
                         detail="supporter appreciation"
                     )
             # 1b) BATCHED follows — thank a burst of follows in one quick line
@@ -5007,7 +6024,7 @@ class AvatarStudio:
                 txt = rx.follow_many(names) if rx is not None else None
                 if txt:
                     return self._prepare_speech_button(
-                        self._with_live_room_context(txt),
+                        self._supporter_text_only(txt),
                         kind="urgent", priority=2, detail="new followers"
                     )
             # 2) market alerts / polls (secondary — may phrase via the brain)
@@ -5041,7 +6058,7 @@ class AvatarStudio:
                 self.tts.clear_pending(below=1)     # announcements clear filler, keep replies
             except Exception:
                 pass
-            self.tts.speak(reply, priority=1)
+            self._speak_exclusive(reply, priority=1)
             self._last_spoke_t = time.monotonic()
             return True
         except Exception as exc:
@@ -5057,6 +6074,8 @@ class AvatarStudio:
                 break
             try:
                 if self.tts is None or not self.running:
+                    continue
+                if self._ready_playback_active:
                     continue
                 if self._prio_events or self._pending_follows:
                     if self._ready_speech_snapshot("urgent") is None:
@@ -5259,17 +6278,20 @@ class AvatarStudio:
             return
         if self.live_mic is not None:
             self._log_msg("[ready] AI voice activated over Live Mic for acknowledgement")
-        youtube_state = self._pause_youtube_for_ready_speech()
-        self.tts.set_muted(False)
-        self._sync_audio_mute_buttons()
+        self._ready_playback_active = True
+        self._user_active_until = time.monotonic() + 60.0
         try:
-            self.tts.interrupt_current()
             self.tts.clear_pending()
+            soft_interrupt = getattr(self.tts, "soft_interrupt_current", None)
+            if callable(soft_interrupt):
+                soft_interrupt()
         except Exception:
             pass
-        accepted = self.tts.speak(item["text"], priority=int(item["priority"]))
+        accepted = self._speak_exclusive(
+            item["text"], priority=int(item["priority"]))
         if not accepted:
-            self._restore_youtube_after_ready_speech(youtube_state)
+            self._ready_playback_active = False
+            self._user_active_until = time.monotonic() + 1.0
             self._log_msg("[ready] TTS rejected the line; button remains ready")
             return
         with self._ready_speech_lock:
@@ -5284,12 +6306,39 @@ class AvatarStudio:
         self._log_msg("[ready] pressed; speech queued")
         self._log_msg("avatar> " + item["text"])
         self._last_spoke_t = time.monotonic()
-        self._user_active_until = time.monotonic() + 4.0
-        if youtube_state is not None:
-            threading.Thread(
-                target=self._wait_and_restore_youtube,
-                args=(youtube_state,), daemon=True
-            ).start()
+        threading.Thread(
+            target=self._finish_ready_playback,
+            args=(item, slot, deferred), daemon=True
+        ).start()
+
+    def _finish_ready_playback(self, item, slot, deferred):
+        """Hold market speech until the selected acknowledgement fully ends."""
+        deadline = time.monotonic() + 60.0
+        started_at = time.monotonic()
+        busy_seen = False
+        idle_since = None
+        while time.monotonic() < deadline:
+            tts = self.tts
+            if tts is None or not self.running:
+                break
+            busy = bool(
+                getattr(tts, "pending", 0) > 0
+                or getattr(tts, "synthesizing", False)
+                or getattr(tts, "speaking", False)
+            )
+            if busy:
+                busy_seen = True
+                idle_since = None
+            elif busy_seen:
+                if idle_since is None:
+                    idle_since = time.monotonic()
+                elif time.monotonic() - idle_since >= 0.35:
+                    break
+            elif time.monotonic() - started_at >= 2.0:
+                break
+            time.sleep(0.03)
+        self._ready_playback_active = False
+        self._user_active_until = time.monotonic() + 3.0
         if item.get("clear_answering"):
             self._clear_answering()
         if deferred is not None and slot == "comment":
@@ -5315,67 +6364,99 @@ class AvatarStudio:
         self._live_response_event.set()
 
     def _pause_youtube_for_ready_speech(self):
-        """Silence real YouTube playback while an urgent response takes the mouth."""
+        """Silence YouTube output while keeping its playback clock advancing."""
         player = self._youtube_audio
         if player is None:
             return None
-        state = {
-            "player": player,
-            "was_running": bool(getattr(player, "_running", False)),
-            "was_paused": bool(getattr(player, "_paused", None)
-                               and player._paused.is_set()),
-            "was_muted": bool(getattr(player, "muted", False)),
-            "duck_gain": getattr(player, "_target_output_gain", 1.0),
-            "tts_was_muted": bool(getattr(self.tts, "muted", False)),
-            "tts_voice_match": getattr(self.tts, "_playback_match_persona", None),
-        }
-        try:
-            persona = getattr(player, "persona", None)
-            if self.tts is not None and persona:
-                self.tts.set_playback_voice_match(persona)
-            if hasattr(player, "set_ducked"):
-                player.set_ducked(True)
-                self._log_msg("[ready] YouTube voice ducked under bot speech")
-            else:
-                player.set_muted(True)
-                player.pause()
-                self._log_msg("[ready] YouTube audio paused; matching acknowledgement voice")
-        except Exception as exc:
-            self._log_msg(f"[ready] could not pause YouTube audio: {exc}")
-        return state
+        with self._audio_handoff_lock:
+            self._audio_handoff_token += 1
+            token = self._audio_handoff_token
+            if self._audio_handoff_state is None:
+                self._audio_handoff_state = {
+                    "player": player,
+                    "was_running": bool(getattr(player, "_running", False)),
+                    "was_paused": bool(getattr(player, "_paused", None)
+                                       and player._paused.is_set()),
+                    "youtube_duck_gain": float(
+                        getattr(player, "duck_gain", 0.22)),
+                    "youtube_output_target": float(
+                        getattr(player, "_target_output_gain", 1.0)),
+                    "tts_was_muted": bool(getattr(self.tts, "muted", False)),
+                    "tts_voice_match": getattr(
+                        self.tts, "_playback_match_persona", None),
+                }
+                try:
+                    if self.tts is not None:
+                        # AI acknowledgements must remain close, clear, and
+                        # intelligible instead of inheriting YouTube's persona
+                        # pitch/formant filter.
+                        self.tts.set_playback_voice_match(None)
+                    # Zero-gain ducking keeps FFmpeg consuming the live stream,
+                    # position_seconds moving, and the UI clock current.
+                    player.set_ducked(True, gain=0.0)
+                    self._log_msg(
+                        "[audio] YouTube voice muted; playback continues")
+                except Exception as exc:
+                    self._log_msg(
+                        f"[ready] could not mute YouTube audio: {exc}")
+            return token
 
-    def _wait_and_restore_youtube(self, state):
-        """Resume the exact YouTube player after the urgent TTS queue becomes idle."""
+    def _wait_and_restore_youtube(self, token):
+        """Restore YouTube volume after the urgent TTS queue becomes idle."""
         deadline = time.monotonic() + 45.0
+        started_at = time.monotonic()
+        busy_seen = False
+        idle_since = None
         while time.monotonic() < deadline:
             tts = self.tts
-            if tts is None or getattr(tts, "pending", 0) <= 0:
+            if tts is None:
+                break
+            busy = bool(
+                getattr(tts, "pending", 0) > 0
+                or getattr(tts, "synthesizing", False)
+                or getattr(tts, "speaking", False)
+            )
+            if busy:
+                busy_seen = True
+                idle_since = None
+            elif busy_seen:
+                if idle_since is None:
+                    idle_since = time.monotonic()
+                elif time.monotonic() - idle_since >= 0.25:
+                    break
+            elif time.monotonic() - started_at >= 1.0:
                 break
             time.sleep(0.02)
-        self._restore_youtube_after_ready_speech(state)
+        self._restore_youtube_after_ready_speech(token)
 
-    def _restore_youtube_after_ready_speech(self, state):
-        if not state:
+    def _restore_youtube_after_ready_speech(self, token):
+        if token is None:
             return
-        player = state.get("player")
-        if player is None or player is not self._youtube_audio:
-            return
-        try:
-            if hasattr(player, "set_ducked"):
-                player.set_ducked(False)
-                player._target_output_gain = float(state.get("duck_gain", 1.0))
-                player.set_muted(bool(state.get("was_muted", False)))
-            else:
-                player.set_muted(bool(state.get("was_muted", False)))
-                if (state.get("was_running") and not state.get("was_paused")
-                        and self._youtube_mode == "youtube"):
-                    player.resume()
-            if self.tts is not None:
-                self.tts.set_playback_voice_match(state.get("tts_voice_match"))
-                self.tts.set_muted(bool(state.get("tts_was_muted", False)))
-            self._log_msg("[ready] YouTube voice blend restored")
-        except Exception as exc:
-            self._log_msg(f"[ready] could not restore YouTube audio: {exc}")
+        with self._audio_handoff_lock:
+            if token != self._audio_handoff_token:
+                return
+            state = self._audio_handoff_state
+            self._audio_handoff_state = None
+            if not state:
+                return
+            player = state.get("player")
+            if player is None or player is not self._youtube_audio:
+                return
+            try:
+                player.duck_gain = float(
+                    state.get("youtube_duck_gain", 0.22))
+                player._target_output_gain = float(
+                    state.get("youtube_output_target", 1.0))
+                if self.tts is not None:
+                    self.tts.set_playback_voice_match(
+                        state.get("tts_voice_match"))
+                    self.tts.set_muted(
+                        bool(state.get("tts_was_muted", False)))
+                self._log_msg(
+                    "[audio] AI speech finished; YouTube volume restored")
+            except Exception as exc:
+                self._log_msg(
+                    f"[ready] could not restore YouTube volume: {exc}")
 
     def _feed_msg(self, text, kind="sys"):
         """Append one line to the live-comments feed below the avatar. Thread-safe.
@@ -6454,6 +7535,18 @@ class AvatarStudio:
     def _on_close(self):
         self.running = False
         self._live_stop = True
+        self._scene_capture_stop.set()
+        if self._scene_preview_job is not None:
+            try:
+                self.root.after_cancel(self._scene_preview_job)
+            except Exception:
+                pass
+            self._scene_preview_job = None
+        if self._youtube_scene is not None:
+            try:
+                self._youtube_scene.stop()
+            except Exception:
+                pass
         self._live_response_event.set()
         if self.brain_pool is not None:
             try:
@@ -6467,8 +7560,8 @@ class AvatarStudio:
                 pass
         if self._worker is not None:
             self._worker.join(timeout=2.0)
-        for fn in (lambda: self.cap.release() if self.cap else None,
-                   lambda: self.obs_cam.close() if self.obs_cam else None,
+        self._release_camera()
+        for fn in (lambda: self.obs_cam.close() if self.obs_cam else None,
                    lambda: self._tv_proc.terminate() if self._tv_proc else None,
                    lambda: self.market_gold.stop() if self.market_gold else None,
                    lambda: self.market_btc.stop() if self.market_btc else None,
@@ -6494,7 +7587,10 @@ def _acquire_single_instance():
     try:
         import ctypes
         ERROR_ALREADY_EXISTS = 183
-        h = ctypes.windll.kernel32.CreateMutexW(None, False, "Global\\AvatarStudioSingleInstance")
+        mutex_name = os.environ.get(
+            "AVATAR_INSTANCE_MUTEX", "Global\\AvatarStudioSingleInstance"
+        )
+        h = ctypes.windll.kernel32.CreateMutexW(None, False, mutex_name)
         if not h or ctypes.windll.kernel32.GetLastError() == ERROR_ALREADY_EXISTS:
             return False
         _SINGLE_INSTANCE_HANDLE = h        # keep the handle alive
@@ -6504,15 +7600,19 @@ def _acquire_single_instance():
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--tradingview-pilot":
+        from tradingview_pilot import main as tradingview_main
+        return tradingview_main([sys.argv[0], *sys.argv[2:]])
     if not _acquire_single_instance():
         print("[studio] Avatar Studio is ALREADY RUNNING — only one instance is "
               "allowed (so only one bot speaks). Exiting this one.")
-        return
+        return 1
     _configure_windows_app_identity()
     root = tk.Tk()
     AvatarStudio(root)
     root.mainloop()
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

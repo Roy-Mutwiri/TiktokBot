@@ -207,13 +207,14 @@ class TTSFluencyTests(unittest.TestCase):
 
         fake_sd = types.SimpleNamespace(OutputStream=FakeStream)
         engine = bare_engine()
+        engine.muted = False
         with mock.patch.dict(sys.modules, {"sounddevice": fake_sd}):
             engine._play_direct(np.ones(1600, np.float32) * 0.1, 16000)
             engine._play_direct(np.ones(1600, np.float32) * 0.2, 16000)
 
         self.assertEqual(len(created), 1)
         self.assertEqual(created[0].started, 1)
-        self.assertEqual(len(created[0].writes), 2)
+        self.assertGreaterEqual(len(created[0].writes), 2)
         self.assertEqual(created[0].kwargs["dtype"], "float32")
 
     def test_tts_chunks_are_bounded_for_stable_voice_generation(self):
