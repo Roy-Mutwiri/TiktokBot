@@ -364,6 +364,7 @@ class AvatarStudio:
         self.scene_preview_lbl = None
         self.scene_add_btn = None
         self.scene_edit_btn = None
+        self.scene_reset_btn = None
         self.scene_time_lbl = None
         self.scene_face_strip = None
         self._active_face_variant = 1
@@ -1773,6 +1774,15 @@ class AvatarStudio:
             highlightthickness=1, highlightbackground=CYAN, padx=10, pady=4)
         self.scene_add_btn.pack(side="right")
         if self._scene_source == "youtube":
+            self.scene_reset_btn = tk.Button(
+                header, text="Reset Video", command=self._reset_youtube_scene_video,
+                bg=self._mix(SURFACE2, RED, 0.18), fg=RED,
+                activebackground=self._mix(SURFACE2, RED, 0.30),
+                activeforeground=RED, relief="flat", bd=0,
+                font=("Segoe UI", 8, "bold"), cursor="hand2",
+                highlightthickness=1, highlightbackground=RED,
+                padx=9, pady=4)
+            self.scene_reset_btn.pack(side="right", padx=(0, 6))
             self.scene_edit_btn = tk.Button(
                 header, text="Edit Crop", command=self._edit_youtube_scene_crop,
                 bg=self._mix(SURFACE2, AMBER, 0.22), fg=AMBER,
@@ -4484,7 +4494,7 @@ class AvatarStudio:
             return
         self._attach_youtube_scene(url)
 
-    def _attach_youtube_scene(self, url, force=False):
+    def _attach_youtube_scene(self, url, force=False, preserve_crop=False):
         url = (url or "").strip()
         if (not url or (
                 url == self._youtube_scene_url
@@ -4510,8 +4520,13 @@ class AvatarStudio:
                 except Exception:
                     pass
 
+        previous_crop = self._youtube_scene_crop
         self._youtube_scene_url = url
-        self._youtube_scene_crop = (0.0, 0.0, 1.0, 1.0)
+        self._youtube_scene_crop = (
+            previous_crop if preserve_crop else (0.0, 0.0, 1.0, 1.0))
+        self._youtube_scene_raw_image = None
+        self._scene_face_box = None
+        self._scene_face_detect_count = 0
         self._youtube_scene = YouTubeVideoScene(
             self._youtube_position_seconds, status_callback=_status)
         with self._scene_capture_lock:
@@ -4527,6 +4542,25 @@ class AvatarStudio:
         self._build_sidebar_scene_slot()
         self._schedule_scene_preview()
         self._log_msg("[scene] YouTube video attached; loading synchronized preview.")
+
+    def _reset_youtube_scene_video(self):
+        """Restart the YouTube video decoder without touching current audio."""
+        if self._scene_source != "youtube":
+            self._log_msg("[scene] no YouTube video scene is active.")
+            return
+        url = (self._youtube_scene_url or "").strip()
+        if not url:
+            try:
+                url = self.youtube_entry.get("1.0", "end").strip()
+            except Exception:
+                url = ""
+        if not url:
+            self._log_msg("[scene] paste a YouTube link before resetting video.")
+            return
+        pos = self._youtube_position_seconds()
+        self._log_msg(
+            f"[scene] resetting YouTube video at {self._fmt_time(pos)}; voice keeps playing.")
+        self._attach_youtube_scene(url, force=True, preserve_crop=True)
 
     def _youtube_position_seconds(self):
         if self._youtube_audio is not None:
