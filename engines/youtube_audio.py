@@ -8,12 +8,14 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 
 import numpy as np
 
 from tts_stream_engine import FFMPEG
 from voice_changer_engine import BLOCK, SAMPLE_RATE, make_converter
 from youtube_cache import audio_dir, get_cached_audio, save_audio
+from youtube_dlp_options import extract_info_with_retries
 
 MONITOR_RATE = 48000
 MONITOR_BLOCK = BLOCK * (MONITOR_RATE // SAMPLE_RATE)
@@ -23,6 +25,8 @@ DEMUCS_MODEL_URL = (
     "https://dl.fbaipublicfiles.com/demucs/hybrid_transformer/"
     + DEMUCS_MODEL_FILENAME
 )
+_AUDIO_DOWNLOAD_LOCKS = {}
+_AUDIO_DOWNLOAD_LOCKS_GUARD = threading.Lock()
 
 try:
     import sounddevice as sd
@@ -80,6 +84,7 @@ class YouTubeAudioPlayer:
         self._pause_release_pending = False
         self._output_gain = 1.0
         self._target_output_gain = 1.0
+        self._playback_anchor_t = None
 
     def start(self, url, start_seconds=None, end_seconds=None):
         if self._running:
@@ -107,6 +112,7 @@ class YouTubeAudioPlayer:
         self._fade_pos = 0
         self._last_styled = None
         self._pause_release_pending = False
+        self._playback_anchor_t = None
         if cache_hit:
             self._set_status("found audio in local db/cache")
         if self.start_seconds > 0:
@@ -207,12 +213,14 @@ class YouTubeAudioPlayer:
                     f"sounddevice unavailable ({_SD_IMPORT_ERROR})")
 
             nbytes = MONITOR_BLOCK * 2
+            self._playback_anchor_t = time.monotonic()
             while self._running:
                 if self._paused.is_set():
                     if self._pause_release_pending:
                         self._pause_release_pending = False
                         self._emit_release_tail()
                     self.speaking = False
+                    self._reset_realtime_anchor()
                     time.sleep(0.05)
                     continue
                 raw = self._proc.stdout.read(nbytes) if self._proc.stdout else b""
@@ -248,12 +256,15 @@ class YouTubeAudioPlayer:
                         np.ascontiguousarray(styled[::3], dtype=np.float32))
                 except Exception:
                     pass
+                wrote_monitor = False
                 if self._out is not None and not self.muted:
                     try:
                         monitor = self._apply_output_duck(styled)
                         self._out.write(monitor.reshape(-1, 1))
+                        wrote_monitor = True
                     except Exception:
                         pass
+                self._pace_realtime_if_needed(wrote_monitor)
             self._set_status("ended")
         except Exception as exc:
             self.last_error = str(exc)
@@ -310,6 +321,23 @@ class YouTubeAudioPlayer:
         self._output_gain = float(next_gain)
         return (out * env).astype(np.float32)
 
+    def _reset_realtime_anchor(self):
+        block_seconds = MONITOR_BLOCK / float(MONITOR_RATE)
+        self._playback_anchor_t = (
+            time.monotonic() - self.position_blocks * block_seconds)
+
+    def _pace_realtime_if_needed(self, wrote_monitor):
+        """Keep ffmpeg reads realtime when no output device write is blocking."""
+        if wrote_monitor:
+            return
+        block_seconds = MONITOR_BLOCK / float(MONITOR_RATE)
+        if self._playback_anchor_t is None:
+            self._reset_realtime_anchor()
+        deadline = self._playback_anchor_t + self.position_blocks * block_seconds
+        delay = deadline - time.monotonic()
+        if delay > 0:
+            time.sleep(min(delay, block_seconds))
+
     def _emit_release_tail(self):
         if not self.smooth_transition:
             return
@@ -353,8 +381,9 @@ def _resolve_audio_source(url, status_callback=None):
     }
     _status(status_callback, "checking youtube link")
     try:
-        with yt_dlp.YoutubeDL(probe_opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        info = extract_info_with_retries(
+            yt_dlp, url, probe_opts, download=False,
+            status_callback=status_callback, status_prefix="real audio")
     except Exception as exc:
         raise YouTubeAudioError(f"could not read YouTube audio ({exc})")
 
@@ -370,21 +399,31 @@ def _resolve_audio_source(url, status_callback=None):
 
     _status(status_callback, "new link - downloading youtube audio to cache")
     out_dir = audio_dir(url)
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "format": "bestaudio/best",
-        "outtmpl": os.path.join(out_dir, "audio.%(ext)s"),
-    }
-    try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-    except Exception as exc:
-        raise YouTubeAudioError(f"could not read YouTube audio ({exc})")
+    lock = _audio_download_lock(out_dir)
+    with lock:
+        cached = get_cached_audio(url)
+        if cached is not None:
+            _status(status_callback, "found audio in local db/cache")
+            return cached["audio_path"], cached["title"], cached["duration"], True
+        _cleanup_partial_audio_files(out_dir)
+        download_id = f"audio-{os.getpid()}-{int(time.time())}-{uuid.uuid4().hex[:8]}"
+        opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "noplaylist": True,
+            "format": "bestaudio/best",
+            "continuedl": False,
+            "outtmpl": os.path.join(out_dir, f"{download_id}.%(ext)s"),
+        }
+        try:
+            info = extract_info_with_retries(
+                yt_dlp, url, opts, download=True,
+                status_callback=status_callback, status_prefix="real audio")
+        except Exception as exc:
+            raise YouTubeAudioError(f"could not read YouTube audio ({exc})")
     title = (info or {}).get("title") or "YouTube audio"
     duration = float((info or {}).get("duration") or 0.0)
-    audio_path = _find_downloaded_audio(out_dir)
+    audio_path = _find_downloaded_audio(out_dir, prefix=download_id)
     if not audio_path:
         audio_path = (info or {}).get("requested_downloads", [{}])[0].get("filepath")
     if not audio_path or not os.path.exists(audio_path):
@@ -424,9 +463,29 @@ def _select_live_audio_url(info):
     return audio[0]["url"]
 
 
-def _find_downloaded_audio(out_dir):
+def _audio_download_lock(out_dir):
+    key = os.path.abspath(out_dir)
+    with _AUDIO_DOWNLOAD_LOCKS_GUARD:
+        lock = _AUDIO_DOWNLOAD_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _AUDIO_DOWNLOAD_LOCKS[key] = lock
+        return lock
+
+
+def _cleanup_partial_audio_files(out_dir):
+    for path in glob.glob(os.path.join(out_dir, "*.part")):
+        try:
+            os.remove(path)
+        except OSError:
+            # A currently running downloader may still own this file. New
+            # attempts use a unique name, so a locked stale part will not block.
+            pass
+
+
+def _find_downloaded_audio(out_dir, prefix="audio"):
     files = [
-        p for p in glob.glob(os.path.join(out_dir, "audio.*"))
+        p for p in glob.glob(os.path.join(out_dir, f"{prefix}.*"))
         if os.path.isfile(p) and not p.endswith(".part")
     ]
     if not files:

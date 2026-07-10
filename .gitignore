@@ -13,6 +13,7 @@
 *.npz
 *.tar
 *.tar.gz
+MohaVoice/Voicebox_0.5.0_x64_en-US.msi
 
 # --- downloaded / generated media ---
 *.mp4

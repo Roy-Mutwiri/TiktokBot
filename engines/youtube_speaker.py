@@ -5,6 +5,7 @@ import urllib.request
 from html import unescape
 
 from youtube_cache import get_cached_transcript, save_transcript
+from youtube_dlp_options import extract_info_with_retries
 
 
 # Long videos are expected. 250k chars is roughly several hours of captions while
@@ -53,8 +54,9 @@ def fetch_youtube_transcript(url, max_chars=MAX_TRANSCRIPT_CHARS,
         "noplaylist": True,
     }
     try:
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
+        info = extract_info_with_retries(
+            yt_dlp, url, opts, download=False,
+            status_callback=status_callback, status_prefix="captions")
     except Exception as exc:
         raise YouTubeTranscriptError(f"could not read YouTube video ({exc})")
 

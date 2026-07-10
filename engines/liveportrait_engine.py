@@ -67,7 +67,7 @@ DRIVING_MIN_FACE = 0.04        # below this the detection is ignored entirely
 # a degraded/distorted face. Below this we treat it like a face-loss (hold the
 # last good frame, then switch to charts) so a BAD face is never shown. Tune via
 # AVATAR_MIN_FACE; raise it to require the operator closer, lower to be lenient.
-MIN_GOOD_FACE = float(os.environ.get("AVATAR_MIN_FACE", "0.09"))
+MIN_GOOD_FACE = float(os.environ.get("AVATAR_MIN_FACE", "0.06"))
 HOLD_ON_FACE_LOSS = True       # hold last good face when no (good) face is detected
 
 # 1€-filter tuning per driving signal (jitter-vs-lag). Higher min_cutoff / beta
@@ -82,7 +82,7 @@ EURO_SCALE = dict(min_cutoff=1.0, beta=0.01)   # scale (lean in/out)
 EURO_EXP = dict(min_cutoff=2.5, beta=0.05)     # expression (keep blinks crisp)
 EURO_BOX = dict(min_cutoff=1.0, beta=0.02)     # face-crop box — higher beta so the
 #                                                crop SNAPS to fast head turns (no lag/trail)
-MISS_GRACE = 6                                 # keep driving this many frames after a
+MISS_GRACE = 12                                # keep driving this many frames after a
 #                                                detector miss before holding (no freeze flicker)
 
 # POSE-AWARE SOFT LIMITING — caps the head-pose DELTA (degrees) with a tanh knee
@@ -458,7 +458,7 @@ class LivePortraitEngine:
             # lower confidence catches more frames (fewer track drops) — the
             # grace window in _crop_driving_face handles the occasional miss.
             self._mesh = mp.solutions.face_detection.FaceDetection(
-                model_selection=0, min_detection_confidence=0.3)
+                model_selection=0, min_detection_confidence=0.25)
         except Exception as exc:
             print(f"[LP] face detector unavailable ({exc}) — driving uncropped.")
             self._mesh = None

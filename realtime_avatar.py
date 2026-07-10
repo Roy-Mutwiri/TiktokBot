@@ -62,7 +62,7 @@ LP_INTERVAL = max(1, int(os.environ.get("AVATAR_LP_INTERVAL", "2")))
 # (operator looks away/down) for NO_FACE_SECONDS, the output crossfades to a
 # live-moving trading chart, then back when the face returns.
 SHOW_CHART_ON_FACE_LOSS = os.environ.get("AVATAR_CHART_ON_LOSS", "1") == "1"
-NO_FACE_SECONDS = 1.5
+NO_FACE_SECONDS = 3.0
 CHART_FADE_STEP = 0.12
 
 # LIVE MIC mode: instead of (or alongside) the AI voice, YOUR mic drives the mouth
@@ -511,8 +511,11 @@ def run(eng=None):
             # face-loss -> trading chart scene (crossfade). Disabled in LP fallback.
             # Charts only when there is NO face at all (operator left / looked
             # away). A small/far face still shows the avatar (held) — not charts.
-            face_ok = (not getattr(liveportrait, "fallback_mode", False)) \
-                and getattr(liveportrait, "_face_size", 0.0) > 0.0
+            face_ok = (
+                not getattr(liveportrait, "fallback_mode", False)
+                and (getattr(liveportrait, "_face_found", False)
+                     or cached_face is not None)
+            )
             noface = 0 if face_ok else noface + 1
             want_chart = (SHOW_CHART_ON_FACE_LOSS
                           and not getattr(liveportrait, "fallback_mode", False)

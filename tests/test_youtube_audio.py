@@ -14,6 +14,8 @@ if ENGINES_DIR not in sys.path:
 
 from youtube_audio import (
     DEMUCS_MODEL_FILENAME,
+    MONITOR_BLOCK,
+    MONITOR_RATE,
     YouTubeAudioPlayer,
     _build_ffmpeg_cmd,
     _has_hash_prefix,
@@ -24,6 +26,10 @@ from youtube_audio import (
     _select_live_audio_url,
     pcm16_bytes_to_float,
 )
+from youtube_dlp_options import (
+    YouTubeDlpAuthError,
+    extract_info_with_retries,
+)
 
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(__file__))
@@ -32,6 +38,68 @@ if PROJECT_DIR not in sys.path:
 
 
 class YouTubeAudioTests(unittest.TestCase):
+    def test_ytdlp_retries_bot_check_with_browser_cookies(self):
+        calls = []
+
+        class FakeYDL:
+            def __init__(self, opts):
+                self.opts = opts
+                calls.append(opts)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                if "cookiesfrombrowser" not in self.opts:
+                    raise RuntimeError(
+                        "Sign in to confirm you're not a bot")
+                return {"title": "OK", "download": download}
+
+        fake_module = types.SimpleNamespace(YoutubeDL=FakeYDL)
+        statuses = []
+        with mock.patch.dict(
+                os.environ,
+                {"AVATAR_YOUTUBE_COOKIE_BROWSERS": "edge"},
+                clear=False):
+            info = extract_info_with_retries(
+                fake_module, "https://youtube.test/watch?v=abc",
+                {"quiet": True}, download=False,
+                status_callback=statuses.append)
+
+        self.assertEqual(info["title"], "OK")
+        self.assertNotIn("cookiesfrombrowser", calls[0])
+        self.assertEqual(calls[1]["cookiesfrombrowser"], ("edge",))
+        self.assertIn("youtube: retrying with edge cookies", statuses)
+
+    def test_ytdlp_auth_error_includes_cookie_hint(self):
+        class FakeYDL:
+            def __init__(self, _opts):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                raise RuntimeError("Sign in to confirm you're not a bot")
+
+        fake_module = types.SimpleNamespace(YoutubeDL=FakeYDL)
+        with mock.patch.dict(
+                os.environ,
+                {"AVATAR_YOUTUBE_COOKIE_BROWSERS": ""},
+                clear=False):
+            with self.assertRaises(YouTubeDlpAuthError) as raised:
+                extract_info_with_retries(
+                    fake_module, "https://youtube.test/watch?v=abc",
+                    {"quiet": True})
+
+        self.assertIn("AVATAR_YOUTUBE_COOKIES", str(raised.exception))
+
     def test_live_info_detection_excludes_upcoming_streams(self):
         self.assertTrue(_is_live_info({"is_live": True}))
         self.assertTrue(_is_live_info({"live_status": "is_live"}))
@@ -63,6 +131,31 @@ class YouTubeAudioTests(unittest.TestCase):
             _select_live_audio_url(info),
             "https://example.test/audio",
         )
+
+    def test_muted_audio_path_is_paced_in_realtime(self):
+        player = YouTubeAudioPlayer.__new__(YouTubeAudioPlayer)
+        player.position_blocks = 10
+        player._playback_anchor_t = 100.0
+
+        block_seconds = MONITOR_BLOCK / float(MONITOR_RATE)
+        with mock.patch(
+                "youtube_audio.time.monotonic",
+                return_value=100.0 + 9 * block_seconds), \
+                mock.patch("youtube_audio.time.sleep") as sleep:
+            player._pace_realtime_if_needed(wrote_monitor=False)
+
+        sleep.assert_called_once()
+        self.assertAlmostEqual(sleep.call_args.args[0], block_seconds, places=4)
+
+    def test_blocking_audio_write_does_not_add_extra_sleep(self):
+        player = YouTubeAudioPlayer.__new__(YouTubeAudioPlayer)
+        player.position_blocks = 10
+        player._playback_anchor_t = 100.0
+
+        with mock.patch("youtube_audio.time.sleep") as sleep:
+            player._pace_realtime_if_needed(wrote_monitor=True)
+
+        sleep.assert_not_called()
 
     def test_live_audio_resolver_does_not_download_infinite_stream(self):
         info = {
@@ -104,6 +197,64 @@ class YouTubeAudioTests(unittest.TestCase):
         self.assertFalse(cache_hit)
         self.assertIn(
             "live stream found - connecting without download", statuses)
+
+    def test_audio_download_uses_unique_file_and_ignores_stale_part(self):
+        import tempfile
+
+        probe_info = {
+            "title": "Cached show",
+            "duration": 123.0,
+            "is_live": False,
+        }
+        ydl_opts = []
+
+        with tempfile.TemporaryDirectory() as tmp:
+            stale = os.path.join(tmp, "audio.webm.part")
+            with open(stale, "wb") as f:
+                f.write(b"stale")
+
+            class FakeYDL:
+                def __init__(self, opts):
+                    self.opts = opts
+                    ydl_opts.append(opts)
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *_args):
+                    return False
+
+                def extract_info(self, _url, download):
+                    if not download:
+                        return probe_info
+                    outtmpl = self.opts["outtmpl"]
+                    path = outtmpl.replace("%(ext)s", "webm")
+                    with open(path, "wb") as f:
+                        f.write(b"audio")
+                    return {
+                        "title": "Cached show",
+                        "duration": 123.0,
+                        "requested_downloads": [{"filepath": path}],
+                    }
+
+            fake_module = types.SimpleNamespace(YoutubeDL=FakeYDL)
+            saved = {}
+            with mock.patch("youtube_audio.get_cached_audio", return_value=None), \
+                    mock.patch("youtube_audio.audio_dir", return_value=tmp), \
+                    mock.patch("youtube_audio.save_audio",
+                               side_effect=lambda *args: saved.setdefault("args", args)), \
+                    mock.patch.dict(sys.modules, {"yt_dlp": fake_module}):
+                source, title, duration, cache_hit = _resolve_audio_source(
+                    "https://youtube.test/watch?v=abc123")
+
+            self.assertEqual(title, "Cached show")
+            self.assertEqual(duration, 123.0)
+            self.assertFalse(cache_hit)
+            self.assertTrue(os.path.exists(source))
+            self.assertFalse(os.path.exists(stale))
+            self.assertFalse(os.path.basename(source).startswith("audio."))
+            self.assertFalse(ydl_opts[-1]["continuedl"])
+            self.assertEqual(saved["args"][3], source)
 
     def test_voice_isolation_streams_demucs_progress(self):
         import tempfile
@@ -407,6 +558,32 @@ class YouTubeAudioTests(unittest.TestCase):
         self.assertEqual(player.resume_calls, 0)
         self.assertEqual(player.duck_gain, 0.22)
         self.assertEqual(player._target_output_gain, 1.0)
+
+    def test_failed_real_audio_is_visible_in_youtube_status(self):
+        from avatar_studio import AvatarStudio
+
+        class FakeLabel:
+            def __init__(self):
+                self.kwargs = {}
+
+            def configure(self, **kwargs):
+                self.kwargs.update(kwargs)
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio._youtube_mode = "market"
+        studio._youtube_audio = None
+        studio._youtube_audio_mode = False
+        studio._youtube_audio_status = "failed"
+        studio._youtube_chunks = []
+        studio._youtube_index = 0
+        studio.youtube_status_lbl = FakeLabel()
+        studio.youtube_light = None
+        studio.youtube_light_dot = None
+        studio._sync_youtube_buttons = mock.Mock()
+
+        studio._sync_youtube_status()
+
+        self.assertEqual(studio.youtube_status_lbl.kwargs["text"], "YOUTUBE FAILED")
 
 if __name__ == "__main__":
     unittest.main()

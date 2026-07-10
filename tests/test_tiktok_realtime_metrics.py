@@ -1,4 +1,5 @@
 import os
+import queue
 import sys
 import unittest
 
@@ -49,6 +50,57 @@ class TikTokRealtimeMetricTests(unittest.TestCase):
             (monitor.cpu_live, monitor.gpu_live, monitor.vram_live),
             (12.0, 34.0, 56.0),
         )
+
+    def test_comment_reader_voice_formats_clean_line(self):
+        from avatar_studio import AvatarStudio
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio._comment_voice_seen = {}
+
+        line = studio._format_comment_reader_voice(
+            "@ali", "  @bot check this https://example.test  gold breakout?  ")
+
+        self.assertEqual(line, "ali says: check this gold breakout?")
+
+    def test_comment_reader_voice_drops_duplicate_burst(self):
+        from avatar_studio import AvatarStudio
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio._comment_voice_seen = {}
+
+        self.assertTrue(studio._format_comment_reader_voice("ali", "hello"))
+        self.assertEqual(studio._format_comment_reader_voice("ali", "hello"), "")
+
+    def test_comment_reader_voice_respects_toggle(self):
+        from avatar_studio import AvatarStudio
+
+        class FakeVar:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+        class FakeEvent:
+            def __init__(self):
+                self.set_called = False
+
+            def set(self):
+                self.set_called = True
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio.comment_voice_var = FakeVar(False)
+        studio._comment_voice_q = queue.Queue()
+        studio._comment_voice_event = FakeEvent()
+        studio._comment_voice_seen = {}
+
+        self.assertFalse(studio._queue_comment_reader_voice("ali", "hello"))
+        self.assertTrue(studio._comment_voice_q.empty())
+
+        studio.comment_voice_var = FakeVar(True)
+        self.assertTrue(studio._queue_comment_reader_voice("ali", "hello"))
+        self.assertFalse(studio._comment_voice_q.empty())
+        self.assertTrue(studio._comment_voice_event.set_called)
 
 
 if __name__ == "__main__":
