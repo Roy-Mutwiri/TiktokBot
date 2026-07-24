@@ -404,7 +404,10 @@ class YouTubeVideoTests(unittest.TestCase):
 
         class FakeEntry:
             def get(self, *_args):
-                return "https://youtu.be/Wpj5TYGw4cY\n"
+                return (
+                    "https://youtu.be/Wpj5TYGw4cY\n"
+                    "https://youtu.be/SECONDVIDEO\n"
+                )
 
         studio = AvatarStudio.__new__(AvatarStudio)
         studio.youtube_entry = FakeEntry()
@@ -416,6 +419,140 @@ class YouTubeVideoTests(unittest.TestCase):
         studio._attach_youtube_scene.assert_called_once_with(
             "https://youtu.be/Wpj5TYGw4cY", force=True)
         studio._start_scene_snip.assert_not_called()
+
+    def test_youtube_playlist_parser_caps_at_ten_unique_links(self):
+        from avatar_studio import AvatarStudio
+
+        class FakeEntry:
+            def get(self, *_args):
+                return "\n".join(
+                    ["not a link"]
+                    + [f"https://youtu.be/video{i}" for i in range(12)]
+                    + ["https://youtu.be/video3"]
+                )
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio.youtube_entry = FakeEntry()
+
+        urls = studio._youtube_links_from_entry()
+
+        self.assertEqual(len(urls), 10)
+        self.assertEqual(urls[0], "https://youtu.be/video0")
+        self.assertEqual(urls[-1], "https://youtu.be/video9")
+
+    def test_youtube_playlist_parser_reads_separate_link_boxes(self):
+        from avatar_studio import AvatarStudio
+
+        class FakeEntry:
+            def __init__(self, value):
+                self.value = value
+
+            def get(self):
+                return self.value
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio.youtube_entries = [
+            FakeEntry("https://youtu.be/first"),
+            FakeEntry(""),
+            FakeEntry("https://youtu.be/second"),
+        ]
+
+        self.assertEqual(studio._youtube_links_from_entry(), [
+            "https://youtu.be/first",
+            "https://youtu.be/second",
+        ])
+
+    def test_youtube_next_video_moves_queue_index(self):
+        from avatar_studio import AvatarStudio
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio._youtube_queue_urls = [
+            "https://youtu.be/first",
+            "https://youtu.be/second",
+        ]
+        studio._youtube_queue_slots = [0, 1]
+        studio._youtube_queue_index = 0
+        studio._youtube_audio = None
+        studio._youtube_busy = False
+        studio.running = False
+        studio.engines = None
+        studio._youtube_link_rows = mock.Mock(return_value=[
+            (0, "https://youtu.be/first"),
+            (1, "https://youtu.be/second"),
+        ])
+        studio._set_youtube_slot_status = mock.Mock()
+        studio._youtube_clock_reset = mock.Mock()
+        studio._set_youtube_progress = mock.Mock()
+        studio._log_msg = mock.Mock()
+        studio._attach_youtube_scene = mock.Mock()
+        studio._sync_youtube_status = mock.Mock()
+
+        self.assertTrue(studio._jump_youtube_queue(1))
+
+        self.assertEqual(studio._youtube_queue_index, 1)
+        studio._attach_youtube_scene.assert_called_once_with(
+            "https://youtu.be/second", force=True, preserve_crop=True)
+
+    def test_youtube_link_change_prepares_queue_and_waits_to_prewarm(self):
+        from avatar_studio import AvatarStudio
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio._youtube_primary_url = mock.Mock(return_value="https://youtu.be/first")
+        studio._prepare_youtube_queue = mock.Mock()
+        studio._attach_youtube_scene = mock.Mock()
+        studio._prewarm_youtube_queue_after_current_ready = mock.Mock()
+
+        studio._attach_youtube_scene_from_entry()
+
+        studio._prepare_youtube_queue.assert_called_once_with(
+            "https://youtu.be/first", auto_prewarm=False)
+        studio._attach_youtube_scene.assert_called_once_with(
+            "https://youtu.be/first")
+        studio._prewarm_youtube_queue_after_current_ready.assert_called_once_with()
+
+    def test_youtube_queue_prepare_keeps_prewarm_state_for_same_links(self):
+        from avatar_studio import AvatarStudio
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio._youtube_link_rows = mock.Mock(return_value=[
+            (0, "https://youtu.be/first"),
+            (1, "https://youtu.be/second"),
+        ])
+        studio._set_youtube_slot_status = mock.Mock()
+        studio._log_msg = mock.Mock()
+        studio._prewarm_youtube_queue = mock.Mock()
+        studio._youtube_queue_signature = ()
+        studio._youtube_queue_prewarmed = set()
+        studio._youtube_queue_prewarm_started = False
+        studio._youtube_prewarm_wait_started = False
+
+        studio._prepare_youtube_queue("https://youtu.be/first", auto_prewarm=False)
+        studio._youtube_queue_prewarmed = {"https://youtu.be/second"}
+        studio._youtube_queue_prewarm_started = True
+        studio._youtube_prewarm_wait_started = True
+        studio._prepare_youtube_queue("https://youtu.be/first", auto_prewarm=False)
+
+        self.assertEqual(studio._youtube_queue_prewarmed, {"https://youtu.be/second"})
+        self.assertTrue(studio._youtube_queue_prewarm_started)
+
+    def test_youtube_audio_start_does_not_wait_for_playlist_prewarm(self):
+        from avatar_studio import AvatarStudio
+
+        studio = AvatarStudio.__new__(AvatarStudio)
+        studio._youtube_primary_url = mock.Mock(return_value="https://youtu.be/first")
+        studio._prepare_youtube_queue = mock.Mock()
+        studio._youtube_current_slot = mock.Mock(return_value=0)
+        studio._set_youtube_slot_status = mock.Mock()
+        studio._announce_youtube_link_state = mock.Mock()
+        studio.running = False
+        studio.engines = None
+        studio._attach_youtube_scene = mock.Mock()
+        studio._log_msg = mock.Mock()
+
+        studio.speak_youtube_audio()
+
+        studio._prepare_youtube_queue.assert_called_once_with(
+            "https://youtu.be/first", auto_prewarm=False)
 
 
 if __name__ == "__main__":

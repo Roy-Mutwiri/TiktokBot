@@ -352,6 +352,16 @@ class AvatarStudio:
         self._youtube_audio_mode = False
         self._youtube_audio_status = ""
         self._youtube_muted = False
+        self._youtube_queue_urls = []
+        self._youtube_queue_slots = []
+        self._youtube_queue_index = 0
+        self._youtube_queue_active = False
+        self._youtube_queue_advancing = False
+        self._youtube_queue_prewarmed = set()
+        self._youtube_queue_prewarm_started = False
+        self._youtube_queue_signature = ()
+        self._youtube_prewarm_wait_started = False
+        self.youtube_status_vars = []
         self.youtube_smooth_var = tk.BooleanVar(value=True)
         self.face_strip_var = tk.StringVar(value=DEFAULT_FACE_STRIP_LABEL)
         self.low_lag_scene_var = tk.BooleanVar(value=True)
@@ -1492,19 +1502,36 @@ class AvatarStudio:
 
         # ---- YOUTUBE SPEAK -------------------------------------------------
         c = self._card(right, "YOUTUBE SPEAK")
-        tk.Label(c, text="Paste a YouTube link. The avatar reads captions in our voice.",
+        tk.Label(c, text="Add YouTube links in order. Video 2 starts when Video 1 ends.",
                  bg=SURFACE, fg=FAINT, font=("Segoe UI", 8),
                  wraplength=300, justify="left").pack(anchor="w", pady=(0, 4))
-        self.youtube_entry = tk.Text(c, height=2, bg=SURFACE2, fg=FG,
-                                     insertbackground=AMBER, font=("Segoe UI", 10),
-                                     relief="flat", wrap="word", padx=9, pady=7,
-                                     highlightthickness=1,
-                                     highlightbackground=BORDER,
-                                     highlightcolor=AMBER)
-        self.youtube_entry.pack(fill="x", pady=(0, 7))
-        self.youtube_entry.bind("<Return>", self._on_youtube_enter)
-        self.youtube_entry.bind("<<Paste>>", self._on_youtube_link_changed)
-        self.youtube_entry.bind("<KeyRelease>", self._on_youtube_link_changed)
+        self.youtube_entries = []
+        self.youtube_status_vars = []
+        for i in range(10):
+            item = tk.Frame(c, bg=SURFACE)
+            item.pack(fill="x", pady=(0, 5))
+            row = tk.Frame(item, bg=SURFACE)
+            row.pack(fill="x")
+            tk.Label(row, text=f"YOUTUBE {i + 1}", bg=SURFACE, fg=FAINT,
+                     font=("Consolas", 8, "bold"), width=10,
+                     anchor="w").pack(side="left")
+            entry = tk.Entry(
+                row, bg=SURFACE2, fg=FG, insertbackground=AMBER,
+                font=("Segoe UI", 9), relief="flat",
+                highlightthickness=1, highlightbackground=BORDER,
+                highlightcolor=AMBER)
+            entry.pack(side="left", fill="x", expand=True, ipady=4)
+            entry.bind("<Return>", self._on_youtube_enter)
+            entry.bind("<<Paste>>", self._on_youtube_link_changed)
+            entry.bind("<KeyRelease>", self._on_youtube_link_changed)
+            self.youtube_entries.append(entry)
+            status_var = tk.StringVar(value="EMPTY")
+            self.youtube_status_vars.append(status_var)
+            tk.Label(
+                item, textvariable=status_var, bg=SURFACE, fg=FAINT,
+                font=("Consolas", 7), anchor="w").pack(
+                    fill="x", padx=(78, 0), pady=(1, 0))
+        self.youtube_entry = self.youtube_entries[0]
         self.youtube_persona_var = tk.StringVar(value=YOUTUBE_PERSONA_LABELS[0])
         persona_combo = ttk.Combobox(
             c, textvariable=self.youtube_persona_var,
@@ -1540,6 +1567,20 @@ class AvatarStudio:
             hover_border="#ffffff", font=("Consolas", 10, "bold"),
             state="disabled")
         self.youtube_audio_btn.pack(fill="x", pady=(6, 0), ipady=6)
+        jump_row = tk.Frame(c, bg=SURFACE); jump_row.pack(fill="x", pady=(6, 0))
+        self.youtube_back_btn = self._btn(
+            jump_row, "BACK VIDEO", self.youtube_previous_video,
+            bg=SURFACE2, fg=AMBER, hover=self._mix(SURFACE2, AMBER, 0.2),
+            border=AMBER, hover_border="#ffffff",
+            font=("Consolas", 9, "bold"), state="disabled")
+        self.youtube_back_btn.pack(side="left", fill="x", expand=True, ipady=5)
+        self.youtube_next_btn = self._btn(
+            jump_row, "NEXT VIDEO", self.youtube_next_video,
+            bg=SURFACE2, fg=AMBER, hover=self._mix(SURFACE2, AMBER, 0.2),
+            border=AMBER, hover_border="#ffffff",
+            font=("Consolas", 9, "bold"), state="disabled")
+        self.youtube_next_btn.pack(side="left", fill="x", expand=True,
+                                   padx=(8, 0), ipady=5)
         ymode = tk.Frame(c, bg=SURFACE); ymode.pack(fill="x", pady=(7, 0))
         self.youtube_light = tk.Canvas(ymode, width=18, height=18, bg=SURFACE,
                                        highlightthickness=0)
@@ -2450,7 +2491,7 @@ class AvatarStudio:
         """Use the pasted YouTube video first, otherwise open screen selection."""
         url = ""
         try:
-            url = self.youtube_entry.get("1.0", "end").strip()
+            url = self._youtube_primary_url()
         except Exception:
             pass
         if "youtu" in url.lower():
@@ -3809,15 +3850,37 @@ class AvatarStudio:
                        lambda x=t: self._speak_text(x), full=True).pack(fill="x", pady=(6, 0))
 
         youtube_panel = self._dash_panel(right, "YouTube Speak", AMBER, fill="x", pady=(0, 8))
-        self.youtube_entry = tk.Text(youtube_panel, height=2, bg=SURFACE2, fg=FG,
-                                     insertbackground=AMBER, font=("Segoe UI", 10),
-                                     relief="flat", wrap="word", padx=8, pady=6,
-                                     highlightthickness=1, highlightbackground=BORDER,
-                                     highlightcolor=AMBER)
-        self.youtube_entry.pack(fill="x", pady=(0, 6))
-        self.youtube_entry.bind("<Return>", self._on_youtube_enter)
-        self.youtube_entry.bind("<<Paste>>", self._on_youtube_link_changed)
-        self.youtube_entry.bind("<KeyRelease>", self._on_youtube_link_changed)
+        tk.Label(
+            youtube_panel, text="Add YouTube links in order. Video 2 starts when Video 1 ends.",
+            bg=SURFACE, fg=FAINT, font=("Segoe UI", 8),
+            wraplength=300, justify="left").pack(anchor="w", pady=(0, 4))
+        self.youtube_entries = []
+        self.youtube_status_vars = []
+        for i in range(10):
+            item = tk.Frame(youtube_panel, bg=SURFACE)
+            item.pack(fill="x", pady=(0, 5))
+            row = tk.Frame(item, bg=SURFACE)
+            row.pack(fill="x")
+            tk.Label(row, text=f"YOUTUBE {i + 1}", bg=SURFACE, fg=FAINT,
+                     font=("Consolas", 8, "bold"), width=10,
+                     anchor="w").pack(side="left")
+            entry = tk.Entry(
+                row, bg=SURFACE2, fg=FG, insertbackground=AMBER,
+                font=("Segoe UI", 9), relief="flat",
+                highlightthickness=1, highlightbackground=BORDER,
+                highlightcolor=AMBER)
+            entry.pack(side="left", fill="x", expand=True, ipady=4)
+            entry.bind("<Return>", self._on_youtube_enter)
+            entry.bind("<<Paste>>", self._on_youtube_link_changed)
+            entry.bind("<KeyRelease>", self._on_youtube_link_changed)
+            self.youtube_entries.append(entry)
+            status_var = tk.StringVar(value="EMPTY")
+            self.youtube_status_vars.append(status_var)
+            tk.Label(
+                item, textvariable=status_var, bg=SURFACE, fg=FAINT,
+                font=("Consolas", 7), anchor="w").pack(
+                    fill="x", padx=(78, 0), pady=(1, 0))
+        self.youtube_entry = self.youtube_entries[0]
         self.youtube_persona_var = tk.StringVar(value=YOUTUBE_PERSONA_LABELS[0])
         persona_combo = ttk.Combobox(
             youtube_panel, textvariable=self.youtube_persona_var,
@@ -3843,6 +3906,21 @@ class AvatarStudio:
                                            border=AMBER, font=("Segoe UI", 9, "bold"),
                                            state="disabled")
         self.youtube_audio_btn.pack(fill="x", ipady=5, pady=(6, 0))
+        jump_row = tk.Frame(youtube_panel, bg=SURFACE)
+        jump_row.pack(fill="x", pady=(6, 0))
+        self.youtube_back_btn = self._btn(
+            jump_row, f"{ICONS['play']}  Back", self.youtube_previous_video,
+            bg=SURFACE2, fg=AMBER, hover=self._mix(SURFACE2, AMBER, 0.2),
+            border=AMBER, font=("Segoe UI", 8, "bold"),
+            state="disabled")
+        self.youtube_back_btn.pack(side="left", fill="x", expand=True, ipady=4)
+        self.youtube_next_btn = self._btn(
+            jump_row, f"{ICONS['play']}  Next", self.youtube_next_video,
+            bg=SURFACE2, fg=AMBER, hover=self._mix(SURFACE2, AMBER, 0.2),
+            border=AMBER, font=("Segoe UI", 8, "bold"),
+            state="disabled")
+        self.youtube_next_btn.pack(side="left", fill="x", expand=True,
+                                   padx=(8, 0), ipady=4)
         ystatus = tk.Frame(youtube_panel, bg=SURFACE); ystatus.pack(fill="x", pady=(7, 0))
         self.youtube_light = tk.Canvas(ystatus, width=18, height=18, bg=SURFACE, highlightthickness=0)
         self.youtube_light_dot = self.youtube_light.create_oval(4, 4, 14, 14, fill="#3a3f4a", outline="")
@@ -5123,7 +5201,7 @@ class AvatarStudio:
 
     # ---- YOUTUBE SPEAK -----------------------------------------------------
     def _on_youtube_enter(self, event):
-        self.speak_youtube()
+        self.speak_youtube_audio()
         return "break"
 
     def _on_youtube_link_changed(self, _event=None):
@@ -5138,10 +5216,266 @@ class AvatarStudio:
 
     def _attach_youtube_scene_from_entry(self):
         self._youtube_scene_attach_job = None
-        url = self.youtube_entry.get("1.0", "end").strip()
+        url = self._youtube_primary_url()
         if "youtu" not in url.lower():
             return
+        self._prepare_youtube_queue(url, auto_prewarm=False)
         self._attach_youtube_scene(url)
+        self._prewarm_youtube_queue_after_current_ready()
+
+    def _youtube_entry_text(self):
+        entries = getattr(self, "youtube_entries", None)
+        if entries:
+            values = []
+            for entry in entries:
+                try:
+                    values.append(entry.get().strip())
+                except TypeError:
+                    values.append(entry.get("1.0", "end").strip())
+                except Exception:
+                    pass
+            return "\n".join(values)
+        try:
+            return self.youtube_entry.get("1.0", "end")
+        except TypeError:
+            try:
+                return self.youtube_entry.get()
+            except Exception:
+                return ""
+        except Exception:
+            return ""
+
+    def _youtube_entry_value(self, entry):
+        try:
+            return entry.get().strip()
+        except TypeError:
+            return entry.get("1.0", "end").strip()
+        except Exception:
+            return ""
+
+    def _youtube_link_rows(self, update_status=True):
+        entries = getattr(self, "youtube_entries", None)
+        if not entries:
+            rows = []
+            seen = set()
+            for raw in self._youtube_entry_text().replace(",", "\n").splitlines():
+                url = raw.strip()
+                if not url or "youtu" not in url.lower() or url in seen:
+                    continue
+                seen.add(url)
+                rows.append((len(rows), url))
+                if len(rows) >= 10:
+                    break
+            return rows
+        rows = []
+        seen = set()
+        for slot, entry in enumerate(entries[:10]):
+            url = self._youtube_entry_value(entry)
+            if not url:
+                if update_status:
+                    self._set_youtube_slot_status(slot, "EMPTY")
+                continue
+            if "youtu" not in url.lower():
+                if update_status:
+                    self._set_youtube_slot_status(slot, "WAITING - paste a YouTube link")
+                continue
+            if url in seen:
+                if update_status:
+                    self._set_youtube_slot_status(slot, "DUPLICATE - skipped")
+                continue
+            seen.add(url)
+            rows.append((slot, url))
+            if update_status:
+                self._set_youtube_slot_status(slot, "READY TO LOAD")
+        return rows
+
+    def _youtube_links_from_entry(self):
+        return [url for _slot, url in self._youtube_link_rows()]
+
+    def _youtube_primary_url(self):
+        rows = self._youtube_link_rows()
+        if rows:
+            return rows[0][1]
+        return self._youtube_entry_text().strip()
+
+    def _set_youtube_slot_status(self, slot, text):
+        try:
+            slot = int(slot)
+        except Exception:
+            return
+        vars_ = getattr(self, "youtube_status_vars", None) or []
+        if slot < 0 or slot >= len(vars_):
+            return
+        value = str(text or "").strip() or "WAITING"
+        if len(value) > 96:
+            value = value[:93] + "..."
+
+        def _apply():
+            try:
+                vars_[slot].set(value)
+            except Exception:
+                pass
+
+        try:
+            self.root.after(0, _apply)
+        except Exception:
+            _apply()
+
+    def _youtube_current_slot(self):
+        slots = getattr(self, "_youtube_queue_slots", []) or []
+        idx = int(getattr(self, "_youtube_queue_index", 0) or 0)
+        if 0 <= idx < len(slots):
+            return slots[idx]
+        return None
+
+    def _set_current_youtube_slot_status(self, text):
+        slot = self._youtube_current_slot()
+        if slot is not None:
+            self._set_youtube_slot_status(slot, text)
+
+    def _youtube_slot_for_url(self, url):
+        needle = (url or "").strip()
+        if not needle:
+            return None
+        for slot, candidate in self._youtube_link_rows(update_status=False):
+            if candidate == needle:
+                return slot
+        return None
+
+    def _youtube_queue_label(self):
+        total = len(getattr(self, "_youtube_queue_urls", []) or [])
+        if not getattr(self, "_youtube_queue_active", False) or total <= 1:
+            return ""
+        idx = min(total, max(0, int(getattr(self, "_youtube_queue_index", 0))) + 1)
+        return f" VIDEO {idx}/{total}"
+
+    def _prepare_youtube_queue(self, start_url=None, auto_prewarm=True):
+        rows = self._youtube_link_rows()
+        urls = [url for _slot, url in rows]
+        slots = [slot for slot, _url in rows]
+        if start_url and start_url not in urls:
+            urls = [start_url] + urls
+            slots = [0] + slots
+        urls = urls[:10]
+        slots = slots[:10]
+        signature = tuple(zip(slots, urls))
+        previous_signature = tuple(getattr(self, "_youtube_queue_signature", ()) or ())
+        changed = signature != previous_signature
+        self._youtube_queue_urls = urls
+        self._youtube_queue_slots = slots
+        self._youtube_queue_signature = signature
+        self._youtube_queue_index = 0
+        if start_url:
+            try:
+                self._youtube_queue_index = self._youtube_queue_urls.index(start_url)
+            except ValueError:
+                self._youtube_queue_index = 0
+        self._youtube_queue_active = len(self._youtube_queue_urls) > 1
+        self._youtube_queue_advancing = False
+        if changed:
+            self._youtube_queue_prewarmed = set()
+            self._youtube_queue_prewarm_started = False
+            self._youtube_prewarm_wait_started = False
+        for order, slot in enumerate(self._youtube_queue_slots):
+            self._set_youtube_slot_status(
+                slot, f"QUEUED - video {order + 1}/{len(self._youtube_queue_urls)}")
+        if self._youtube_queue_active and changed:
+            self._log_msg(
+                f"[youtube] playlist loaded: {len(self._youtube_queue_urls)} videos.")
+        if self._youtube_queue_active and auto_prewarm:
+            self._prewarm_youtube_queue()
+        return self._youtube_queue_urls
+
+    def _prewarm_youtube_queue_after_current_ready(self):
+        if (not getattr(self, "_youtube_queue_active", False)
+                or getattr(self, "_youtube_prewarm_wait_started", False)):
+            return
+        self._youtube_prewarm_wait_started = True
+
+        def _worker():
+            deadline = time.monotonic() + 240.0
+            while time.monotonic() < deadline:
+                if not getattr(self, "_youtube_queue_active", False):
+                    return
+                scene = getattr(self, "_youtube_scene", None)
+                if scene is None:
+                    time.sleep(0.25)
+                    continue
+                if bool(getattr(scene, "video_ready", False)):
+                    self._log_msg(
+                        "[youtube] first video ready; downloading next queued video.")
+                    self._prewarm_youtube_queue()
+                    return
+                status = str(getattr(scene, "status", "") or "").lower()
+                if "video scene failed" in status:
+                    self._log_msg(
+                        "[youtube] first video failed; starting queued preload anyway.")
+                    self._prewarm_youtube_queue()
+                    return
+                time.sleep(0.25)
+            self._log_msg(
+                "[youtube] first video wait timed out; starting queued preload.")
+            self._prewarm_youtube_queue()
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _prewarm_youtube_queue(self):
+        if (not getattr(self, "_youtube_queue_active", False)
+                or getattr(self, "_youtube_queue_prewarm_started", False)):
+            return
+        self._youtube_queue_prewarm_started = True
+
+        def _worker():
+            urls = list(getattr(self, "_youtube_queue_urls", []) or [])
+            slots = list(getattr(self, "_youtube_queue_slots", []) or [])
+            start = max(0, int(getattr(self, "_youtube_queue_index", 0))) + 1
+            for i, url in enumerate(urls[start:], start=start):
+                slot = slots[i] if i < len(slots) else i
+                if not getattr(self, "_youtube_queue_active", False):
+                    break
+                if url in self._youtube_queue_prewarmed:
+                    continue
+                try:
+                    self._set_youtube_slot_status(
+                        slot, f"PRELOADING - video {i + 1}/{len(urls)}")
+                    self._log_msg(
+                        f"[youtube] preloading next video {i + 1}/{len(urls)}...")
+                    try:
+                        from youtube_audio import _resolve_audio_source
+                        _resolve_audio_source(
+                            url,
+                            lambda msg, n=i, s=slot: (
+                                self._log_msg(
+                                    f"[youtube] preload audio {n + 1}: {msg}"),
+                                self._set_youtube_slot_status(
+                                    s, f"AUDIO: {msg}")))
+                    except Exception as exc:
+                        self._set_youtube_slot_status(
+                            slot, f"AUDIO PRELOAD SKIPPED: {exc}")
+                        self._log_msg(
+                            f"[youtube] preload audio {i + 1} skipped: {exc}")
+                    try:
+                        from youtube_video import resolve_youtube_video
+                        resolve_youtube_video(
+                            url,
+                            lambda msg, n=i, s=slot: (
+                                self._log_msg(
+                                    f"[youtube] preload video {n + 1}: {msg}"),
+                                self._set_youtube_slot_status(
+                                    s, f"VIDEO: {msg}")))
+                    except Exception as exc:
+                        self._set_youtube_slot_status(
+                            slot, f"VIDEO PRELOAD SKIPPED: {exc}")
+                        self._log_msg(
+                            f"[youtube] preload video {i + 1} skipped: {exc}")
+                    self._youtube_queue_prewarmed.add(url)
+                    self._set_youtube_slot_status(
+                        slot, f"READY - video {i + 1}/{len(urls)} cached")
+                except Exception as exc:
+                    self._set_youtube_slot_status(slot, f"PRELOAD FAILED: {exc}")
+                    self._log_msg(f"[youtube] preload failed: {exc}")
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     def _attach_youtube_scene(
             self, url, force=False, preserve_crop=False,
@@ -5166,6 +5500,9 @@ class AvatarStudio:
         def _status(message):
             self._log_msg(f"[scene] {message}")
             self._on_youtube_video_status(message)
+            slot = self._youtube_slot_for_url(url)
+            if slot is not None:
+                self._set_youtube_slot_status(slot, f"VIDEO: {message}")
             try:
                 with open(os.path.join(PROJECT_DIR, "youtube_scene_status.log"),
                           "a", encoding="utf-8") as fh:
@@ -5223,7 +5560,7 @@ class AvatarStudio:
         url = (self._youtube_scene_url or "").strip()
         if not url:
             try:
-                url = self.youtube_entry.get("1.0", "end").strip()
+                url = self._youtube_primary_url()
             except Exception:
                 url = ""
         if not url:
@@ -5403,7 +5740,7 @@ class AvatarStudio:
         return seen
 
     def speak_youtube(self):
-        url = self.youtube_entry.get("1.0", "end").strip()
+        url = self._youtube_primary_url()
         if not url:
             return
         self._announce_youtube_link_state(url)
@@ -5748,6 +6085,20 @@ class AvatarStudio:
             self.youtube_audio_btn, audio_on, "ALTER REAL YOUTUBE VOICE")
         self._style_state_button(self.youtube_resume_btn, yt_on, "YOUTUBE")
         self._style_state_button(self.market_mode_btn, market_on, "MARKET")
+        total = len(getattr(self, "_youtube_queue_urls", []) or [])
+        idx = int(getattr(self, "_youtube_queue_index", 0) or 0)
+        if total <= 0:
+            total = len(self._youtube_links_from_entry())
+            idx = 0
+        prev_enabled = total > 1 and idx > 0 and not self._youtube_busy
+        next_enabled = total > 1 and idx < total - 1 and not self._youtube_busy
+        try:
+            self.youtube_back_btn.configure(
+                state="normal" if prev_enabled else "disabled")
+            self.youtube_next_btn.configure(
+                state="normal" if next_enabled else "disabled")
+        except Exception:
+            pass
 
     def _youtube_clock_tick(self):
         try:
@@ -5768,13 +6119,14 @@ class AvatarStudio:
             pass
 
     def _youtube_time_text(self):
+        queue_label = self._youtube_queue_label()
         if self._youtube_audio is not None:
             pos = self._youtube_position_seconds()
             dur = float(getattr(self._youtube_audio, "duration", 0.0))
             status = (getattr(self._youtube_audio, "status", "") or "").upper()
             if dur > 0:
-                return f"YOUTUBE TIME {self._fmt_time(pos)} / {self._fmt_time(dur)}  {status}"
-            return f"YOUTUBE TIME {self._fmt_time(pos)}  {status}"
+                return f"YOUTUBE{queue_label} TIME {self._fmt_time(pos)} / {self._fmt_time(dur)}  {status}"
+            return f"YOUTUBE{queue_label} TIME {self._fmt_time(pos)}  {status}"
         if self._youtube_chunks:
             total = len(self._youtube_chunks)
             idx = min(total, max(0, self._youtube_index))
@@ -5788,8 +6140,8 @@ class AvatarStudio:
             range_end = float(end) if end is not None else (dur if dur > 0 else start)
             pos = self._youtube_position_seconds()
             if dur > 0:
-                return f"YOUTUBE TIME {self._fmt_time(pos)} / {self._fmt_time(dur)}  TEXT {idx}/{total} {pct}%"
-            return f"YOUTUBE TIME {self._fmt_time(pos)}  TEXT {idx}/{total} {pct}%"
+                return f"YOUTUBE{queue_label} TIME {self._fmt_time(pos)} / {self._fmt_time(dur)}  TEXT {idx}/{total} {pct}%"
+            return f"YOUTUBE{queue_label} TIME {self._fmt_time(pos)}  TEXT {idx}/{total} {pct}%"
         return "YOUTUBE TIME 00:00"
 
     def _youtube_playback_progress(self):
@@ -5841,15 +6193,27 @@ class AvatarStudio:
             return f"{h:d}:{m:02d}:{s:02d}"
         return f"{m:02d}:{s:02d}"
 
-    def speak_youtube_audio(self, start_override=None):
+    def speak_youtube_audio(self, start_override=None, queue_advance=False):
         """Play the real YouTube recording through a voice-only transform.
 
         This path never transcribes the video and never invokes TTS. It preserves
         the source performance and changes only its audible voice characteristics.
         """
-        url = self.youtube_entry.get("1.0", "end").strip()
+        if queue_advance and getattr(self, "_youtube_queue_active", False):
+            urls = getattr(self, "_youtube_queue_urls", []) or []
+            idx = int(getattr(self, "_youtube_queue_index", 0) or 0)
+            url = urls[idx] if 0 <= idx < len(urls) else ""
+        else:
+            url = self._youtube_primary_url()
         if not url:
             return
+        if not queue_advance:
+            self._prepare_youtube_queue(url, auto_prewarm=False)
+        current_slot = self._youtube_current_slot()
+        if current_slot is None:
+            current_slot = self._youtube_slot_for_url(url)
+        if current_slot is not None:
+            self._set_youtube_slot_status(current_slot, "LOADING - checking cache/video/audio")
         self._announce_youtube_link_state(url)
         if not self.running or self.engines is None:
             self._attach_youtube_scene(url)
@@ -5861,11 +6225,14 @@ class AvatarStudio:
         if self._youtube_busy:
             self._log_msg("[studio] YouTube audio is already loading.")
             return
-        try:
-            start_s, end_s = self._youtube_range()
-        except ValueError as exc:
-            self._log_msg(f"[youtube] range error: {exc}")
-            return
+        if queue_advance:
+            start_s, end_s = 0.0, None
+        else:
+            try:
+                start_s, end_s = self._youtube_range()
+            except ValueError as exc:
+                self._log_msg(f"[youtube] range error: {exc}")
+                return
         if start_override is not None:
             try:
                 start_s = max(0.0, float(start_override))
@@ -5910,6 +6277,9 @@ class AvatarStudio:
                 def _audio_status(msg):
                     self._youtube_audio_status = msg
                     self._log_msg(f"[youtube] real audio: {msg}")
+                    if current_slot is not None:
+                        self._set_youtube_slot_status(
+                            current_slot, f"AUDIO: {msg}")
                     if msg.startswith("voice isolation ") and "%" in msg:
                         try:
                             phase_pct = int(
@@ -5927,7 +6297,12 @@ class AvatarStudio:
                     elif "playing" in msg:
                         self._bump_youtube_progress(94, "Playing altered original voice")
                     elif msg == "ended":
-                        self._set_youtube_progress(100, "Original YouTube audio finished")
+                        label = self._youtube_queue_label()
+                        if current_slot is not None:
+                            self._set_youtube_slot_status(current_slot, "ENDED")
+                        self._set_youtube_progress(
+                            100, f"Original YouTube audio finished{label}")
+                        self._advance_youtube_queue_after_current()
                     try:
                         self.root.after(0, self._sync_youtube_status)
                     except Exception:
@@ -5945,11 +6320,18 @@ class AvatarStudio:
                 self._youtube_audio = player
                 player.set_muted(self._youtube_muted)
                 self._wait_for_youtube_video_ready(url)
+                if current_slot is not None:
+                    self._set_youtube_slot_status(current_slot, "VIDEO READY - starting audio")
                 player.start(url, start_seconds=start_s, end_seconds=end_s)
                 self._youtube_title = player.title
                 self._youtube_duration = player.duration
                 self._set_youtube_mode("youtube")
                 self._set_youtube_progress(85, "Starting altered original voice...")
+                if current_slot is not None:
+                    self._set_youtube_slot_status(
+                        current_slot,
+                        "PLAYING - next videos downloading in background")
+                self._prewarm_youtube_queue()
                 self._log_msg(
                     f"[youtube] original performance: {player.title}"
                     f"{self._youtube_range_label(start_s, end_s)}"
@@ -5959,6 +6341,8 @@ class AvatarStudio:
                 self._youtube_audio_status = "failed"
                 self._youtube_audio = None
                 self._set_youtube_progress(0, f"Failed: {exc}")
+                if current_slot is not None:
+                    self._set_youtube_slot_status(current_slot, f"FAILED: {exc}")
                 self._log_msg(f"[youtube] real audio failed: {exc}")
                 try:
                     if self.tts is not None:
@@ -5977,6 +6361,115 @@ class AvatarStudio:
                     self._youtube_busy = False
 
         threading.Thread(target=_worker, daemon=True).start()
+
+    def _advance_youtube_queue_after_current(self):
+        if not getattr(self, "_youtube_queue_active", False):
+            return False
+        if getattr(self, "_youtube_queue_advancing", False):
+            return False
+        urls = getattr(self, "_youtube_queue_urls", []) or []
+        next_index = int(getattr(self, "_youtube_queue_index", 0) or 0) + 1
+        if next_index >= len(urls):
+            self._youtube_queue_active = False
+            self._youtube_queue_advancing = False
+            self._log_msg("[youtube] playlist finished all videos.")
+            try:
+                if self.tts is not None:
+                    self.tts.set_muted(False)
+            except Exception:
+                pass
+            return False
+        self._youtube_queue_index = next_index
+        self._youtube_queue_advancing = True
+        next_slot = None
+        slots = getattr(self, "_youtube_queue_slots", []) or []
+        if next_index < len(slots):
+            next_slot = slots[next_index]
+            self._set_youtube_slot_status(
+                next_slot, f"STARTING NOW - video {next_index + 1}/{len(urls)}")
+        self._set_youtube_progress(
+            2, f"Starting next video {next_index + 1}/{len(urls)}...")
+        self._log_msg(
+            f"[youtube] video ended; switching to playlist video "
+            f"{next_index + 1}/{len(urls)}.")
+
+        def _start_next():
+            self._youtube_queue_advancing = False
+            try:
+                self.speak_youtube_audio(queue_advance=True)
+            except Exception as exc:
+                self._log_msg(f"[youtube] playlist advance failed: {exc}")
+
+        try:
+            self.root.after(1, _start_next)
+        except Exception:
+            _start_next()
+        return True
+
+    def youtube_next_video(self):
+        self._jump_youtube_queue(1)
+
+    def youtube_previous_video(self):
+        self._jump_youtube_queue(-1)
+
+    def _jump_youtube_queue(self, step):
+        rows = self._youtube_link_rows()
+        if not rows:
+            self._log_msg("[youtube] add YouTube links before using next/back.")
+            return False
+        if not getattr(self, "_youtube_queue_urls", None):
+            self._prepare_youtube_queue(rows[0][1], auto_prewarm=False)
+        urls = getattr(self, "_youtube_queue_urls", []) or []
+        slots = getattr(self, "_youtube_queue_slots", []) or []
+        if not urls:
+            return False
+        current = int(getattr(self, "_youtube_queue_index", 0) or 0)
+        target = max(0, min(len(urls) - 1, current + int(step or 0)))
+        if target == current:
+            direction = "next" if int(step or 0) > 0 else "back"
+            self._log_msg(f"[youtube] no {direction} video available.")
+            return False
+        old_slot = slots[current] if current < len(slots) else None
+        target_slot = slots[target] if target < len(slots) else None
+        if old_slot is not None:
+            self._set_youtube_slot_status(old_slot, "SKIPPED BY USER")
+        if target_slot is not None:
+            self._set_youtube_slot_status(
+                target_slot, f"STARTING NOW - video {target + 1}/{len(urls)}")
+        self._youtube_queue_index = target
+        self._youtube_queue_active = len(urls) > 1
+        self._youtube_queue_advancing = False
+        self._youtube_start_seconds = 0.0
+        self._youtube_end_seconds = None
+        self._youtube_clock_reset(0.0, running=False)
+        try:
+            if self._youtube_audio is not None:
+                self._youtube_audio.stop()
+                self._youtube_audio = None
+        except Exception:
+            pass
+        self._youtube_busy = False
+        self._youtube_audio_mode = False
+        self._youtube_audio_status = ""
+        self._youtube_chunks = []
+        self._youtube_index = 0
+        self._set_youtube_progress(
+            2, f"User selected video {target + 1}/{len(urls)}")
+        self._log_msg(
+            f"[youtube] user selected playlist video {target + 1}/{len(urls)}.")
+        if not self.running or self.engines is None:
+            self._attach_youtube_scene(urls[target], force=True, preserve_crop=True)
+            self._log_msg("[studio] press START to play audio for the selected video.")
+            self._sync_youtube_status()
+            return True
+        try:
+            self.speak_youtube_audio(queue_advance=True)
+        except Exception as exc:
+            self._log_msg(f"[youtube] jump failed: {exc}")
+            if target_slot is not None:
+                self._set_youtube_slot_status(target_slot, f"FAILED: {exc}")
+            return False
+        return True
 
     def _on_youtube_persona_change(self, event=None):
         """Apply a newly selected persona immediately to active YouTube audio."""

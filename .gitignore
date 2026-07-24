@@ -11,6 +11,7 @@
 *.bin
 *.pt
 *.npz
+*.iso
 *.tar
 *.tar.gz
 MohaVoice/Voicebox_0.5.0_x64_en-US.msi
