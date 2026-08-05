@@ -116,3 +116,6 @@ driver/**/Debug/
 driver/**/Release/
 # RoyCam shared-memory ring backing files (also covered by *.bin)
 roycam_ring.bin
+
+# Large installers dropped in MohaVoice/ - never commit these
+MohaVoice/*.exe

@@ -1,4 +1,5 @@
 import os
+import collections
 import glob
 import hashlib
 import json
@@ -14,7 +15,8 @@ import numpy as np
 
 from tts_stream_engine import FFMPEG
 from voice_changer_engine import BLOCK, SAMPLE_RATE, make_converter
-from youtube_cache import audio_dir, get_cached_audio, save_audio
+from youtube_cache import audio_dir, get_cached_audio, save_audio, video_id_from_url
+from youtube_cache_janitor import enforce_budget, human_bytes
 from youtube_dlp_options import extract_info_with_retries
 
 MONITOR_RATE = 48000
@@ -35,8 +37,53 @@ except Exception as _sd_exc:  # pragma: no cover
     _SD_IMPORT_ERROR = _sd_exc
 
 
+FFMPEG_ERROR_LINES = 40
+
+
 class YouTubeAudioError(RuntimeError):
     pass
+
+
+def _drain_stderr(proc):
+    """Keep reading ffmpeg's stderr so it can never block on a full pipe.
+
+    Same reasoning as the video scene: nothing read this pipe during normal
+    playback, so on a long stream ffmpeg's warnings eventually filled the 64 KB
+    buffer and it stopped emitting audio while still looking alive. The drained
+    text is kept in a small rolling buffer so failures can be reported with
+    detail.
+    """
+    stream = getattr(proc, "stderr", None)
+    if stream is None:
+        return
+    proc._error_tail = collections.deque(maxlen=FFMPEG_ERROR_LINES)
+
+    def _pump():
+        try:
+            for line in iter(stream.readline, b""):
+                text = line.decode("utf-8", "replace").strip()
+                if text:
+                    proc._error_tail.append(text)
+        except Exception:
+            pass
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+    threading.Thread(target=_pump, daemon=True).start()
+
+
+def _stderr_tail(proc):
+    """Last few lines of ffmpeg's stderr, for error messages."""
+    try:
+        lines = list(getattr(proc, "_error_tail", ()) or ())
+        if not lines:
+            return ""
+        return " ".join(lines).replace("\r", " ")[-500:]
+    except Exception:
+        return ""
 
 
 class YouTubeAudioPlayer:
@@ -85,22 +132,33 @@ class YouTubeAudioPlayer:
         self._output_gain = 1.0
         self._target_output_gain = 1.0
         self._playback_anchor_t = None
+        self._last_output_warning_t = 0.0
 
     def start(self, url, start_seconds=None, end_seconds=None):
         if self._running:
             self.stop()
         audio_url, title, duration, cache_hit = _resolve_audio_source(
             url, self._set_status)
+        # A downloaded track is a local file; a broadcast stays a remote URL.
+        is_live = not os.path.isfile(audio_url)
         if (os.environ.get("AVATAR_YOUTUBE_VOCALS_ONLY", "0") == "1"
-                and os.path.isfile(audio_url)):
+                and not is_live):
             audio_url = _isolate_vocals(audio_url, self._set_status)
-        elif not os.path.isfile(audio_url):
+        elif is_live:
             self._set_status(
                 "live stream connected - voice isolation skipped for low latency")
         self.title = title
         self.duration = float(duration or 0.0)
         self.start_seconds = float(start_seconds or 0.0)
         self.end_seconds = float(end_seconds) if end_seconds is not None else None
+        if is_live and (self.start_seconds > 0 or self.end_seconds is not None):
+            # A broadcast in progress has no timeline to seek in. Handing ffmpeg
+            # "-ss 8400" against a rolling playlist starves it to a trickle, so
+            # a FROM/TO left over from the previous video silences the voice.
+            self._set_status(
+                "live stream - ignoring the FROM/TO time range and joining now")
+            self.start_seconds = 0.0
+            self.end_seconds = None
         if self.end_seconds is not None and self.end_seconds > self.start_seconds:
             self.duration = self.end_seconds
         self.position_blocks = 0
@@ -199,12 +257,32 @@ class YouTubeAudioPlayer:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
             )
+            # Nothing reads this pipe until playback ends. On a long live
+            # stream ffmpeg's reconnect warnings eventually fill the 64 KB
+            # buffer, and it then blocks writing to stderr and stops emitting
+            # audio - the voice simply stops with the process still alive.
+            _drain_stderr(self._proc)
             if self.monitor and sd is not None:
                 try:
-                    self._out = sd.OutputStream(
-                        samplerate=MONITOR_RATE, channels=1, dtype="float32",
-                        blocksize=MONITOR_BLOCK, device=self.out_device)
-                    self._out.start()
+                    from audio_output import ManagedOutputStream, output_health
+                    if self.out_device is None:
+                        # Managed: survives the playback device being swapped or
+                        # unplugged mid-video instead of going silently deaf.
+                        self._out = ManagedOutputStream(
+                            samplerate=MONITOR_RATE, channels=1,
+                            dtype="float32", blocksize=MONITOR_BLOCK,
+                            status_callback=self._set_status)
+                        # Open now: an unusable speaker must fail here with a
+                        # clear message, the way it did before, instead of
+                        # turning into a silent per-block retry during playback.
+                        self._out.open()
+                        self._set_status(output_health(self._set_status))
+                    else:
+                        self._out = sd.OutputStream(
+                            samplerate=MONITOR_RATE, channels=1,
+                            dtype="float32", blocksize=MONITOR_BLOCK,
+                            device=self.out_device)
+                        self._out.start()
                 except Exception as exc:
                     raise YouTubeAudioError(
                         f"audio output unavailable ({exc})") from exc
@@ -226,10 +304,7 @@ class YouTubeAudioPlayer:
                 raw = self._proc.stdout.read(nbytes) if self._proc.stdout else b""
                 if len(raw) < nbytes:
                     return_code = self._proc.wait()
-                    error_text = ""
-                    if self._proc.stderr is not None:
-                        error_text = self._proc.stderr.read().decode(
-                            "utf-8", "replace").strip()
+                    error_text = _stderr_tail(self._proc)
                     if return_code != 0:
                         raise YouTubeAudioError(
                             error_text or f"ffmpeg exited with code {return_code}")
@@ -262,8 +337,11 @@ class YouTubeAudioPlayer:
                         monitor = self._apply_output_duck(styled)
                         self._out.write(monitor.reshape(-1, 1))
                         wrote_monitor = True
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        # This used to swallow everything, so a speaker that had
+                        # gone away looked identical to normal playback: no
+                        # sound, nothing in the log, no way to tell why.
+                        self._note_output_failure(exc)
                 self._pace_realtime_if_needed(wrote_monitor)
             self._set_status("ended")
         except Exception as exc:
@@ -271,6 +349,15 @@ class YouTubeAudioPlayer:
             self._set_status(f"failed: {exc}")
         finally:
             self.stop()
+
+    def _note_output_failure(self, exc):
+        """Report a dead speaker once, not once per 21 ms audio block."""
+        now = time.monotonic()
+        if now - getattr(self, "_last_output_warning_t", 0.0) < 5.0:
+            return
+        self._last_output_warning_t = now
+        self.last_error = str(exc)
+        self._set_status(f"NO SOUND - audio output failing: {exc}")
 
     def _set_status(self, status):
         self.status = status
@@ -411,10 +498,25 @@ def _resolve_audio_source(url, status_callback=None):
             "quiet": True,
             "no_warnings": True,
             "noplaylist": True,
-            "format": "bestaudio/best",
+            # Plain "bestaudio" sometimes lands on a 390 kbps AAC track, which
+            # is several times the bytes of the transparent ~120 kbps Opus one
+            # for sound that ends up mono 48 kHz either way. Naming Opus and
+            # capping the bitrate keeps the quality that is actually audible and
+            # drops only the overshoot. AVATAR_YOUTUBE_AUDIO_ABR moves the cap:
+            # lower saves more disk, higher goes back to the biggest track.
+            "format": (
+                f"bestaudio[acodec=opus][abr<=?{_audio_abr_cap()}]/"
+                f"bestaudio[abr<=?{_audio_abr_cap()}]/"
+                "bestaudio/best"
+            ),
             "continuedl": False,
             "outtmpl": os.path.join(out_dir, f"{download_id}.%(ext)s"),
         }
+        try:
+            from youtube_video import _download_tuning_opts
+            opts.update(_download_tuning_opts())
+        except Exception:
+            pass
         try:
             info = extract_info_with_retries(
                 yt_dlp, url, opts, download=True,
@@ -430,7 +532,31 @@ def _resolve_audio_source(url, status_callback=None):
         raise YouTubeAudioError("audio download finished but no cached file was found")
     save_audio(url, title, duration, audio_path)
     _status(status_callback, "saved audio in local db/cache")
+    _trim_cache_after_download(url, status_callback)
     return audio_path, title, duration, False
+
+
+def _audio_abr_cap():
+    raw = os.environ.get("AVATAR_YOUTUBE_AUDIO_ABR", "").strip()
+    try:
+        cap = int(float(raw)) if raw else 160
+    except ValueError:
+        cap = 160
+    return max(48, cap)
+
+
+def _trim_cache_after_download(url, status_callback=None):
+    """Evict the oldest cached videos so this download stays inside the budget."""
+    try:
+        removed, freed, _names = enforce_budget(keep_ids=[video_id_from_url(url)])
+    except Exception as exc:
+        _status(status_callback, f"cache cleanup skipped ({exc})")
+        return
+    if removed:
+        _status(
+            status_callback,
+            f"cache trimmed: {removed} old video(s) removed, "
+            f"{human_bytes(freed)} freed")
 
 
 def _is_live_info(info):
@@ -494,14 +620,65 @@ def _find_downloaded_audio(out_dir, prefix="audio"):
     return files[0]
 
 
+def _cached_vocals_path(cache_dir):
+    """Return an already-isolated stem, preferring the compact FLAC copy."""
+    for name in ("vocals.flac", "vocals.wav"):
+        path = os.path.join(cache_dir, name)
+        if os.path.exists(path) and os.path.getsize(path) > 4096:
+            return path
+    return ""
+
+
+def _compress_vocals(wav_path, status_callback=None):
+    """Store the stem as FLAC. Lossless audio, roughly a third of the bytes.
+
+    The player still feeds ffmpeg a stereo file, so dialoguenhance and the
+    centre-channel pan behave exactly as they did with the WAV.
+    """
+    if os.environ.get("AVATAR_YOUTUBE_VOCALS_FLAC", "1") == "0":
+        return wav_path
+    flac_path = os.path.splitext(wav_path)[0] + ".flac"
+    try:
+        proc = subprocess.run(
+            [
+                FFMPEG, "-y", "-hide_banner", "-loglevel", "error",
+                "-i", wav_path,
+                "-c:a", "flac", "-compression_level", "5",
+                "-sample_fmt", "s16",
+                flac_path,
+            ],
+            capture_output=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except Exception:
+        return wav_path
+    if proc.returncode != 0 or not os.path.exists(flac_path) \
+            or os.path.getsize(flac_path) <= 4096:
+        try:
+            os.remove(flac_path)
+        except OSError:
+            pass
+        return wav_path
+    try:
+        saved = os.path.getsize(wav_path) - os.path.getsize(flac_path)
+        os.remove(wav_path)
+        _status(
+            status_callback,
+            f"vocals stored losslessly ({saved / float(1024 ** 2):.0f} MB saved)")
+    except OSError:
+        pass
+    return flac_path
+
+
 def _isolate_vocals(audio_path, status_callback=None):
     """Return a cached Demucs vocal stem; never fall back to music-mixed audio."""
     source = os.path.abspath(audio_path)
     cache_dir = os.path.dirname(source)
     vocals_path = os.path.join(cache_dir, "vocals.wav")
-    if os.path.exists(vocals_path) and os.path.getsize(vocals_path) > 4096:
+    cached_vocals = _cached_vocals_path(cache_dir)
+    if cached_vocals:
         _status(status_callback, "found isolated vocals in local cache")
-        return vocals_path
+        return cached_vocals
 
     _status(status_callback, "isolating voice and removing background music")
     _prepare_demucs_checkpoint(status_callback)
@@ -587,8 +764,19 @@ def _isolate_vocals(audio_path, status_callback=None):
     shutil.copy2(candidates[0], vocals_path)
     if not os.path.exists(vocals_path) or os.path.getsize(vocals_path) <= 4096:
         raise YouTubeAudioError("voice isolation produced an empty vocal stem")
+    # The raw Demucs stems are only an intermediate; the copy above is the stem
+    # that gets played, so the multi-gigabyte work directory can go now.
+    _remove_tree(work_dir)
+    vocals_path = _compress_vocals(vocals_path, status_callback)
     _status(status_callback, "vocals ready - background music removed")
     return vocals_path
+
+
+def _remove_tree(path):
+    try:
+        shutil.rmtree(path)
+    except OSError:
+        pass
 
 
 def _low_commit_headroom(minimum_bytes=4 * 1024 ** 3):
@@ -699,6 +887,7 @@ def _isolate_dialogue_low_memory(source, vocals_path, status_callback=None):
     if not os.path.exists(vocals_path) or os.path.getsize(vocals_path) <= 4096:
         raise YouTubeAudioError("low-memory isolation produced an empty track")
     _status(status_callback, "voice isolation 100% - dialogue track ready")
+    vocals_path = _compress_vocals(vocals_path, status_callback)
     _status(status_callback, "vocals ready - background music reduced")
     return vocals_path
 

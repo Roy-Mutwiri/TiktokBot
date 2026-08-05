@@ -1,3 +1,4 @@
+import collections
 import glob
 import io
 import os
@@ -9,7 +10,8 @@ import urllib.request
 import numpy as np
 
 from tts_stream_engine import FFMPEG
-from youtube_cache import audio_dir
+from youtube_cache import audio_dir, video_id_from_url
+from youtube_cache_janitor import enforce_budget, human_bytes
 from youtube_dlp_options import extract_info_with_retries
 
 
@@ -19,14 +21,75 @@ VIDEO_FPS = 15.0
 MAX_SOURCE_HEIGHT = 720
 MAX_FORWARD_DRIFT = 30.0
 DECODER_READ_TIMEOUT_US = 5_000_000
+LIVE_READ_TIMEOUT_US = 15_000_000
 DECODER_RESTART_BACKOFF = 0.35
-DECODER_ERROR_BYTES = 4000
+DECODER_ERROR_LINES = 40
 DECODER_FIRST_FRAME_TIMEOUT = 8.0
+LIVE_FIRST_FRAME_TIMEOUT = 20.0
+LIVE_SOURCE_REFRESH_SECONDS = 45.0
+# How long a live decoder may deliver nothing before it counts as dead. ffmpeg
+# goes quiet for a few seconds each time it reconnects a dropped TLS connection.
+LIVE_PARTIAL_STALL_LIMIT = 25.0
+END_OF_VIDEO_MARGIN = 0.75
 LOCAL_CACHE_FIRST_FRAME_RETRIES = 2
 LOCAL_CACHE_DECODE_RETRIES = 3
+# Consecutive failures on a remote source before re-asking yt-dlp for a fresh
+# URL. googlevideo links are short-lived and start answering 403.
+REMOTE_SOURCE_REFRESH_RETRIES = 2
+
+# Resolution first, then the smallest rendition of that resolution. The scene
+# renders 1280x720 at 15 fps, so a taller or higher-bitrate source is bytes on
+# disk that never reach the screen.
+DOWNLOAD_FORMAT_SORT = ("res:720", "+size", "+br")
+
+# Download tuning. The old 1 MB chunk size turned a 68 MB preview into 68
+# sequential ranged GETs, each paying a fresh round-trip and TCP ramp-up:
+# measured 1.5 MB/s against 2.8-3.2 MB/s with big chunks and parallel
+# fragments on the same link and connection.
+DOWNLOAD_CHUNK_BYTES = 10 * 1024 * 1024
+DOWNLOAD_FRAGMENT_THREADS = 8
 
 _VIDEO_DOWNLOAD_LOCKS = {}
 _VIDEO_DOWNLOAD_LOCKS_GUARD = threading.Lock()
+_BACKGROUND_PREVIEW_JOBS = set()
+_BACKGROUND_PREVIEW_GUARD = threading.Lock()
+
+
+def _env_int(name, default, minimum=0):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(minimum, int(float(raw)))
+    except ValueError:
+        return default
+
+
+def _download_tuning_opts():
+    """Throughput options shared by foreground and background cache downloads."""
+    opts = {
+        "concurrent_fragment_downloads": _env_int(
+            "AVATAR_YOUTUBE_DL_THREADS", DOWNLOAD_FRAGMENT_THREADS, minimum=1),
+    }
+    chunk = _env_int(
+        "AVATAR_YOUTUBE_DL_CHUNK_MB",
+        DOWNLOAD_CHUNK_BYTES // (1024 * 1024), minimum=0)
+    # 0 disables chunking entirely and lets yt-dlp stream the whole format in
+    # one request, which is the fastest path when the connection is stable.
+    if chunk:
+        opts["http_chunk_size"] = chunk * 1024 * 1024
+    return opts
+
+
+def _stream_first_enabled():
+    """Play the direct stream at once and fill the disk cache in the background.
+
+    Waiting for the full 720p file before the first frame is what made a new
+    link feel slow: nothing is on screen for the whole download. ffmpeg reads
+    the googlevideo URL directly just as well - that is already the fallback
+    used when a cached file turns out to be broken.
+    """
+    return os.environ.get("AVATAR_YOUTUBE_VIDEO_STREAM_FIRST", "1") != "0"
 
 
 class YouTubeVideoError(RuntimeError):
@@ -48,6 +111,11 @@ def _select_video_source(info):
     return selected.get("url", "") if selected else ""
 
 
+def _is_hls_format(fmt):
+    protocol = str((fmt or {}).get("protocol") or "").lower()
+    return "m3u8" in protocol or "hls" in protocol
+
+
 def _select_video_format(info):
     info = info or {}
     requested = info.get("requested_formats") or []
@@ -65,10 +133,15 @@ def _select_video_format(info):
     ]
     if bounded:
         video = bounded
+    live = _is_live_info(info)
     video.sort(
         key=lambda fmt: (
-            str(fmt.get("ext") or "").lower() == "mp4",
-            str(fmt.get("protocol") or "").lower() in ("https", "http"),
+            # A live broadcast only plays cleanly off its rolling HLS playlist;
+            # a plain https segment URL runs dry the moment the buffer catches up.
+            _is_hls_format(fmt) if live else (
+                str(fmt.get("ext") or "").lower() == "mp4"),
+            str(fmt.get("protocol") or "").lower() in ("https", "http")
+            if not live else True,
             str(fmt.get("vcodec") or "").startswith(("avc1", "h264")),
             int(fmt.get("height") or 0),
             int(fmt.get("width") or 0),
@@ -81,7 +154,8 @@ def _select_video_format(info):
     return video[0]
 
 
-def resolve_youtube_video(url, status_callback=None, force_refresh_cache=False):
+def resolve_youtube_video(url, status_callback=None, force_refresh_cache=False,
+                          wait_for_cache=False):
     try:
         import yt_dlp
     except Exception as exc:
@@ -92,12 +166,15 @@ def resolve_youtube_video(url, status_callback=None, force_refresh_cache=False):
         "quiet": True,
         "no_warnings": True,
         "noplaylist": True,
+        # "<=?" keeps the filter advisory: a live broadcast that only publishes
+        # HLS renditions still resolves instead of failing "format not available".
         "format": (
-            f"bestvideo[height<={MAX_SOURCE_HEIGHT}][ext=mp4]/"
-            f"best[height<={MAX_SOURCE_HEIGHT}][ext=mp4]/"
-            "best[height<=720]/"
+            f"bestvideo[height<=?{MAX_SOURCE_HEIGHT}]/"
+            f"best[height<=?{MAX_SOURCE_HEIGHT}]/"
+            "best/"
             "worst"
         ),
+        "format_sort": list(DOWNLOAD_FORMAT_SORT),
         "extractor_args": {
             "youtube": {"player_client": ["android"]},
         },
@@ -119,9 +196,21 @@ def resolve_youtube_video(url, status_callback=None, force_refresh_cache=False):
     source = direct_source
     is_live = _is_live_info(info)
     if not is_live and os.environ.get("AVATAR_YOUTUBE_VIDEO_CACHE", "1") != "0":
-        cached_source = _cached_or_download_preview_video(
-            yt_dlp, url, info, status_callback,
-            force_refresh=bool(force_refresh_cache))
+        cached_source = ""
+        if _stream_first_enabled() and not force_refresh_cache and not wait_for_cache:
+            cached_source = _existing_preview_video(url)
+            if not cached_source:
+                _start_background_preview_download(
+                    yt_dlp, url, info, status_callback)
+                _status(
+                    status_callback,
+                    "streaming video now; caching it in the background")
+            else:
+                _status(status_callback, "video preview found in local cache")
+        else:
+            cached_source = _cached_or_download_preview_video(
+                yt_dlp, url, info, status_callback,
+                force_refresh=bool(force_refresh_cache))
         if cached_source:
             source = cached_source
             headers = {}
@@ -135,6 +224,54 @@ def resolve_youtube_video(url, status_callback=None, force_refresh_cache=False):
         "is_live": is_live,
         "thumbnail": (info or {}).get("thumbnail") or "",
     }
+
+
+def _cache_preview_video_blocking(url, status_callback=None):
+    """Fully cache a link's preview video before returning.
+
+    Queue preloading wants the file on disk, not a stream URL: the whole point
+    of preloading is that the next video is already local when it starts.
+    """
+    cached = _existing_preview_video(url)
+    if cached:
+        _status(status_callback, "video preview found in local cache")
+        return cached
+    info = resolve_youtube_video(
+        url, status_callback=status_callback, wait_for_cache=True)
+    source = info.get("source") or ""
+    return source if not _is_remote_source(source) else ""
+
+
+def _existing_preview_video(url):
+    """Path of an already cached preview for this link, or "" if there is none."""
+    try:
+        for path in _preview_video_candidates(audio_dir(url)):
+            return path
+    except Exception:
+        pass
+    return ""
+
+
+def _start_background_preview_download(yt_dlp, url, info, status_callback=None):
+    """Download the cache copy off-thread so playback does not wait for it."""
+    key = os.path.abspath(audio_dir(url))
+    with _BACKGROUND_PREVIEW_GUARD:
+        if key in _BACKGROUND_PREVIEW_JOBS:
+            return False
+        _BACKGROUND_PREVIEW_JOBS.add(key)
+
+    def _worker():
+        try:
+            _cached_or_download_preview_video(
+                yt_dlp, url, info, status_callback, force_refresh=False)
+        except Exception as exc:
+            _status(status_callback, f"background video cache failed ({exc})")
+        finally:
+            with _BACKGROUND_PREVIEW_GUARD:
+                _BACKGROUND_PREVIEW_JOBS.discard(key)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return True
 
 
 def _cached_or_download_preview_video(
@@ -160,21 +297,24 @@ def _cached_or_download_preview_video(
                 "quiet": True,
                 "no_warnings": True,
                 "noplaylist": True,
+                # Video-only and 720p. The scene decodes with -an and renders at
+                # 1280x720, so an audio track or a taller rendition is downloaded
+                # and then thrown away.
                 "format": (
-                    "bestvideo[height<=720][ext=mp4]/"
-                    "best[height<=720][ext=mp4]/"
-                    "best[height<=720]/"
+                    "bestvideo[height<=?720]/"
+                    "best[height<=?720]/"
                     "best[ext=mp4]/"
                     "worst"
                 ),
+                "format_sort": list(DOWNLOAD_FORMAT_SORT),
                 "continuedl": True,
                 "retries": 8,
                 "fragment_retries": 8,
                 "file_access_retries": 5,
-                "http_chunk_size": 1024 * 1024,
                 "outtmpl": os.path.join(out_dir, f"{download_id}.%(ext)s"),
                 "progress_hooks": [_preview_progress_hook(status_callback)],
             }
+            opts.update(_download_tuning_opts())
             try:
                 _status(
                     status_callback,
@@ -204,8 +344,27 @@ def _cached_or_download_preview_video(
                 status_callback,
                 "video preview cache missing; direct stream fallback")
             return ""
-        _status(status_callback, "video preview saved in local cache")
+        _status(
+            status_callback,
+            "video preview saved in local cache "
+            f"({human_bytes(os.path.getsize(path))})")
+        _trim_cache_after_download(url, status_callback)
         return path
+
+
+def _trim_cache_after_download(url, status_callback=None):
+    """Evict the oldest cached videos so this download stays inside the budget."""
+    try:
+        removed, freed, _names = enforce_budget(
+            keep_ids=[video_id_from_url(url)], status_callback=status_callback)
+    except Exception as exc:
+        _status(status_callback, f"cache cleanup skipped ({exc})")
+        return
+    if removed:
+        _status(
+            status_callback,
+            f"cache trimmed: {removed} old video(s) removed, "
+            f"{human_bytes(freed)} freed")
 
 
 def _preview_download_lock(out_dir):
@@ -380,6 +539,7 @@ class YouTubeVideoScene:
         self.latest_frame = None
         self.frame_serial = 0
         self.video_ready = False
+        self.is_live = False
         self.force_refresh_cache = bool(force_refresh_cache)
 
         self._source = ""
@@ -390,10 +550,13 @@ class YouTubeVideoScene:
         self._thread = None
         self._proc = None
         self._lock = threading.Lock()
+        self._live_resolved_at = 0.0
+        self._cache_rejected = False
 
     def start(self, url):
         self.stop()
         self.url = (url or "").strip()
+        self.is_live = False
         with self._lock:
             self.latest_frame = _placeholder_frame("LOADING VIDEO")
             self.frame_serial = 1
@@ -424,7 +587,7 @@ class YouTubeVideoScene:
     def _run(self):
         try:
             info = resolve_youtube_video(
-                self.url, self._set_status,
+                self.url, self._scene_status_callback(self.url),
                 force_refresh_cache=self.force_refresh_cache)
             thumb = _thumbnail_frame(info.get("thumbnail"), info.get("headers"))
             if thumb is not None:
@@ -437,7 +600,10 @@ class YouTubeVideoScene:
             self._direct_headers = info.get("direct_headers") or {}
             self.title = info["title"]
             self.duration = info["duration"]
-            self._set_status("video scene ready")
+            self.is_live = bool(info.get("is_live"))
+            self._live_resolved_at = time.monotonic()
+            self._set_status(
+                "live video scene ready" if self.is_live else "video scene ready")
 
             proc = None
             base_position = 0.0
@@ -446,35 +612,120 @@ class YouTubeVideoScene:
             decoder_opened_at = 0.0
             first_frame_failures = 0
             cache_decode_failures = 0
+            stream_failures = 0
+            ended_announced = False
+            opened_once = False
+            produced_frames = False
+            pending = b""
+            last_progress_at = time.monotonic()
             while self._running:
-                target = max(0.0, float(self.position_getter() or 0.0))
+                live = bool(self.is_live)
+                first_frame_timeout = (
+                    LIVE_FIRST_FRAME_TIMEOUT if live
+                    else DECODER_FIRST_FRAME_TIMEOUT)
+                # A live broadcast has no seekable timeline: it is always "now",
+                # so the playback clock can never be a seek position for it.
+                target = (
+                    0.0 if live
+                    else max(0.0, float(self.position_getter() or 0.0)))
+                if self._at_end_of_video(target, live):
+                    if self.video_ready:
+                        # The clock has run past the last frame. Hold the picture
+                        # instead of reopening a decoder that has nothing to
+                        # read: that loop used to burn CPU and eventually delete
+                        # the cached download as if it were broken.
+                        if proc is not None:
+                            try:
+                                proc.kill()
+                            except Exception:
+                                pass
+                            proc = None
+                            self._proc = None
+                        if not ended_announced:
+                            ended_announced = True
+                            self._set_status(
+                                "video reached the end; holding the last frame")
+                        time.sleep(0.2)
+                        continue
+                    # Nothing has been shown yet, so the clock is stale from an
+                    # earlier, longer video. Decode the closing seconds rather
+                    # than hold a blank frame forever.
+                    target = max(0.0, float(self.duration) - 1.0)
                 stream_position = base_position + frame_index * frame_interval
-                if proc is None or _decoder_needs_restart(
-                        target, stream_position):
+                if proc is None or (
+                        not live
+                        and _decoder_needs_restart(target, stream_position)):
                     if proc is not None:
                         try:
                             proc.kill()
                         except Exception:
                             pass
+                    if live and opened_once and not produced_frames:
+                        # A decoder that opened but never delivered a frame is
+                        # what an expired playlist URL looks like. A mid-stream
+                        # drop still delivered frames, so reopen straight away
+                        # rather than pay for another five-second resolve.
+                        self._refresh_live_source()
+                    opened_once = True
+                    produced_frames = False
+                    pending = b""
+                    # A stream-first start plays the googlevideo URL while the
+                    # cache copy downloads. Every decoder reopen is a free
+                    # chance to move onto the local file once it has landed:
+                    # seeking a file beats re-ranging a remote URL.
+                    self._adopt_cached_source_if_ready()
                     proc = self._open_decoder(target)
                     self._proc = proc
                     decoder_opened_at = time.monotonic()
-                    self._set_status(f"video decoder opened at {_fmt_time(target)}")
+                    last_progress_at = decoder_opened_at
+                    self._set_status(
+                        "live video decoder opened at the broadcast edge" if live
+                        else f"video decoder opened at {_fmt_time(target)}")
                     base_position = target
                     frame_index = 0
                     stream_position = target
 
-                if frame_index > 0 and target <= stream_position + 0.01:
+                if not live and frame_index > 0 and target <= stream_position + 0.01:
                     time.sleep(0.02)
                     continue
+                # ffmpeg hands over the segments it already buffered as fast as
+                # it can decode them, then follows the broadcast in real time.
+                # Showing that opening burst at whatever speed it arrives makes
+                # the picture race, and leaves it minutes ahead of the voice,
+                # which is paced to real time. Meter live frames to the wall
+                # clock so both run at 1x from the same moment.
+                if live and frame_index > 0:
+                    due_at = decoder_opened_at + frame_index * frame_interval
+                    behind = due_at - time.monotonic()
+                    if behind > 0:
+                        time.sleep(min(behind, 0.05))
+                        continue
 
-                raw = _read_exact(
-                    proc.stdout, VIDEO_WIDTH * VIDEO_HEIGHT * 3,
+                frame_bytes = VIDEO_WIDTH * VIDEO_HEIGHT * 3
+                chunk = _read_exact(
+                    proc.stdout, frame_bytes - len(pending),
                     timeout=(
-                        DECODER_FIRST_FRAME_TIMEOUT
-                        if frame_index == 0 else 1.5)
+                        first_frame_timeout if frame_index == 0
+                        else (6.0 if live else 1.5))
                 ) if proc.stdout is not None else b""
-                if len(raw) != VIDEO_WIDTH * VIDEO_HEIGHT * 3:
+                if chunk:
+                    pending += chunk
+                    last_progress_at = time.monotonic()
+                if len(pending) < frame_bytes:
+                    # A live broadcast pauses its output for a few seconds while
+                    # ffmpeg reconnects after a dropped TLS connection, and it
+                    # recovers on its own. Keep the half-read frame and wait
+                    # rather than killing a decoder that is still alive.
+                    if (live and proc.poll() is None
+                            and time.monotonic() - last_progress_at
+                            < LIVE_PARTIAL_STALL_LIMIT):
+                        continue
+                    pending = b""
+                    if not self._running:
+                        # stop() kills the decoder when a scene is replaced.
+                        # Reporting that as a stream failure sent every scene
+                        # switch to the log as a decoder hiccup.
+                        break
                     return_code = proc.poll()
                     waiting = time.monotonic() - decoder_opened_at
                     first_frame_failed = frame_index == 0
@@ -487,7 +738,7 @@ class YouTubeVideoScene:
                         self._set_status(
                             f"video decoder hiccup ({return_code}); resyncing"
                             + (f": {detail}" if detail else ""))
-                    elif frame_index == 0 and waiting >= DECODER_FIRST_FRAME_TIMEOUT:
+                    elif frame_index == 0 and waiting >= first_frame_timeout:
                         detail = _decoder_error_tail(proc)
                         self._set_status(
                             "video decoder produced no first frame; resyncing"
@@ -500,6 +751,8 @@ class YouTubeVideoScene:
                         pass
                     proc = None
                     self._proc = None
+                    if _is_remote_source(self._source):
+                        stream_failures += 1
                     should_bypass_cache = (
                         first_frame_failed
                         and first_frame_failures >= LOCAL_CACHE_FIRST_FRAME_RETRIES
@@ -507,10 +760,22 @@ class YouTubeVideoScene:
                     if should_bypass_cache and self._fallback_from_bad_cache():
                         first_frame_failures = 0
                         cache_decode_failures = 0
+                    # A stream-first scene plays a googlevideo URL, and those
+                    # expire and start returning 403. _fallback_from_bad_cache
+                    # cannot help - it only rescues a local file - so without
+                    # this the loop retried a dead URL forever and the video
+                    # simply never appeared.
+                    elif stream_failures >= REMOTE_SOURCE_REFRESH_RETRIES:
+                        if self._refresh_direct_source():
+                            stream_failures = 0
+                            first_frame_failures = 0
                     time.sleep(DECODER_RESTART_BACKOFF)
                     continue
+                raw = pending
+                pending = b""
                 frame = np.frombuffer(raw, dtype=np.uint8).reshape(
                     VIDEO_HEIGHT, VIDEO_WIDTH, 3)
+                produced_frames = True
                 with self._lock:
                     self.latest_frame = frame
                     self.frame_serial += 1
@@ -519,6 +784,7 @@ class YouTubeVideoScene:
                     self._set_status("video first frame ready")
                     first_frame_failures = 0
                     cache_decode_failures = 0
+                    ended_announced = False
                 frame_index += 1
         except Exception as exc:
             self.last_error = str(exc)
@@ -531,6 +797,7 @@ class YouTubeVideoScene:
             self.stop()
 
     def _open_decoder(self, position):
+        live = bool(self.is_live)
         cmd = [FFMPEG, "-hide_banner", "-loglevel", "error"]
         user_agent = self._headers.get("User-Agent")
         if user_agent:
@@ -540,13 +807,17 @@ class YouTubeVideoScene:
             cmd += ["-headers", header_text]
         if _is_remote_source(self._source):
             cmd += [
-                "-rw_timeout", str(DECODER_READ_TIMEOUT_US),
+                "-rw_timeout", str(
+                    LIVE_READ_TIMEOUT_US if live else DECODER_READ_TIMEOUT_US),
                 "-reconnect", "1",
                 "-reconnect_streamed", "1",
-                "-reconnect_at_eof", "1",
                 "-reconnect_delay_max", "2",
             ]
-        position = max(0.0, float(position))
+            if not live:
+                # On a live HLS playlist this makes ffmpeg reconnect forever on
+                # the normal end-of-segment EOF and never emit a single frame.
+                cmd += ["-reconnect_at_eof", "1"]
+        position = 0.0 if live else max(0.0, float(position))
         fast_seek = max(0.0, position - 5.0)
         fine_seek = position - fast_seek
         if fast_seek > 0:
@@ -567,12 +838,98 @@ class YouTubeVideoScene:
             "-f", "rawvideo",
             "pipe:1",
         ]
-        return subprocess.Popen(
+        proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
+        _drain_stderr(proc)
+        return proc
+
+    def _at_end_of_video(self, position, live=False):
+        """True when the clock has run past the last frame of a finished video."""
+        if live:
+            return False
+        duration = float(self.duration or 0.0)
+        if duration <= 0.0:
+            return False
+        return float(position) >= duration - END_OF_VIDEO_MARGIN
+
+    def _refresh_live_source(self):
+        """Re-ask yt-dlp for the playlist URL; live manifests expire as they age."""
+        if not self.is_live or not self.url:
+            return False
+        age = time.monotonic() - float(self._live_resolved_at or 0.0)
+        if age < LIVE_SOURCE_REFRESH_SECONDS:
+            return False
+        try:
+            info = resolve_youtube_video(self.url)
+        except Exception as exc:
+            self._set_status(f"live link refresh failed ({exc})")
+            self._live_resolved_at = time.monotonic()
+            return False
+        self._source = info["source"]
+        self._headers = info["headers"]
+        self._direct_source = info.get("direct_source") or self._source
+        self._direct_headers = info.get("direct_headers") or {}
+        self.is_live = bool(info.get("is_live"))
+        self._live_resolved_at = time.monotonic()
+        self._set_status("live link refreshed")
+        return True
+
+    def _scene_status_callback(self, url):
+        """Status sink that goes quiet once this scene is no longer the one shown.
+
+        The cache download outlives the scene that started it, so without this
+        an abandoned download keeps driving the progress bar for a video the
+        user already moved off.
+        """
+        def _forward(message):
+            if not self._running or self.url != url:
+                return
+            self._set_status(message)
+
+        return _forward
+
+    def _adopt_cached_source_if_ready(self):
+        """Switch from the direct stream to the cached file once it exists."""
+        if self.is_live or self._cache_rejected or not self.url:
+            return False
+        if not _is_remote_source(self._source):
+            return False
+        cached = _existing_preview_video(self.url)
+        if not cached:
+            return False
+        self._source = cached
+        self._headers = {}
+        self._set_status("video cache ready; playing from local file")
+        return True
+
+    def _refresh_direct_source(self):
+        """Re-resolve an expired googlevideo URL for a finished (non-live) video.
+
+        Prefers the cached file if the background download has landed by now;
+        otherwise asks yt-dlp for a fresh stream URL.
+        """
+        if self.is_live or not self.url:
+            return False
+        if self._adopt_cached_source_if_ready():
+            return True
+        try:
+            info = resolve_youtube_video(self.url)
+        except Exception as exc:
+            self._set_status(f"video link refresh failed ({exc})")
+            return False
+        source = info.get("direct_source") or info.get("source") or ""
+        if not source:
+            return False
+        self._source = source
+        self._headers = dict(info.get("direct_headers") or {})
+        self._direct_source = source
+        self._direct_headers = dict(self._headers)
+        self._set_status("video link refreshed; resuming stream")
+        return True
 
     def _fallback_from_bad_cache(self):
         if _is_remote_source(self._source):
@@ -580,6 +937,8 @@ class YouTubeVideoScene:
         if not _is_remote_source(self._direct_source):
             return False
         bad_path = self._source
+        # Never re-adopt a cache copy this scene has already judged broken.
+        self._cache_rejected = True
         self._set_status("cached video failed to decode; using direct stream")
         try:
             if bad_path and os.path.isfile(bad_path):
@@ -623,25 +982,44 @@ def _read_exact(stream, size, timeout=1.5):
     return b"".join(chunks)
 
 
-def _decoder_error_tail(proc):
-    try:
-        stream = getattr(proc, "stderr", None)
-        if stream is None:
-            return ""
+def _drain_stderr(proc):
+    """Keep reading ffmpeg's stderr so it can never block on a full pipe.
+
+    Nothing read this pipe during normal playback. A long live session emits a
+    reconnect warning every so often, and once the 64 KB pipe buffer filled,
+    ffmpeg blocked writing to it and stopped producing video while still
+    appearing alive - the "decoder stalled" freezes. The drained text is kept in
+    a small rolling buffer so failures can still be reported with detail.
+    """
+    stream = getattr(proc, "stderr", None)
+    if stream is None:
+        return
+    proc._error_tail = collections.deque(maxlen=DECODER_ERROR_LINES)
+
+    def _pump():
         try:
-            os.set_blocking(stream.fileno(), False)
+            for line in iter(stream.readline, b""):
+                text = line.decode("utf-8", "replace").strip()
+                if text:
+                    proc._error_tail.append(text)
         except Exception:
             pass
-        data = b""
-        while True:
-            chunk = stream.read(DECODER_ERROR_BYTES)
-            if not chunk:
-                break
-            data += chunk
-            if len(data) > DECODER_ERROR_BYTES:
-                data = data[-DECODER_ERROR_BYTES:]
-        return data.decode("utf-8", "replace").strip().replace(
-            "\r", " ").replace("\n", " ")[-500:]
+        finally:
+            try:
+                stream.close()
+            except Exception:
+                pass
+
+    thread = threading.Thread(target=_pump, daemon=True)
+    thread.start()
+
+
+def _decoder_error_tail(proc):
+    try:
+        lines = list(getattr(proc, "_error_tail", ()) or ())
+        if not lines:
+            return ""
+        return " ".join(lines).replace("\r", " ")[-500:]
     except Exception:
         return ""
 

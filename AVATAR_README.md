@@ -122,6 +122,77 @@ Model weights (auto-downloaded / vendored): `ai-face/models/codeformer.pth`,
 facexlib's detector/parser into the HF cache. CodeFormer arch is vendored in
 `engines/codeformer_arch/`.
 
+## YouTube disk budget
+
+Every YouTube link leaves a 720p video preview, an audio download and an
+isolated vocal stem in `data/youtube_cache/`. Nothing used to delete them, so
+the cache grew without limit. `engines/youtube_cache_janitor.py` now keeps it
+bounded: dead `.part` / `.bad-` / `.old-` / `preview-low.*` files go first, then
+the least-recently-used videos are evicted until the cache fits its budget. It
+runs at Studio startup and after every download, and only ever removes copies
+that re-download on demand — picture and sound quality are untouched.
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `AVATAR_YOUTUBE_CACHE_GB` | `12` | Cache size cap. `0` disables eviction (unbounded growth). |
+| `AVATAR_YOUTUBE_AUDIO_ABR` | `160` | Max audio bitrate to download. Stops `bestaudio` grabbing a 390 kbps AAC track when a transparent ~120 kbps Opus one exists. |
+| `AVATAR_YOUTUBE_VOCALS_FLAC` | `1` | Store Demucs vocal stems as FLAC instead of WAV (~a third of the bytes, lossless). |
+| `AVATAR_YOUTUBE_VIDEO_CACHE` | `1` | `0` streams video directly instead of caching a local copy. |
+
+Run it by hand any time:
+
+```powershell
+python engines\youtube_cache_janitor.py --dry-run     # show what would go
+python engines\youtube_cache_janitor.py               # actually reclaim
+python engines\youtube_cache_janitor.py --gb 6        # tighter cap for one run
+```
+
+## YouTube start-up latency
+
+A new link used to show nothing until the whole 720p file had downloaded — 26 s
+for a 10-minute video, minutes for a long one. The scene now plays the direct
+stream immediately and caches the file in the background, moving onto the local
+copy when it lands. Measured on one link: 26.0 s → 3.6 s to first frame.
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `AVATAR_YOUTUBE_VIDEO_STREAM_FIRST` | `1` | `0` restores the old behaviour: wait for the full download before the first frame. |
+| `AVATAR_YOUTUBE_DL_CHUNK_MB` | `10` | HTTP chunk size. `0` disables chunking. The old 1 MB value measured 1.5 MB/s against 2.8–3.2 MB/s here. |
+| `AVATAR_YOUTUBE_DL_THREADS` | `8` | Parallel fragment downloads. |
+
+Do **not** pin a single yt-dlp `player_client` in the download path: `ios`, `tv`,
+`mweb` and `web_safari` all fail with "Requested format is not available", and
+`android` measured slower than the default client set.
+
+## Sound output
+
+Both sound paths (TTS and the altered YouTube voice) share one output device.
+They used to open a stream on the system default and cache it forever, so if
+that device went away the Studio fell silent for the rest of the session with
+nothing in any log. `engines/audio_output.py` now reopens on device change and
+reports failures instead of swallowing them.
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `AVATAR_OUTPUT_DEVICE` | *(unset)* | Pin playback to a device: an index (`14`) or any part of its name (`odyssey`). Unset follows the system default. |
+
+```powershell
+python engines\audio_output.py list          # every playback device + index
+python engines\audio_output.py test 14       # 2s tone on one device
+```
+
+A speaker that is powered off but still connected accepts audio at full level —
+no API can tell that apart from a working one, so if `test` is silent on every
+device, the fault is the speaker, not the Studio.
+
+## Live YouTube links
+
+A live broadcast is handled differently from a recording. It is never downloaded
+(there is no end to download), it plays off its rolling HLS playlist, and it
+ignores the playback clock — a live stream has no seekable timeline, it is always
+"now". `SPEAK YOUTUBE` on a live link routes itself to the real-voice path,
+because a broadcast in progress has no finished caption track to re-speak.
+
 ## Performance reality check
 
 Per-frame on this hardware, LivePortrait (~per-frame encode + warp) **plus**

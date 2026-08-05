@@ -505,6 +505,9 @@ class AvatarStudio:
         # Open the real TradingView and let the AI operate it (env AVATAR_TV=0
         # to disable). Delayed so the Studio window paints first.
         self.root.after(1500, self._launch_tradingview)
+        # Reclaim disk before anything downloads: dead .part/.bad files first,
+        # then the oldest cached videos once the cache passes its budget.
+        self.root.after(2000, self._start_youtube_cache_sweep)
 
     def _safe_thread(self, method_name, *args):
         """Start a daemon thread for self.<method_name>, but NEVER let a missing/
@@ -5440,34 +5443,47 @@ class AvatarStudio:
                         slot, f"PRELOADING - video {i + 1}/{len(urls)}")
                     self._log_msg(
                         f"[youtube] preloading next video {i + 1}/{len(urls)}...")
-                    try:
-                        from youtube_audio import _resolve_audio_source
-                        _resolve_audio_source(
-                            url,
-                            lambda msg, n=i, s=slot: (
-                                self._log_msg(
-                                    f"[youtube] preload audio {n + 1}: {msg}"),
-                                self._set_youtube_slot_status(
-                                    s, f"AUDIO: {msg}")))
-                    except Exception as exc:
-                        self._set_youtube_slot_status(
-                            slot, f"AUDIO PRELOAD SKIPPED: {exc}")
-                        self._log_msg(
-                            f"[youtube] preload audio {i + 1} skipped: {exc}")
-                    try:
-                        from youtube_video import resolve_youtube_video
-                        resolve_youtube_video(
-                            url,
-                            lambda msg, n=i, s=slot: (
-                                self._log_msg(
-                                    f"[youtube] preload video {n + 1}: {msg}"),
-                                self._set_youtube_slot_status(
-                                    s, f"VIDEO: {msg}")))
-                    except Exception as exc:
-                        self._set_youtube_slot_status(
-                            slot, f"VIDEO PRELOAD SKIPPED: {exc}")
-                        self._log_msg(
-                            f"[youtube] preload video {i + 1} skipped: {exc}")
+                    def _preload_audio(u=url, n=i, s=slot):
+                        try:
+                            from youtube_audio import _resolve_audio_source
+                            _resolve_audio_source(
+                                u,
+                                lambda msg: (
+                                    self._log_msg(
+                                        f"[youtube] preload audio {n + 1}: {msg}"),
+                                    self._set_youtube_slot_status(
+                                        s, f"AUDIO: {msg}")))
+                        except Exception as exc:
+                            self._set_youtube_slot_status(
+                                s, f"AUDIO PRELOAD SKIPPED: {exc}")
+                            self._log_msg(
+                                f"[youtube] preload audio {n + 1} skipped: {exc}")
+
+                    def _preload_video(u=url, n=i, s=slot):
+                        try:
+                            from youtube_video import (
+                                _cache_preview_video_blocking)
+                            _cache_preview_video_blocking(
+                                u,
+                                lambda msg: (
+                                    self._log_msg(
+                                        f"[youtube] preload video {n + 1}: {msg}"),
+                                    self._set_youtube_slot_status(
+                                        s, f"VIDEO: {msg}")))
+                        except Exception as exc:
+                            self._set_youtube_slot_status(
+                                s, f"VIDEO PRELOAD SKIPPED: {exc}")
+                            self._log_msg(
+                                f"[youtube] preload video {n + 1} skipped: {exc}")
+
+                    # Audio and video are two independent downloads over the
+                    # same link. Running them back to back doubled the time a
+                    # queued video needed before it was ready.
+                    audio_thread = threading.Thread(
+                        target=_preload_audio, daemon=True)
+                    audio_thread.start()
+                    _preload_video()
+                    audio_thread.join()
                     self._youtube_queue_prewarmed.add(url)
                     self._set_youtube_slot_status(
                         slot, f"READY - video {i + 1}/{len(urls)} cached")
@@ -5739,6 +5755,46 @@ class AvatarStudio:
             pass
         return seen
 
+    def _start_youtube_cache_sweep(self):
+        """Read the pasted links on the UI thread, then sweep in the background."""
+        try:
+            keep_urls = self._youtube_links_from_entry()
+        except Exception:
+            keep_urls = []
+        threading.Thread(
+            target=self._sweep_youtube_cache, args=(keep_urls,),
+            daemon=True).start()
+
+    def _sweep_youtube_cache(self, keep_urls=()):
+        """Trim data/youtube_cache to its budget. Never touches the links in use."""
+        try:
+            from youtube_cache_janitor import summary_line, sweep
+
+            result = sweep(keep_urls=keep_urls)
+        except Exception as exc:
+            self._log_msg(f"[cache] cleanup skipped ({exc})")
+            return
+        if result.get("freed_bytes"):
+            self._log_msg(f"[cache] {summary_line(result)}")
+
+    def _youtube_scene_live_state(self, url, timeout=30.0):
+        """True/False once the attached scene has resolved the link, else None."""
+        url = (url or "").strip()
+        deadline = time.monotonic() + float(timeout)
+        while time.monotonic() < deadline:
+            scene = getattr(self, "_youtube_scene", None)
+            if scene is None:
+                return None
+            if (getattr(scene, "url", "") or "").strip() != url:
+                return None
+            status = str(getattr(scene, "status", "") or "").lower()
+            if "video scene failed" in status:
+                return None
+            if getattr(scene, "video_ready", False) or "scene ready" in status:
+                return bool(getattr(scene, "is_live", False))
+            time.sleep(0.2)
+        return None
+
     def speak_youtube(self):
         url = self._youtube_primary_url()
         if not url:
@@ -5782,6 +5838,17 @@ class AvatarStudio:
             try:
                 from youtube_cache import cache_summary
                 from youtube_speaker import fetch_youtube_transcript, chunk_for_speech
+                if self._youtube_scene_live_state(url) is True:
+                    # A broadcast in progress has no finished caption track to
+                    # re-speak, so the only thing there is to say is what is
+                    # being said right now: run the live sound through the voice.
+                    self._youtube_busy = False
+                    self._log_msg(
+                        "[youtube] this link is LIVE - captions do not exist yet;"
+                        " switching to the real live voice.")
+                    self._set_youtube_progress(5, "Live link - using live voice")
+                    self.root.after(120, self.speak_youtube_audio)
+                    return
                 summary = cache_summary(url)
                 if summary["has_transcript"]:
                     self._log_msg(f"[youtube] db hit: captions already saved ({summary['video_id']})")

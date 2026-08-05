@@ -1059,7 +1059,7 @@ class TTSStreamEngine:
 
     def _play_direct(self, pcm, rate, serial=None):
         """Write speech through one persistent float stream."""
-        import sounddevice as sd
+        from audio_output import ManagedOutputStream
 
         audio = self._condition_playback(pcm)
         if rate != PLAYBACK_RATE:
@@ -1070,14 +1070,16 @@ class TTSStreamEngine:
                 if self.muted:
                     return
                 if self._audio_stream is None:
-                    self._audio_stream = sd.OutputStream(
+                    # Managed: reopens itself if the playback device is swapped
+                    # or disappears, instead of writing into a dead handle.
+                    self._audio_stream = ManagedOutputStream(
                         samplerate=PLAYBACK_RATE,
                         channels=1,
                         dtype="float32",
                         blocksize=960,
                         latency="low",
+                        status_callback=lambda m: print(f"[TTS] {m}"),
                     )
-                    self._audio_stream.start()
                 stream = self._audio_stream
                 for start in range(0, len(audio), 960):
                     if (self.muted or stream is not self._audio_stream

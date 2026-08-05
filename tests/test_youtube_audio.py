@@ -243,9 +243,16 @@ class YouTubeAudioTests(unittest.TestCase):
                     mock.patch("youtube_audio.audio_dir", return_value=tmp), \
                     mock.patch("youtube_audio.save_audio",
                                side_effect=lambda *args: saved.setdefault("args", args)), \
+                    mock.patch("youtube_audio.enforce_budget",
+                               return_value=(0, 0, [])) as trim, \
                     mock.patch.dict(sys.modules, {"yt_dlp": fake_module}):
                 source, title, duration, cache_hit = _resolve_audio_source(
                     "https://youtube.test/watch?v=abc123")
+
+            # The freshly downloaded video must be exempt from its own cleanup.
+            self.assertEqual(trim.call_args.kwargs["keep_ids"], ["abc123"])
+            self.assertLessEqual(
+                int(ydl_opts[-1]["format"].split("abr<=?")[1].split("]")[0]), 160)
 
             self.assertEqual(title, "Cached show")
             self.assertEqual(duration, 123.0)
