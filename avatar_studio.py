@@ -32,6 +32,8 @@ except Exception:
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 ENGINES_DIR = os.path.join(PROJECT_DIR, "engines")
+# Serialises appends to youtube_scene_status.log across scene threads.
+_SCENE_STATUS_LOG_LOCK = threading.Lock()
 # Insert PROJECT first then ENGINES so ENGINES ends up FIRST in sys.path — the
 # engine modules in engines/ must win over any stale duplicate in the project root
 # (a root copy of bg_music.py was shadowing engines/bg_music.py, so the studio ran
@@ -2222,7 +2224,12 @@ class AvatarStudio:
                 except Exception as exc:
                     self._log_msg(f"[scene] YouTube frame failed: {exc}")
                     self._scene_capture_stop.wait(0.5)
-                self._scene_capture_stop.wait(0.04)
+                # The scene hands over a frame every 67 ms and the work above
+                # costs about 8 ms, so a 40 ms sleep here bought no CPU worth
+                # having and just delayed each frame on its way to the output.
+                # Poll on a fine grid instead; an unchanged serial costs a lock
+                # and an integer compare.
+                self._scene_capture_stop.wait(0.01)
                 continue
             if bbox is None:
                 self._scene_capture_stop.wait(0.20)
@@ -5181,26 +5188,24 @@ class AvatarStudio:
         if self.tts is None or not self.running:
             return False
         handoff_token = self._pause_youtube_for_ready_speech()
+        # Whatever happens next, the voice has to come back. Muting is one
+        # statement and un-muting was several, on paths that could be skipped:
+        # a raise out of speak() left the restore thread unstarted and the
+        # YouTube voice muted with nothing to turn it back on.
         try:
-            self.tts.set_playback_voice_match(None)
-            self.tts.set_muted(False)
-            self._sync_audio_mute_buttons()
-        except Exception:
-            pass
-        accepted = self.tts.speak(text, priority=priority)
-        if not accepted:
+            try:
+                self.tts.set_playback_voice_match(None)
+                self.tts.set_muted(False)
+                self._sync_audio_mute_buttons()
+            except Exception:
+                pass
+            return bool(self.tts.speak(text, priority=priority))
+        finally:
             if handoff_token is not None:
                 threading.Thread(
                     target=self._wait_and_restore_youtube,
                     args=(handoff_token,), daemon=True
                 ).start()
-            return False
-        if handoff_token is not None:
-            threading.Thread(
-                target=self._wait_and_restore_youtube,
-                args=(handoff_token,), daemon=True
-            ).start()
-        return True
 
     # ---- YOUTUBE SPEAK -----------------------------------------------------
     def _on_youtube_enter(self, event):
@@ -5519,12 +5524,7 @@ class AvatarStudio:
             slot = self._youtube_slot_for_url(url)
             if slot is not None:
                 self._set_youtube_slot_status(slot, f"VIDEO: {message}")
-            try:
-                with open(os.path.join(PROJECT_DIR, "youtube_scene_status.log"),
-                          "a", encoding="utf-8") as fh:
-                    fh.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n")
-            except Exception:
-                pass
+            self._append_scene_status_log(message)
             if "ready" in message:
                 try:
                     self.root.after(0, self._build_sidebar_scene_slot)
@@ -5552,7 +5552,9 @@ class AvatarStudio:
         self._scene_face_detect_count = 0
         self._youtube_scene = YouTubeVideoScene(
             self._youtube_position_seconds, status_callback=_status,
-            force_refresh_cache=bool(force_refresh_cache))
+            force_refresh_cache=bool(force_refresh_cache),
+            voice_active=self._youtube_voice_is_playing,
+            voice_lag=self._youtube_voice_lag_seconds)
         with self._scene_capture_lock:
             self._scene_source = "youtube"
             self._scene_capture_bbox = None
@@ -5588,6 +5590,47 @@ class AvatarStudio:
             f"[scene] resetting YouTube video at {self._fmt_time(pos)}; voice keeps playing.")
         self._attach_youtube_scene(
             url, force=True, preserve_crop=True)
+
+    def _append_scene_status_log(self, message):
+        """Append one line to the scene status log.
+
+        Both the picture and the voice write here. The voice used to report
+        only to the in-app log, which is held in memory and lost on restart, so
+        nothing about the sound survived to be read back against the picture -
+        and a scene where the two disagree is exactly the thing you need both
+        halves of to diagnose.
+        """
+        try:
+            # Background cache downloads write here from their own threads, and
+            # unsynchronised appends interleave mid-line: the log had entries
+            # cut in half by the next thread's text.
+            line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n"
+            with _SCENE_STATUS_LOG_LOCK:
+                with open(
+                        os.path.join(PROJECT_DIR, "youtube_scene_status.log"),
+                        "a", encoding="utf-8") as fh:
+                    fh.write(line)
+        except Exception:
+            pass
+
+    def _youtube_voice_lag_seconds(self):
+        """How far behind the broadcast edge the YouTube voice is playing."""
+        player = self._youtube_audio
+        if player is None:
+            return None
+        try:
+            return player.live_lag_seconds
+        except Exception:
+            return None
+
+    def _youtube_voice_is_playing(self):
+        """Is the YouTube voice the thing driving _youtube_position_seconds?
+
+        A live picture waits for this clock to start before showing its first
+        frame, so it has to know the difference between a voice that has not
+        begun yet and a scene that has no voice at all.
+        """
+        return self._youtube_audio is not None
 
     def _youtube_position_seconds(self):
         if self._youtube_audio is not None:
@@ -5795,6 +5838,40 @@ class AvatarStudio:
             time.sleep(0.2)
         return None
 
+    def _probe_youtube_live(self, url):
+        """Ask YouTube directly whether a link is live. None = unanswerable."""
+        try:
+            from youtube_video import probe_youtube_live
+
+            live = probe_youtube_live(url)
+        except Exception as exc:
+            self._log_msg(f"[youtube] live check failed ({exc})")
+            return None
+        if live is None:
+            self._log_msg(
+                "[youtube] live check could not reach YouTube;"
+                " treating the link as a recording.")
+        else:
+            self._log_msg(
+                f"[youtube] live check: this link is"
+                f" {'LIVE' if live else 'a recording'}.")
+        return live
+
+    def _youtube_link_is_live(self, url):
+        """True if the link is a broadcast in progress, as best as can be told.
+
+        The video scene answers first because it has already resolved the link,
+        but it cannot always answer: it may have failed on a format hiccup, or
+        still be resolving, or have moved on to another link. Treating that
+        silence as "not live" is what sent a live broadcast to the caption
+        reader, which has no captions to read and so did nothing at all - so
+        an unknown answer is re-asked of YouTube directly.
+        """
+        live = self._youtube_scene_live_state(url)
+        if live is not None:
+            return live
+        return bool(self._probe_youtube_live(url))
+
     def speak_youtube(self):
         url = self._youtube_primary_url()
         if not url:
@@ -5838,7 +5915,7 @@ class AvatarStudio:
             try:
                 from youtube_cache import cache_summary
                 from youtube_speaker import fetch_youtube_transcript, chunk_for_speech
-                if self._youtube_scene_live_state(url) is True:
+                if self._youtube_link_is_live(url):
                     # A broadcast in progress has no finished caption track to
                     # re-speak, so the only thing there is to say is what is
                     # being said right now: run the live sound through the voice.
@@ -6109,6 +6186,12 @@ class AvatarStudio:
                 return False
             if bool(getattr(scene, "video_ready", False)):
                 return True
+            if bool(getattr(scene, "buffered_ready", False)):
+                # Decoded and holding. A live picture deliberately holds its
+                # first frame until this voice starts, so waiting for a frame
+                # on screen would be waiting for something only this call can
+                # cause - both sides would sit still until one timed out.
+                return True
             status = str(getattr(scene, "status", "") or "").lower()
             if "video scene failed" in status:
                 return False
@@ -6167,7 +6250,38 @@ class AvatarStudio:
         except Exception:
             pass
 
+    def _unmute_youtube_if_stranded(self):
+        """Undo a duck that nothing is going to undo.
+
+        Muting the YouTube voice is a handoff: something silences it, and
+        something else is supposed to give it back. If that second half is ever
+        missed the voice is gone with no error anywhere - the meters keep
+        moving because playback is fine, and only the speaker knows. A mute
+        with no handoff in flight is that state, and it can simply be undone.
+        """
+        player = self._youtube_audio
+        if player is None:
+            return
+        with self._audio_handoff_lock:
+            if self._audio_handoff_state is not None:
+                return          # a handoff owns the gain; leave it alone
+        try:
+            if float(getattr(player, "_target_output_gain", 1.0)) >= 0.5:
+                return
+            player.duck_gain = float(
+                os.environ.get("AVATAR_YOUTUBE_DUCK_GAIN", "0.22"))
+            player._target_output_gain = 1.0
+        except Exception:
+            return
+        self._log_msg("[audio] YouTube voice was left muted; volume restored")
+        self._append_scene_status_log(
+            "voice was left muted with no handoff pending; volume restored")
+
     def _youtube_clock_tick(self):
+        try:
+            self._unmute_youtube_if_stranded()
+        except Exception:
+            pass
         try:
             if getattr(self, "youtube_time_lbl", None) is not None:
                 self.youtube_time_lbl.configure(text=self._youtube_time_text())
@@ -6344,6 +6458,7 @@ class AvatarStudio:
                 def _audio_status(msg):
                     self._youtube_audio_status = msg
                     self._log_msg(f"[youtube] real audio: {msg}")
+                    self._append_scene_status_log(f"voice: {msg}")
                     if current_slot is not None:
                         self._set_youtube_slot_status(
                             current_slot, f"AUDIO: {msg}")
@@ -6411,6 +6526,11 @@ class AvatarStudio:
                 if current_slot is not None:
                     self._set_youtube_slot_status(current_slot, f"FAILED: {exc}")
                 self._log_msg(f"[youtube] real audio failed: {exc}")
+                # Also to the scene log. A voice that never starts is the
+                # loudest kind of voice loss and it was the quietest in the
+                # log: the failure only reached the in-app panel, so the file
+                # you read afterwards just stopped mid-sequence with no reason.
+                self._append_scene_status_log(f"voice failed: {exc}")
                 try:
                     if self.tts is not None:
                         self.tts.set_muted(False)
@@ -6980,6 +7100,14 @@ class AvatarStudio:
                         self._log_msg(
                             "[watchdog] render stalled >20s; entering light recovery "
                             "and refreshing camera feed.")
+                        # To the file as well. Light recovery turns off the
+                        # swap, the body pass and the face restore for 45 s,
+                        # which looks exactly like the portrait quality
+                        # dropping - and reporting it only to the in-app panel
+                        # meant the one visible symptom had no record anywhere.
+                        self._append_scene_status_log(
+                            "render stalled >20s; portrait dropped to light "
+                            f"recovery for 45s (stall #{self._render_stall_count})")
                         try:
                             released = False
                             lock = getattr(self, "_camera_lock", None)
@@ -7913,10 +8041,19 @@ class AvatarStudio:
                     "was_running": bool(getattr(player, "_running", False)),
                     "was_paused": bool(getattr(player, "_paused", None)
                                        and player._paused.is_set()),
+                    # Restore to full volume, not to whatever the gain happens
+                    # to be right now. Capturing the live value looks careful
+                    # and is a trap: the moment one restore is missed the
+                    # player sits at zero, the next duck records that zero as
+                    # the value to go back to, and every restore after it
+                    # faithfully restores silence. One miss mutes the voice for
+                    # good - meters still moving, speaker dead - which is
+                    # exactly what it did. Full volume is the only state this
+                    # is ever ducking away from, so it is the only state worth
+                    # remembering.
                     "youtube_duck_gain": float(
-                        getattr(player, "duck_gain", 0.22)),
-                    "youtube_output_target": float(
-                        getattr(player, "_target_output_gain", 1.0)),
+                        os.environ.get("AVATAR_YOUTUBE_DUCK_GAIN", "0.22")),
+                    "youtube_output_target": 1.0,
                     "tts_was_muted": bool(getattr(self.tts, "muted", False)),
                     "tts_voice_match": getattr(
                         self.tts, "_playback_match_persona", None),

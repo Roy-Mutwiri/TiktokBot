@@ -1,6 +1,27 @@
 import os
+import sys
 
 import pytest
+
+
+ENGINES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "engines")
+if ENGINES_DIR not in sys.path:
+    sys.path.insert(0, ENGINES_DIR)
+
+
+@pytest.fixture(autouse=True)
+def _forget_unreadable_cookie_sources():
+    """Keep the cookie skip list from leaking between tests.
+
+    extract_info_with_retries remembers browsers whose cookie store this
+    process could not read, so a test that simulates a locked cookie database
+    would otherwise delete that browser's attempt from every later test.
+    """
+    from youtube_dlp_options import reset_unreadable_cookie_sources
+
+    reset_unreadable_cookie_sources()
+    yield
+    reset_unreadable_cookie_sources()
 
 
 @pytest.fixture(autouse=True)

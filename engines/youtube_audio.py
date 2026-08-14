@@ -17,10 +17,62 @@ from tts_stream_engine import FFMPEG
 from voice_changer_engine import BLOCK, SAMPLE_RATE, make_converter
 from youtube_cache import audio_dir, get_cached_audio, save_audio, video_id_from_url
 from youtube_cache_janitor import enforce_budget, human_bytes
-from youtube_dlp_options import extract_info_with_retries
+from youtube_dlp_options import extract_info_with_retries, one_line
 
 MONITOR_RATE = 48000
 MONITOR_BLOCK = BLOCK * (MONITOR_RATE // SAMPLE_RATE)
+
+# Jitter buffer between ffmpeg and the speaker. See _PcmReader for the
+# measurements. The pre-roll grows each time the buffer runs dry, because a
+# broadcast that stalls once tends to stall again. PCM is 96 KB/s, so even the
+# 30 s cap is under 3 MB.
+#
+# The deepest stalls come at the start, while ffmpeg is still filling its HLS
+# window: a 2.5 s pre-roll was measured being wiped out by a 10.4 s stall five
+# seconds into playback. Waiting a few seconds longer up front is far less
+# noticeable than a hole in the voice, so the cushion starts where it can
+# actually survive that.
+#
+# This is chosen for the voice alone, and deliberately so. It was briefly held
+# equal to the picture's pre-roll, on the reasoning that each side settles
+# behind the broadcast edge by its own cushion and the difference is lip sync
+# error. That is true, but it is the wrong lever: the picture now measures both
+# lags and holds itself back to match (see youtube_video._picture_is_ahead_by),
+# so it corrects any difference on its own. Matching the pre-rolls bought no
+# sync that was not already there and cost the voice its depth - at 4 s the
+# buffer starved within a minute of a live broadcast, and because the picture
+# follows this player, the starve became a six second freeze in the picture
+# too. A stall here is now expensive for both halves, which is a reason to
+# make it rarer, not a reason to run shallow.
+AUDIO_PREROLL_SECONDS = 6.0
+AUDIO_MAX_PREROLL_SECONDS = 12.0
+AUDIO_BUFFER_SECONDS = 30.0
+# A live broadcast is braked exactly like a recording, and the brake is load
+# bearing. It was once removed on the theory that a braked ffmpeg stops fetching
+# segments and drifts off the live edge - the voice was starving 27 to 29 s into
+# every live playback against a 30 s buffer draining at 1x, which looked like
+# the brake causing it. Unbraked, ffmpeg instead raced through the segments the
+# playlist had, reached the end of them, and exited cleanly: the reader saw EOF
+# and the voice ended outright 25 s in. Pacing ffmpeg to the speed the audio is
+# consumed is what keeps it following a live playlist, so the brake stays. The
+# starve is real but it is a hole, not a stop, and the cushion is what covers
+# it - see AUDIO_PREROLL_SECONDS.
+AUDIO_LIVE_BUFFER_SECONDS = AUDIO_BUFFER_SECONDS
+# Bitrate ceiling, in kbps, for the live rendition the voice is pulled from.
+# See _select_live_audio_url: the widest stream available is the one most
+# likely to starve, and speech does not need it.
+LIVE_AUDIO_ABR_CAP = 96.0
+# How long the voice may receive nothing at all before its decoder is replaced.
+# ffmpeg staying alive proves nothing - a connection can die without ever
+# raising - and the playback loop had no timeout on its refill, so a stream
+# that stopped delivering became permanent silence with no error and no log
+# line while the picture carried on. Segments are a few seconds, so nothing
+# this long is a stream that is still working.
+AUDIO_STALL_RESTART_SECONDS = 12.0
+# Consecutive reconnects that deliver no audio before the voice is declared
+# failed. Reconnecting forever would hide a dead link as effectively as the
+# original silent wait did.
+AUDIO_STALL_RESTART_LIMIT = 6
 DEMUCS_MODEL_FILENAME = "955717e8-8726e21a.th"
 DEMUCS_MODEL_HASH_PREFIX = "8726e21a"
 DEMUCS_MODEL_URL = (
@@ -73,6 +125,129 @@ def _drain_stderr(proc):
                 pass
 
     threading.Thread(target=_pump, daemon=True).start()
+
+
+class _PcmReader:
+    """Reads PCM blocks off ffmpeg's stdout in its own thread.
+
+    The playback loop used to read one block straight from the pipe and then
+    block writing it to the speaker, so the network and the sound card were
+    chained together: nothing was read while a block was playing, and nothing
+    played while a block was being fetched. A live broadcast does not deliver
+    on that rhythm. Measured over 60 s of one, ffmpeg supplied audio at 1.09x
+    realtime overall - fast enough - but in bursts separated by 21 stalls, the
+    longest 9.6 s. Every one of those was a hole in the sound.
+
+    Averaging 1.09x is exactly the case a buffer fixes: there is enough audio,
+    it just arrives early or late. This thread keeps reading regardless of what
+    playback is doing, and parks whole blocks until the speaker wants them.
+
+    The buffer is bounded, and a full buffer makes this thread wait rather than
+    discard: dropping a block would be a skip in the audio, and back-pressure on
+    a paused player is the correct behaviour anyway. PCM is cheap - 96 KB/s - so
+    the cap can be generous.
+    """
+
+    def __init__(self, proc, block_bytes, max_blocks):
+        self.proc = proc
+        self.block_bytes = int(block_bytes)
+        self.max_blocks = max(1, int(max_blocks))
+        self.blocks = collections.deque()
+        self.eof = False
+        self.short_tail = b""
+        # When audio last arrived. ffmpeg can stop delivering without exiting -
+        # a dead connection that never raises - and the playback loop then
+        # waits for a refill that never comes. Alive says nothing; this is the
+        # only signal that the stream has actually stopped.
+        self.last_progress_at = time.monotonic()
+        self._lock = threading.Lock()
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._pump, daemon=True)
+        self._thread.start()
+
+    def _pump(self):
+        stdout = getattr(self.proc, "stdout", None)
+        if stdout is None:
+            self.eof = True
+            return
+        try:
+            while not self._stop.is_set():
+                while (not self._stop.is_set()
+                       and self.depth() >= self.max_blocks):
+                    # Full: let ffmpeg block on the pipe instead of losing audio.
+                    # Progress is marked while braking - a throttled reader is
+                    # healthy, and letting the clock run here would read as a
+                    # dead stream to the watchdog.
+                    self.last_progress_at = time.monotonic()
+                    self._stop.wait(0.02)
+                if self._stop.is_set():
+                    break
+                raw = stdout.read(self.block_bytes)
+                if len(raw) < self.block_bytes:
+                    self.short_tail = raw
+                    break
+                with self._lock:
+                    self.blocks.append(raw)
+                self.last_progress_at = time.monotonic()
+        except Exception:
+            pass
+        finally:
+            self.eof = True
+
+    def pop(self):
+        with self._lock:
+            return self.blocks.popleft() if self.blocks else None
+
+    def depth(self):
+        with self._lock:
+            return len(self.blocks)
+
+    def drained(self):
+        return self.eof and self.depth() == 0
+
+    def close(self):
+        self._stop.set()
+        with self._lock:
+            self.blocks.clear()
+
+
+def _env_float(name, default, minimum=0.0):
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return max(minimum, float(raw))
+    except ValueError:
+        return default
+
+
+def _audio_preroll_seconds():
+    return _env_float(
+        "AVATAR_YOUTUBE_AUDIO_PREROLL", AUDIO_PREROLL_SECONDS, minimum=0.05)
+
+
+def _audio_max_preroll_seconds():
+    return max(
+        _audio_preroll_seconds(),
+        _env_float("AVATAR_YOUTUBE_AUDIO_MAX_PREROLL",
+                   AUDIO_MAX_PREROLL_SECONDS, minimum=0.05))
+
+
+def _audio_buffer_seconds(live=False):
+    """Buffer cap, never shallower than the deepest pre-roll it must hold.
+
+    A broadcast gets a cap it will not reach, so the reader never brakes the
+    ffmpeg that has to keep fetching to hold the live edge.
+    """
+    if live:
+        return max(
+            _audio_max_preroll_seconds(),
+            _env_float("AVATAR_YOUTUBE_AUDIO_LIVE_BUFFER",
+                       AUDIO_LIVE_BUFFER_SECONDS, minimum=0.2))
+    return max(
+        _audio_max_preroll_seconds(),
+        _env_float("AVATAR_YOUTUBE_AUDIO_BUFFER", AUDIO_BUFFER_SECONDS,
+                   minimum=0.2))
 
 
 def _stderr_tail(proc):
@@ -133,20 +308,35 @@ class YouTubeAudioPlayer:
         self._target_output_gain = 1.0
         self._playback_anchor_t = None
         self._last_output_warning_t = 0.0
+        self._reader = None
+        self._audio_stalls = 0
+        self._last_stall_warning_t = 0.0
+        self._edge_open_t = None
+        self.is_live = False
+        self._source_url = ""
 
     def start(self, url, start_seconds=None, end_seconds=None):
         if self._running:
             self.stop()
+        # Kept so a reconnect can resolve a fresh stream URL. A broadcast's
+        # googlevideo URL expires, so reopening ffmpeg on the same one just
+        # reconnects to something already dead.
+        self._source_url = url
+        resolved = {}
         audio_url, title, duration, cache_hit = _resolve_audio_source(
-            url, self._set_status)
+            url, self._set_status, out_info=resolved)
         # A downloaded track is a local file; a broadcast stays a remote URL.
-        is_live = not os.path.isfile(audio_url)
+        # Not the same question as "is this a broadcast" any more, though: a
+        # recording whose download was refused is streamed from a URL too, and
+        # calling that live would throw away its FROM/TO range and its end.
+        is_live = bool(resolved.get("is_live", not os.path.isfile(audio_url)))
         if (os.environ.get("AVATAR_YOUTUBE_VOCALS_ONLY", "0") == "1"
                 and not is_live):
             audio_url = _isolate_vocals(audio_url, self._set_status)
         elif is_live:
             self._set_status(
                 "live stream connected - voice isolation skipped for low latency")
+        self.is_live = is_live
         self.title = title
         self.duration = float(duration or 0.0)
         self.start_seconds = float(start_seconds or 0.0)
@@ -199,6 +389,12 @@ class YouTubeAudioPlayer:
         self._running = False
         self._paused.clear()
         try:
+            reader = getattr(self, "_reader", None)
+            if reader is not None:
+                reader.close()
+        except Exception:
+            pass
+        try:
             if self._proc is not None:
                 self._proc.kill()
         except Exception:
@@ -244,6 +440,75 @@ class YouTubeAudioPlayer:
     def position_seconds(self):
         return self.start_seconds + self.position_blocks * BLOCK / float(SAMPLE_RATE)
 
+    def _reconnect_source(self, audio_url, block_bytes, max_blocks):
+        """Replace a decoder that went quiet without exiting.
+
+        A recording resumes where playback got to, so the reconnect is
+        inaudible. A broadcast has no timeline to resume into and rejoins at
+        the edge, which is the same thing it did when it first connected.
+        """
+        try:
+            if self._proc is not None:
+                self._proc.kill()
+        except Exception:
+            pass
+        try:
+            if self._reader is not None:
+                self._reader.close()
+        except Exception:
+            pass
+        if self.is_live and self._source_url:
+            # Resolve a fresh stream URL rather than reopening the old one. A
+            # broadcast's googlevideo URL expires, and reconnecting to an
+            # expired URL just reproduces the silence that triggered this -
+            # measured reconnecting four times in a row against a dead URL
+            # without ever recovering the voice.
+            try:
+                fresh, _title, _duration, _hit = _resolve_audio_source(
+                    self._source_url, self._set_status)
+                if fresh:
+                    audio_url = fresh
+            except Exception as exc:
+                self._set_status(f"could not refresh voice link ({one_line(exc)})")
+        resume_at = 0.0 if self.is_live else self.position_seconds
+        cmd = _build_ffmpeg_cmd(
+            audio_url, resume_at, self.end_seconds,
+            voice_disguise=self.converter_kind in (
+                "youtube-disguise", "youtube_disguise"),
+            persona=self.persona)
+        self._edge_open_t = time.monotonic()
+        self._proc = subprocess.Popen(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        _drain_stderr(self._proc)
+        self._reader = _PcmReader(self._proc, block_bytes, max_blocks)
+
+    def _expected_end_seconds(self):
+        """Where playback should reach, or None for a broadcast (no end)."""
+        if self.is_live:
+            return None
+        if self.end_seconds is not None:
+            return float(self.end_seconds)
+        if self.duration and self.duration > 0:
+            return float(self.duration)
+        return None
+
+    @property
+    def live_lag_seconds(self):
+        """How far behind the broadcast edge this voice is playing, in seconds.
+
+        Wall time since ffmpeg opened at the edge, minus the audio actually
+        played in that time. A picture decoded from the same broadcast can
+        measure its own lag the same way and hold itself back to match, which
+        is what puts the lips on the sound: both sides are then showing the
+        same instant of the broadcast, whatever each of them spent getting
+        there. None until playback has produced something to measure.
+        """
+        opened = self._edge_open_t
+        if opened is None or self.position_blocks <= 0:
+            return None
+        played = self.position_seconds - self.start_seconds
+        return max(0.0, (time.monotonic() - opened) - played)
+
     def _run(self, audio_url):
         try:
             cmd = _build_ffmpeg_cmd(
@@ -252,6 +517,13 @@ class YouTubeAudioPlayer:
                     "youtube-disguise", "youtube_disguise"),
                 persona=self.persona)
             self._set_status("starting ffmpeg")
+            # A live playlist has no timeline to seek, so ffmpeg starts from
+            # wherever the broadcast edge is at this instant. That makes this
+            # moment the reference for live_lag_seconds: everything spent
+            # afterwards not playing - startup, pre-roll, stalls - is time the
+            # broadcast moved on without this player, and is exactly how far
+            # behind the edge the sound has settled.
+            self._edge_open_t = time.monotonic()
             self._proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
@@ -291,6 +563,15 @@ class YouTubeAudioPlayer:
                     f"sounddevice unavailable ({_SD_IMPORT_ERROR})")
 
             nbytes = MONITOR_BLOCK * 2
+            block_seconds = MONITOR_BLOCK / float(MONITOR_RATE)
+            preroll = _audio_preroll_seconds()
+            max_preroll = _audio_max_preroll_seconds()
+            max_blocks = max(2, int(round(
+                _audio_buffer_seconds(live=bool(self.is_live))
+                / block_seconds)))
+            self._reader = _PcmReader(self._proc, nbytes, max_blocks)
+            primed = False
+            reconnects = 0
             self._playback_anchor_t = time.monotonic()
             while self._running:
                 if self._paused.is_set():
@@ -301,13 +582,69 @@ class YouTubeAudioPlayer:
                     self._reset_realtime_anchor()
                     time.sleep(0.05)
                     continue
-                raw = self._proc.stdout.read(nbytes) if self._proc.stdout else b""
-                if len(raw) < nbytes:
+                if not primed:
+                    want = max(1, int(round(preroll / block_seconds)))
+                    if self._reader.depth() < want and not self._reader.eof:
+                        quiet = (time.monotonic()
+                                 - self._reader.last_progress_at)
+                        if quiet >= AUDIO_STALL_RESTART_SECONDS:
+                            # ffmpeg is alive and delivering nothing, which it
+                            # can do indefinitely on a connection that died
+                            # without erroring. Waiting here was an unbounded
+                            # silence: the voice simply stopped, with no error,
+                            # no log line and no recovery, while the picture
+                            # carried on. Replace the decoder instead.
+                            reconnects += 1
+                            if reconnects > AUDIO_STALL_RESTART_LIMIT:
+                                raise YouTubeAudioError(
+                                    "voice stream stopped delivering audio "
+                                    f"and did not recover after {reconnects} "
+                                    "reconnects")
+                            self._set_status(
+                                f"voice stream silent for {quiet:.0f}s; "
+                                f"reconnecting ({reconnects})")
+                            self._reconnect_source(audio_url, nbytes, max_blocks)
+                        else:
+                            time.sleep(0.02)
+                        continue
+                    primed = True
+                    reconnects = 0
+                    self._reset_realtime_anchor()
+                raw = self._reader.pop()
+                if raw is None:
+                    if not self._reader.eof:
+                        # The broadcast went quiet mid-stream. Hold and refill
+                        # rather than feed the speaker a hole, and earn a deeper
+                        # cushion so the next stall is covered too.
+                        primed = False
+                        preroll = min(max_preroll, preroll + 1.0)
+                        self._note_audio_stall(preroll)
+                        continue
                     return_code = self._proc.wait()
                     error_text = _stderr_tail(self._proc)
                     if return_code != 0:
                         raise YouTubeAudioError(
                             error_text or f"ffmpeg exited with code {return_code}")
+                    # ffmpeg exiting 0 is only good news if it reached the end
+                    # it was asked for. Short of that the voice has been lost,
+                    # and "ended" on its own is indistinguishable from a track
+                    # finishing normally - which is how a voice that stopped 8 s
+                    # into a 9 minute track read as a clean finish in the log.
+                    played = self.position_seconds
+                    expected = self._expected_end_seconds()
+                    if expected is not None and played < expected - 1.0:
+                        self._set_status(
+                            f"voice ended early at {played:.0f}s of "
+                            f"{expected:.0f}s (ffmpeg exited {return_code})"
+                            + (f": {error_text}" if error_text else ""))
+                    elif expected is None:
+                        # A broadcast has no end to reach at all, so any exit
+                        # is early: it ran out of playlist and stopped.
+                        self._set_status(
+                            "live voice ended early after "
+                            f"{played - self.start_seconds:.0f}s "
+                            f"(ffmpeg exited {return_code})"
+                            + (f": {error_text}" if error_text else ""))
                     break
                 block = pcm16_bytes_to_float(raw)
                 if self.gain != 1.0:
@@ -349,6 +686,17 @@ class YouTubeAudioPlayer:
             self._set_status(f"failed: {exc}")
         finally:
             self.stop()
+
+    def _note_audio_stall(self, preroll):
+        """Report a starved buffer at most once every few seconds."""
+        self._audio_stalls = getattr(self, "_audio_stalls", 0) + 1
+        now = time.monotonic()
+        if now - getattr(self, "_last_stall_warning_t", 0.0) < 5.0:
+            return
+        self._last_stall_warning_t = now
+        self._set_status(
+            f"youtube audio buffering ({self._audio_stalls} so far); "
+            f"cushion now {preroll:.1f}s")
 
     def _note_output_failure(self, exc):
         """Report a dead speaker once, not once per 21 ms audio block."""
@@ -450,7 +798,7 @@ class YouTubeAudioPlayer:
                     pass
 
 
-def _resolve_audio_source(url, status_callback=None):
+def _resolve_audio_source(url, status_callback=None, out_info=None):
     cached = get_cached_audio(url)
     if cached is not None:
         _status(status_callback, "found audio in local db/cache")
@@ -474,14 +822,20 @@ def _resolve_audio_source(url, status_callback=None):
     except Exception as exc:
         raise YouTubeAudioError(f"could not read YouTube audio ({exc})")
 
+    probe_info = info
     title = (info or {}).get("title") or "YouTube audio"
     duration = float((info or {}).get("duration") or 0.0)
+    if out_info is not None:
+        out_info["is_live"] = _is_live_info(info)
+        out_info["streamed"] = False
     if _is_live_info(info):
         audio_url = _select_live_audio_url(info)
         if not audio_url:
             raise YouTubeAudioError(
                 "the live video is online but no playable audio stream was found")
         _status(status_callback, "live stream found - connecting without download")
+        if out_info is not None:
+            out_info["streamed"] = True
         return audio_url, title, duration, False
 
     _status(status_callback, "new link - downloading youtube audio to cache")
@@ -522,7 +876,23 @@ def _resolve_audio_source(url, status_callback=None):
                 yt_dlp, url, opts, download=True,
                 status_callback=status_callback, status_prefix="real audio")
         except Exception as exc:
-            raise YouTubeAudioError(f"could not read YouTube audio ({exc})")
+            # Downloading is refused far more often than playing is: YouTube
+            # answers the download with 403 while the very same media URLs
+            # stream fine, which is visible whenever the picture keeps playing
+            # and only the voice dies. A voice that streams is worth more than
+            # a cached one, so fall back to the stream the live path already
+            # uses rather than losing the voice altogether.
+            stream_url = _select_live_audio_url(probe_info)
+            if not stream_url:
+                raise YouTubeAudioError(f"could not read YouTube audio ({exc})")
+            _status(
+                status_callback,
+                "download refused ("
+                f"{one_line(exc)[:90]}); streaming the voice instead")
+            if out_info is not None:
+                out_info["is_live"] = False
+                out_info["streamed"] = True
+            return stream_url, title, duration, False
     title = (info or {}).get("title") or "YouTube audio"
     duration = float((info or {}).get("duration") or 0.0)
     audio_path = _find_downloaded_audio(out_dir, prefix=download_id)
@@ -534,6 +904,17 @@ def _resolve_audio_source(url, status_callback=None):
     _status(status_callback, "saved audio in local db/cache")
     _trim_cache_after_download(url, status_callback)
     return audio_path, title, duration, False
+
+
+def _live_audio_abr_cap():
+    """Bitrate ceiling for a live rendition, in kbps.
+
+    Low enough to keep the stream fetchable on a slow link, high enough that
+    speech is unaffected - a voice at 96 kbps is indistinguishable from the
+    same voice at 160 once it has been pitch shifted and rebroadcast.
+    """
+    return _env_float(
+        "AVATAR_YOUTUBE_LIVE_AUDIO_ABR", LIVE_AUDIO_ABR_CAP, minimum=8.0)
 
 
 def _audio_abr_cap():
@@ -578,14 +959,24 @@ def _select_live_audio_url(info):
     ]
     if not audio:
         return ""
-    audio.sort(
-        key=lambda fmt: (
-            fmt.get("vcodec") == "none",
-            float(fmt.get("abr") or 0.0),
-            float(fmt.get("tbr") or 0.0),
-        ),
-        reverse=True,
-    )
+    cap = _live_audio_abr_cap()
+
+    def rank(fmt):
+        # Audio-only first - pulling a video rendition to get its sound wastes
+        # the bandwidth this is trying to protect.
+        #
+        # Then the best stream that fits under the cap, rather than the best
+        # stream outright. Taking the fattest rendition available maximises the
+        # bytes that have to arrive on time, which on a slow link is precisely
+        # what starves the buffer and puts holes in the voice. The voice is
+        # pitch shifted and rebroadcast, so the top rendition buys nothing
+        # audible and costs the reliability that matters. If nothing fits,
+        # the smallest overshoot wins for the same reason.
+        abr = float(fmt.get("abr") or fmt.get("tbr") or 0.0)
+        within = abr <= cap
+        return (fmt.get("vcodec") == "none", within, abr if within else -abr)
+
+    audio.sort(key=rank, reverse=True)
     return audio[0]["url"]
 
 
