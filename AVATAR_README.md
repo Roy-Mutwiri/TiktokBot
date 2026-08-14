@@ -164,6 +164,31 @@ Do **not** pin a single yt-dlp `player_client` in the download path: `ios`, `tv`
 `mweb` and `web_safari` all fail with "Requested format is not available", and
 `android` measured slower than the default client set.
 
+The *resolver* used to pin `player_client=["android"]` with no fallback, which
+broke the same way from the other side: whichever client YouTube has just
+tightened answers "No video formats found!" instead of an error a viewer would
+ever see, and the whole scene died. Measured on a live link on 2026-08-13,
+`android` answered with 6 formats while `tv`, `ios` and `web_safari` all came
+back empty — and an hour earlier `android` itself had been the empty one. The
+resolver now walks a ladder (`android` first, so the common case still resolves
+in ~4 s, then the default client set, then `web`/`tv`/`ios`) and only moves on
+when a client answers *empty*; a real failure is raised at once.
+
+| Env var | Default | Effect |
+|---------|---------|--------|
+| `AVATAR_YOUTUBE_PLAYER_CLIENTS` | `android,default,web,tv,ios` | Client ladder for the resolver, in order. `default` means "let yt-dlp pick". |
+
+yt-dlp used to warn `No supported JavaScript runtime could be found` here and
+called format extraction without one deprecated. **deno 2.9.5 is now installed**
+(`winget install DenoLand.Deno`); yt-dlp finds it on PATH and the warning is
+gone. Measured afterwards on the same live link, though, `tv`, `ios` and
+`web_safari` still answered empty while `android` returned 6 formats — the JS
+runtime removes the deprecation, not the empty answers, so the ladder above is
+what actually keeps a live link resolving.
+
+A process started before the install keeps the old PATH: restart the Studio
+after installing a runtime, or it will not see it.
+
 ## Sound output
 
 Both sound paths (TTS and the altered YouTube voice) share one output device.
